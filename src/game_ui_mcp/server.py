@@ -25,6 +25,7 @@ except ImportError:  # MCP Python SDK 1.x
     except ImportError:  # very old 1.x
         ToolError = RuntimeError
 
+from . import animation as anim_mod
 from . import export as ex
 from . import engines
 from .icons import icon_names
@@ -64,7 +65,14 @@ Angles (add_arc, add_ticks, conic): degrees, 0 = 3 o'clock, clockwise. A classic
 Any element takes rotation (degrees clockwise) and origin [x, y] as the pivot (default: its centre) -
 e.g. a needle pivoting on the gauge hub. Shapes and text take skew (degrees) for slanted, italic looks.
 
-Always call `preview` after a group of changes and actually inspect the image before exporting.
+Animation: create_animation, then set_keyframes per (target, property). Any numeric or color property can be
+keyframed (x, width, rotation, radius, end_angle, style.glow.blur, style.fill, ...) plus the helpers dx, dy
+(move), scale / scale_x / scale_y (around the pivot) and opacity. Check motion with preview_animation (a
+filmstrip of frames) and export with export_animation (sprite sheet, frames, GIF/APNG/WebP, or keyframe JSON).
+
+There are no ready-made components (no "button" or "panel" tool): build everything from these primitives,
+and judge the result yourself. Always call `preview` after a group of changes and actually inspect the
+image before exporting.
 """
 
 mcp = _Server("game-ui-mcp", instructions=INSTRUCTIONS)
@@ -748,7 +756,7 @@ def batch(canvas: str, operations: list[dict]):
 
     Each operation is {"op": "<tool name>", ...the same arguments that tool takes, without canvas}.
     Supported ops: add_rect, add_ellipse, add_line, add_polygon, add_path, add_arc, add_ticks, add_text,
-    add_icon, add_image, update_element, delete_elements, move_elements, reorder_element, duplicate_element.
+    add_icon, add_image, create_animation, set_keyframes, update_element, delete_elements, move_elements, reorder_element, duplicate_element.
     Give elements explicit "id"s so later operations (clip, update, reorder) can refer to them.
     The batch is atomic: if any operation fails nothing is changed, and the error names the failing op.
     """
@@ -773,6 +781,13 @@ def batch(canvas: str, operations: list[dict]):
                     results.append(_summary(st, c, el, warnings))
                 elif op == "add_ticks":
                     results.append(_ticks(c, op_args))
+                elif op == "create_animation":
+                    key, anim, _ = st.create_animation(c, op_args["name"], op_args["duration"],
+                                                       op_args.get("loop", False), op_args.get("fps", 30))
+                    st._undo[c["id"]].pop()
+                    results.append({"animation": key, "duration": anim["duration"], "loop": anim["loop"]})
+                elif op == "set_keyframes":
+                    results.append(_set_keyframes(c, op_args, checkpoint=False))
                 elif op == "update_element":
                     el = st.find(c, op_args["id"])
                     warnings = st.update_element(c, el, _prepare_update(el, op_args.get("props", {})), checkpoint=False)
@@ -823,6 +838,315 @@ def undo(canvas: str):
     if not st.undo(c):
         return {"undone": False, "reason": "nothing to undo"}
     return {"undone": True, "elements": [e["id"] for e in c["elements"]]}
+
+
+# --------------------------------------------------------------------------- animation tools
+
+def _set_keyframes(c: dict, args: dict, checkpoint: bool = True) -> dict:
+    st = store()
+    try:
+        name, target, prop = args["animation"], str(args["target"]), str(args["property"])
+        raw = _maybe_json(args["keyframes"])
+    except KeyError as exc:
+        raise ValueError(f"set_keyframes is missing {exc}") from exc
+    key, anim = st.get_animation(c, name)
+    keys = anim_mod.normalize_keyframes(raw, anim["duration"], float(args.get("offset", 0) or 0))
+    elements, warnings = st.set_track(c, anim, target, prop, keys, _maybe_json(args.get("pivot")), checkpoint)
+    out: dict = {"animation": key, "target": target, "property": prop, "elements": [e["id"] for e in elements],
+                 "keyframes": [{"t": k["t"], "value": k["value"], **({"ease": anim_mod.ease_name(k["ease"])}
+                                                                      if "ease" in k else {})} for k in keys]}
+    if warnings:
+        out["warnings"] = warnings
+    return out
+
+
+@tool
+def create_animation(canvas: str, name: str, duration: float, loop: bool = False, fps: float = 30):
+    """Create an animation on a canvas (or change the duration / loop / fps of an existing one; its
+    keyframes are kept). A canvas can hold several: "hover", "press", "appear", "idle", ...
+
+    duration in seconds. UI feedback is short: hover/press 0.1-0.2 s, panel appear 0.25-0.4 s;
+    idle loops (pulsing glow, breathing) 1.5-3 s with loop=true. fps is the default sampling rate for
+    previews and frame exports. The animation is empty until you add tracks with set_keyframes.
+    """
+    st = store()
+    c = st.get(canvas)
+    key, anim, created = st.create_animation(c, name, duration, loop, fps)
+    return {"animation": key, "created": created, "duration": anim["duration"], "loop": anim["loop"],
+            "fps": anim["fps"], "tracks": len(anim["tracks"])}
+
+
+@tool
+def set_keyframes(canvas: str, animation: str, target: str, property: str, keyframes: list,
+                  pivot: list[float] | None = None, offset: float = 0):
+    """Animate one property of an element (or of a whole group) with keyframes. Calling it again for
+    the same target + property replaces that track.
+
+    target: an element id, or "group:<name>" for every element in a group.
+    property: what changes over time -
+      helpers:  "dx", "dy" (offset from the drawn position), "scale", "scale_x", "scale_y" (1 = normal size,
+                grows around the pivot, effects included), "opacity" (0-1)
+      any numeric element property: "x", "y", "width", "height", "radius", "rotation", "skew", "size",
+                "thickness", "start_angle", "end_angle", "dash_offset", "letter_spacing", "cx", "rx", ...
+      any style value by path: "style.glow.blur", "style.glow.strength", "style.shadow.dy", "style.blur",
+                "style.stroke.width", "style.bevel.size"
+      colors and gradients: "style.fill", "style.glow.color", "style.stroke.color" (gradients blend when
+                both keyframes have the same stops layout)
+      switches: "visible", "text" (these jump at the keyframe instead of blending)
+    keyframes: [{"t": seconds, "value": v, "ease": "..."}] or [[t, v], [t, v, ease]]. A keyframe's ease
+      shapes the motion arriving at it. Eases: "linear", "step", "ease-in" / "ease-out" / "ease-in-out",
+      or style + direction such as "quad-out", "cubic-in-out", "back-out" (overshoot), "elastic-out",
+      "bounce-out", "expo-out", "sine-in-out"; or a cubic-bezier [x1, y1, x2, y2].
+      Before the first keyframe the property holds the first value; after the last, the last value.
+    pivot [x, y]: centre for rotation / scale during this animation (e.g. the hub of a gauge needle, or
+      one shared point so a group scales as one piece). Default: each element's own centre or origin.
+    offset: seconds added to every keyframe time - use it to stagger the same motion across items.
+
+    Example - a button pops in: property "scale", keyframes [[0, 0.6], [0.22, 1, "back-out"]], plus
+    property "opacity", keyframes [[0, 0], [0.12, 1, "quad-out"]].
+    """
+    return _set_keyframes(store().get(canvas), dict(animation=animation, target=target, property=property,
+                                                    keyframes=keyframes, pivot=pivot, offset=offset))
+
+
+@tool
+def delete_keyframes(canvas: str, animation: str, target: str | None = None, property: str | None = None):
+    """Remove tracks from an animation: one target + property, everything for a target, or (with
+    neither) every track."""
+    st = store()
+    c = st.get(canvas)
+    key, anim = st.get_animation(c, animation)
+    removed = st.delete_tracks(c, anim, target, property)
+    return {"animation": key, "removed_tracks": removed, "tracks_left": len(anim["tracks"])}
+
+
+@tool
+def get_animations(canvas: str, name: str | None = None):
+    """List the animations on a canvas, or show one in full (tracks, keyframes, eases)."""
+    st = store()
+    c = st.get(canvas)
+    if name:
+        key, anim = st.get_animation(c, name)
+        return anim_mod.describe(key, anim, c)
+    return {"canvas": c["id"], "animations": [
+        {"animation": key, "duration": a["duration"], "loop": a["loop"], "fps": a.get("fps", 30),
+         "tracks": [f"{t['target']} -> {t['property']} ({len(t['keyframes'])} keys)" for t in a["tracks"]]}
+        for key, a in st.animations(c).items()]}
+
+
+@tool
+def delete_animation(canvas: str, name: str):
+    """Delete an animation from a canvas. The elements themselves are not changed."""
+    st = store()
+    c = st.get(canvas)
+    key, _ = st.get_animation(c, name)
+    st.delete_animation(c, key)
+    return {"deleted": key, "animations_left": sorted(st.animations(c))}
+
+
+def _pose(c: dict, anim: dict, t: float, scale: float, include_background: bool = True,
+          only: set[str] | None = None) -> tuple[PILImage.Image, list[str]]:
+    st = store()
+    frame, warnings = anim_mod.apply_animation(c, anim, t, st.theme.get("colors", {}))
+    r = st.renderer(frame, scale)
+    return r.render(include_background=include_background, only=only), warnings + r.warnings
+
+
+@tool
+def preview_animation(canvas: str, animation: str, frames: int = 8, columns: int = 4, cell: int = 320,
+                      background: str = "checker", region: list[float] | None = None,
+                      times: list[float] | None = None):
+    """Show an animation as a filmstrip: `frames` moments spread evenly over its duration, side by side,
+    each labelled with its time. This is how you watch your own animation - read it left to right and
+    check spacing between frames (even spacing = linear, bunching at the end = ease-out), overshoot,
+    anything popping, clipping at the canvas edge, and that a loop's last frame leads back into the first.
+
+    times: exact moments in seconds instead of the even spread (zoom in on a fast part).
+    region [x, y, width, height] crops every frame to one area. For a single moment at full size use
+    preview(canvas, animation=..., time=...).
+    """
+    st = store()
+    c = st.get(canvas)
+    key, anim = st.get_animation(c, animation)
+    duration = anim["duration"]
+    if times:
+        moments = [max(0.0, min(duration, float(t))) for t in times][:24]
+    else:
+        frames = max(2, min(24, int(frames)))
+        last = duration * (frames - 1) / frames if anim.get("loop") else duration
+        moments = [last * i / (frames - 1) for i in range(frames)]
+    if region:
+        rx, ry, rw, rh = (float(v) for v in region)
+        if rw <= 0 or rh <= 0:
+            raise ValueError("region width and height must be > 0")
+    else:
+        rx, ry, rw, rh = 0.0, 0.0, float(c["width"]), float(c["height"])
+    columns = max(1, min(8, int(columns), len(moments)))
+    cell = max(96, min(512, int(cell)))
+    scale = min(4.0, cell / max(rw, rh))
+    fw, fh = max(1, int(round(rw * scale))), max(1, int(round(rh * scale)))
+    rows = (len(moments) + columns - 1) // columns
+    pad, label_h = 10, 18
+    sheet = PILImage.new("RGBA", (columns * (fw + pad) + pad, rows * (fh + label_h + pad) + pad), (18, 18, 22, 255))
+    draw = ImageDraw.Draw(sheet)
+    font = _label_font(12)
+    warnings: list[str] = []
+    for i, t in enumerate(moments):
+        img, warn = _pose(c, anim, t, scale)
+        warnings += warn
+        if region:
+            img = img.crop((int(round(rx * scale)), int(round(ry * scale)),
+                            int(round(rx * scale)) + fw, int(round(ry * scale)) + fh))
+        tile = backdrop((fw, fh), background, st.theme.get("colors", {}))
+        tile.alpha_composite(img)
+        ox, oy = pad + (i % columns) * (fw + pad), pad + (i // columns) * (fh + label_h + pad)
+        sheet.paste(tile, (ox, oy))
+        draw.text((ox, oy + fh + 2), f"{t:.3f}s", fill="#ffffff", font=font)
+    info: dict = {"animation": key, "duration": duration, "loop": anim.get("loop", False),
+                  "times": [round(t, 4) for t in moments], "frame_scale": round(scale, 3),
+                  "tracks": len(anim["tracks"])}
+    if not anim["tracks"]:
+        info["note"] = "this animation has no tracks yet - add some with set_keyframes"
+    if warnings:
+        info["warnings"] = sorted(set(warnings))
+    return [Image(data=_png_bytes(sheet.convert("RGB")), format="png"), json.dumps(info)]
+
+
+@tool
+def export_animation(canvas: str, animation: str, format: str = "spritesheet", path: str | None = None,
+                     fps: float | None = None, scale: float = 1, background: str | None = None,
+                     trim: bool = True, ids: list[str] | None = None, group: str | None = None):
+    """Export an animation.
+
+    format:
+      "json"        keyframe data (targets, properties, times, values, eases with their Roblox TweenService and
+                    DOTween names). Use this when the engine can tween the property itself - crisp at any
+                    size and cheap. Pair it with export_layers so each animated part is its own image.
+      "spritesheet" every frame in one PNG grid + a JSON with frame size, columns, fps. For effects an engine
+                    cannot tween (shine sweeps, morphing shapes, clipped fills): Unity sprite animation,
+                    Unreal flipbook / SubUV, Roblox ImageRectOffset.
+      "frames"      numbered PNG files in a folder.
+      "gif" / "apng" / "webp"   one animated file to look at or share (GIF: 256 colors, hard edges on
+                    transparency; APNG and WebP keep full quality and alpha).
+    fps: sampling rate (default: the animation's own). scale: resolution multiplier.
+    background: "dark", "light", "checker", "game" or a color to put behind the frames. Without it, sprite
+      sheets and frames are transparent; animated files show the canvas background if it has one (a GIF
+      with nothing behind it gets a dark backdrop).
+    trim: crop all frames to the area that is ever painted (sprite sheets and frames only).
+    ids / group: export only those elements.
+    path: output file (or folder for "frames"); relative paths go to the workspace exports folder.
+    """
+    st = store()
+    c = st.get(canvas)
+    key, anim = st.get_animation(c, animation)
+    fmt = format.lower()
+    if fmt not in ("json", "spritesheet", "frames", "gif", "apng", "webp"):
+        raise ValueError("format must be json, spritesheet, frames, gif, apng or webp")
+    base_name = f"{c['id']}_{key}"
+    if fmt == "json":
+        out = Path(path).expanduser() if path else st.exports_dir / "animations" / f"{base_name}.anim.json"
+        if not out.is_absolute():
+            out = st.exports_dir / out
+        if out.suffix.lower() != ".json":
+            raise ValueError("json export path must end with .json")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        data = anim_mod.describe(key, anim, c)
+        ex.write_json(out, data)
+        return {"file": str(out), "tracks": len(data["tracks"]), "duration": data["duration"], "loop": data["loop"]}
+
+    if not 0.1 <= float(scale) <= 8:
+        raise ValueError("scale must be between 0.1 and 8")
+    times = anim_mod.frame_times(anim, fps)
+    rate = float(fps or anim.get("fps", 30))
+    only = {e["id"] for e in st.select(c, ids, group)} if (ids or group) else None
+    images: list[PILImage.Image] = []
+    warnings: list[str] = []
+    for t in times:
+        img, warn = _pose(c, anim, t, float(scale), include_background=False, only=only)
+        warnings += warn
+        images.append(img)
+    result: dict = {"animation": key, "frames": len(images), "fps": rate, "duration": anim["duration"],
+                    "loop": bool(anim.get("loop"))}
+    offset = (0, 0)
+    if trim and fmt in ("spritesheet", "frames"):
+        boxes = [im.getchannel("A").getbbox() for im in images]
+        boxes = [b for b in boxes if b]
+        if boxes:
+            box = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+            images = [im.crop(box) for im in images]
+            offset = (box[0], box[1])
+    own_bg = c.get("background") if fmt in ("gif", "apng", "webp") and not background else None
+    if own_bg:
+        # animated preview files show the canvas as designed, background included
+        images = [_pose(c, anim, t, float(scale), include_background=True, only=only)[0] for t in times]
+    elif background or fmt == "gif":
+        flat = []
+        for im in images:
+            bg = backdrop(im.size, background or "dark", st.theme.get("colors", {}))
+            bg.alpha_composite(im)
+            flat.append(bg)
+        images = flat
+    fw, fh = images[0].size
+
+    if fmt == "frames":
+        folder = Path(path).expanduser() if path else st.exports_dir / "animations" / base_name
+        if not folder.is_absolute():
+            folder = st.exports_dir / folder
+        folder.mkdir(parents=True, exist_ok=True)
+        digits = max(3, len(str(len(images) - 1)))
+        for i, im in enumerate(images):
+            im.save(folder / f"{base_name}_{i:0{digits}d}.png")
+        ex.write_json(folder / f"{base_name}.frames.json", {
+            "animation": key, "frames": len(images), "fps": rate, "duration": anim["duration"],
+            "loop": bool(anim.get("loop")), "frame_width": fw, "frame_height": fh, "scale": scale,
+            "offset": [round(offset[0] / float(scale), 2), round(offset[1] / float(scale), 2)],
+            "pattern": f"{base_name}_{'#' * digits}.png"})
+        result.update(folder=str(folder), frame_size=[fw, fh])
+    elif fmt == "spritesheet":
+        out = _out_path(path, f"{base_name}_sheet.png", "animations")
+        columns = max(1, int(len(images) ** 0.5 + 0.999))
+        rows = (len(images) + columns - 1) // columns
+        sheet = PILImage.new("RGBA", (columns * fw, rows * fh), (0, 0, 0, 0))
+        for i, im in enumerate(images):
+            sheet.paste(im, ((i % columns) * fw, (i // columns) * fh))
+        sheet.save(out)
+        meta = {"animation": key, "image": out.name, "frames": len(images), "columns": columns, "rows": rows,
+                "frame_width": fw, "frame_height": fh, "fps": rate, "duration": anim["duration"],
+                "loop": bool(anim.get("loop")), "scale": scale,
+                "offset": [round(offset[0] / float(scale), 2), round(offset[1] / float(scale), 2)]}
+        ex.write_json(out.with_suffix(".json"), meta)
+        result.update(file=str(out), json=str(out.with_suffix(".json")), sheet_size=list(sheet.size),
+                      frame_size=[fw, fh], columns=columns, rows=rows)
+        if max(sheet.size) > ex.ROBLOX_MAX:
+            result["note"] = (f"sheet is {sheet.width}x{sheet.height}; Roblox downsizes images over {ex.ROBLOX_MAX}px. "
+                              "Lower fps or scale, or tween the property in engine with format='json'.")
+    else:
+        suffix = {"gif": ".gif", "apng": ".png", "webp": ".webp"}[fmt]
+        st_path = Path(path).expanduser() if path else st.exports_dir / "animations" / f"{base_name}{suffix}"
+        if not st_path.is_absolute():
+            st_path = st.exports_dir / st_path
+        if st_path.suffix.lower() != suffix:
+            raise ValueError(f"{fmt} export path must end with {suffix}")
+        st_path.parent.mkdir(parents=True, exist_ok=True)
+        ms = max(10, int(round(1000 / rate)))
+        loops = 0 if anim.get("loop") else 1
+        if fmt == "gif":
+            frames_p = [im.convert("RGB").quantize(colors=255, method=PILImage.Quantize.MEDIANCUT,
+                                                   dither=PILImage.Dither.FLOYDSTEINBERG) for im in images]
+            frames_p[0].save(st_path, save_all=True, append_images=frames_p[1:], duration=ms, loop=0, disposal=1,
+                             optimize=False)
+            if not anim.get("loop"):
+                result["note"] = "GIF preview repeats forever in most viewers; the animation itself is not a loop."
+        elif fmt == "apng":
+            images[0].save(st_path, format="PNG", save_all=True, append_images=images[1:], duration=ms, loop=loops,
+                           disposal=1, blend=0)
+        else:
+            images[0].save(st_path, format="WEBP", save_all=True, append_images=images[1:], duration=ms, loop=loops,
+                           lossless=True)
+        result.update(file=str(st_path), frame_size=[fw, fh])
+    if warnings:
+        result["warnings"] = sorted(set(warnings))
+    return result
 
 
 # --------------------------------------------------------------------------- theme / info tools
@@ -897,7 +1221,8 @@ def _label_font(size: int = 12):
 
 @tool
 def preview(canvas: str, background: str = "checker", max_size: int = 1024, show_ids: bool = False,
-            region: list[float] | None = None, zoom: float | None = None):
+            region: list[float] | None = None, zoom: float | None = None,
+            animation: str | None = None, time: float = 0):
     """Render a canvas and return the picture so you can check your work. Look at it critically:
     alignment, spacing, contrast, clipped shadows, text overflow.
 
@@ -906,9 +1231,14 @@ def preview(canvas: str, background: str = "checker", max_size: int = 1024, show
     show_ids=true outlines every element with its id - use it to find what to fix.
     region [x, y, width, height] zooms into part of the canvas for detail checks.
     zoom: render scale; by default the view is scaled to fit max_size (small assets are enlarged up to 4x).
+    animation + time: show the canvas posed at `time` seconds of that animation (one frame, full detail).
     """
     st = store()
     c = st.get(canvas)
+    pose_warnings: list[str] = []
+    if animation:
+        _, anim = st.get_animation(c, animation)
+        c, pose_warnings = anim_mod.apply_animation(c, anim, float(time), st.theme.get("colors", {}))
     if region:
         rx, ry, rw, rh = (float(v) for v in region)
         if rw <= 0 or rh <= 0:
@@ -949,8 +1279,10 @@ def preview(canvas: str, background: str = "checker", max_size: int = 1024, show
             draw.text((lx + 3, ly), label, fill="#000000", font=font)
     info = {"canvas": c["id"], "canvas_size": [c["width"], c["height"]], "shown_scale": round(scale, 3),
             "image_size": list(view.size), "elements": len(c["elements"])}
-    if r.warnings:
-        info["warnings"] = r.warnings
+    if animation:
+        info["animation"], info["time"] = animation, float(time)
+    if r.warnings or pose_warnings:
+        info["warnings"] = sorted(set(r.warnings + pose_warnings))
     return [Image(data=_png_bytes(view.convert("RGB")), format="png"), json.dumps(info)]
 
 

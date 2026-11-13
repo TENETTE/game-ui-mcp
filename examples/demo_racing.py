@@ -11,7 +11,7 @@ from pathlib import Path
 from game_ui_mcp import server as ui
 from game_ui_mcp.store import Store
 
-OUT = Path(__file__).parent
+OUT = Path(__file__).resolve().parent
 ui.set_store(Store(Path(tempfile.mkdtemp()) / "ws"))
 
 HAIRLINE = {"color": {"type": "linear", "angle": 90, "stops": ["#ffffff@0.26", "#ffffff@0.05"]}, "width": 1}

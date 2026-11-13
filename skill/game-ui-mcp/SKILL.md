@@ -1,11 +1,11 @@
 ---
 name: game-ui-mcp
-description: Oyun UI'ı (menü, HUD, buton, panel, bar, gösterge, ikon) çizerken game-ui-mcp server'ının tool'larını kullanır: stilize (Roblox, cartoon) ve gerçekçi (yarış, simülasyon, AAA) tarz; Unity, Unreal, Roblox ve Assetto Corsa için PNG, 9-slice ve katman çıktısı.
+description: Oyun UI'ı (menü, HUD, buton, panel, bar, gösterge, ikon) çizerken ve canlandırırken game-ui-mcp server'ının temel gereçlerini kullanır: stilize ve gerçekçi (yarış, simülasyon, AAA) tarz, keyframe animasyon; Unity, Unreal, Roblox ve Assetto Corsa için PNG, 9-slice, katman ve animasyon çıktısı.
 ---
 
 # game-ui-mcp ile oyun UI'ı çizmek
 
-Bu skill, `game-ui-mcp` MCP server'ının çizim tool'larını (create_canvas, add_rect, add_arc, add_ticks, add_text, preview, export_asset...) iyi kullanmanın yolunu anlatır. Server'da AI görsel üretimi yok: her piksel senin çağırdığın şekil, yazı, ikon ve efektlerden gelir. Kalite tamamen senin tasarım kararlarına ve kendi çıktına bakıp düzeltmene bağlı.
+Bu skill, `game-ui-mcp` MCP server'ının çizim tool'larını (create_canvas, add_rect, add_arc, add_ticks, add_text, preview, export_asset...) iyi kullanmanın yolunu anlatır. Server'da AI görsel üretimi yok: her piksel senin çağırdığın şekil, yazı, ikon ve efektlerden gelir. Hazır bileşen de yok: "buton", "panel", "gösterge" ya da "pop animasyonu" diye bir tool bulunmaz, yalnızca temel gereçler (şekil, yazı, stil, keyframe) vardır. Ürünü sen tasarlarsın; aşağıdaki tarifler kopyalanacak şablon değil, başlangıç noktasıdır. Kalite tamamen senin tasarım kararlarına ve kendi çıktına bakıp düzeltmene bağlı.
 
 Tool'lar listede yoksa (`create_canvas`, `preview` görünmüyorsa) server bağlı değildir. Kullanıcıya server'ı Claude'a bağlaması gerektiğini söyle (repo README'sinde kurulum var) ve çizmiş gibi davranma.
 
@@ -17,8 +17,9 @@ Tool'lar listede yoksa (`create_canvas`, `preview` görünmüyorsa) server bağl
 4. **Çiz.** `batch` ile, elemanlara açık `id` vererek. Tek tek `add_*` çağrısı yavaş.
 5. **Bak.** `preview` çağır ve resme gerçekten bak. Sorun bul, `update_element` ile düzelt, tekrar bak. En az bir tur düzeltme yapmadan export etme.
 6. **Durumlar.** Buton gibi parçalarda `duplicate_canvas` ile hover / pressed / disabled üret.
-7. **Tutarlılık.** `contact_sheet` ile bütün kiti yan yana gör.
-8. **Export.** `export_asset` (motor + 9-slice), ikon setleri için `export_atlas`. Sonra motor tarafındaki kodu yaz.
+7. **Hareket.** Gerekiyorsa `create_animation` + `set_keyframes` ile canlandır, `preview_animation` film şeridine bak ("Animasyon" bölümü).
+8. **Tutarlılık.** `contact_sheet` ile bütün kiti yan yana gör.
+9. **Export.** `export_asset` (motor + 9-slice), ikon setleri için `export_atlas`, hareketli parçalar için `export_layers`, animasyon için `export_animation`. Sonra motor tarafındaki kodu yaz.
 
 ## Tema: önce bunu kur
 
@@ -148,6 +149,48 @@ Canvas 320×96. Yazı `anchor: "center"` ile gövdenin tam ortasına: dikey orta
 
 **HUD mockup:** 1920×1080 canvas, arka plan olarak koyu gradient (gerçekçi tarzda üstüne `blur` verilmiş sis elipsi ve radial vinyet). Parçaları güvenli alan içinde tut (kenarlardan ≥ 32 px). `preview(background="game")` ile oyun sahnesi üstünde okunuyor mu bak.
 
+## Animasyon
+
+Hazır animasyon yok: hangi özelliğin ne zaman, hangi değere, hangi ivmeyle gideceğini `create_animation` + `set_keyframes` ile sen yazarsın. Neredeyse her şey keyframe'lenir: konum (`dx`, `dy`), boyut (`scale`, `scale_x`, `scale_y`, `width`, `height`), `rotation`, `opacity`, renk ve gradient (`style.fill`), efekt (`style.glow.blur`, `style.shadow.dy`), yay (`end_angle`), kesik çizgi akışı (`dash_offset`), yazı ve görünürlük (`text`, `visible`: adım adım değişir).
+
+**Sıra:** statik hali bitir → `create_animation(ad, süre)` → `set_keyframes` (batch içinde) → `preview_animation` → düzelt → `export_animation`. Bir canvas'ta birden çok animasyon olabilir: `appear`, `hover`, `press`, `idle`.
+
+**Süre:** hover / press 0.10-0.18 sn. Küçük parça girişi 0.2-0.3. Panel, menü 0.3-0.45. Ekran geçişi en fazla 0.6. Boşta döngü (nefes alan glow, dönen halka) 1.5-3 sn ve `loop: true`. Oyuncunun beklediği her animasyon kısa olur.
+
+**Ease** (keyframe'deki `ease`, o keyframe'e varışı şekillendirir):
+- Giren şey `-out` ile gelir (hızlı başlar, yumuşak durur): `cubic-out`, `expo-out`. Çıkan şey `-in`. Ekranda yer değiştiren `-in-out`.
+- Taşma: `back-out`. Stilize tarzda belirgin, gerçekçi tarzda yok ya da çok kısa.
+- `elastic-out`, `bounce-out` yalnızca cartoon / arcade.
+- Döngüler `sine-in-out`. Sabit hızla dönen ya da akan şeyler `linear`.
+- Fiziksel göstergeler gerçek davranışı taklit eder: ibre `quad-in` ile hızlanır, vites değişiminde `quad-out` ile aniden düşer.
+
+**Kurallar:**
+- Bir animasyonda 1 ana hareket ve en fazla 1-2 destek (opaklık, glow). Her şey aynı anda oynamaz.
+- Sıralı giriş: aynı keyframe'leri her öğeye `offset: i × 0.05-0.08` ile ver.
+- Bir grubu tek parça gibi büyütmek ya da döndürmek için `target: "group:ad"` ve ortak `pivot`.
+- Ölçek 0'dan başlamaz (0.5-0.85'ten başlat) ve opaklıkla birlikte gelir.
+- Döngüde ilk ve son keyframe değeri aynıdır.
+- Hareket canvas dışına taşıyorsa (kayarak giriş, taşma, büyüyen glow) canvas'ta pay bırak.
+- Tarza uy. Stilize: squash / stretch (`scale_x` ve `scale_y` ters yönde), taşma, zıplama. Gerçekçi: kısa, taşmasız, opaklık + 8-20 px kayma, ışık değişimi.
+
+**Film şeridini okumak** (`preview_animation`): kareler arası fark hep aynıysa hareket doğrusaldır ve cansız durur; sona doğru farklar küçülüyorsa ease-out çalışıyordur. Bir karede öğe aniden belirip kayboluyorsa keyframe zamanı ya da başlangıç değeri yanlıştır. Hızlı kısmı `times=[0.0, 0.05, 0.1, ...]` ile yakından örnekle. Döngüde son kare ilk kareye bağlanıyor mu bak. Tek bir anı tam boy görmek için `preview(canvas, animation=..., time=...)`.
+
+**Örnek: buton girişi + parlama geçişi.** Butonun bütün elemanları `group: "btn"`; `shine`, gövdeye `clip`'li, eğik, ortası yarı saydam beyaz gradient'li dar bir rect ve başlangıçta gövdenin solunda, dışarıda durur.
+```json
+[{"op":"create_animation","name":"appear","duration":1.0},
+ {"op":"set_keyframes","animation":"appear","target":"group:btn","property":"scale","pivot":[180,64],
+  "keyframes":[[0,0.55],[0.28,1,"back-out"]]},
+ {"op":"set_keyframes","animation":"appear","target":"group:btn","property":"opacity",
+  "keyframes":[[0,0],[0.14,1,"quad-out"]]},
+ {"op":"set_keyframes","animation":"appear","target":"shine","property":"dx",
+  "keyframes":[[0.35,0],[0.85,400,"quad-in-out"]]}]
+```
+
+**Dışa aktarma seçimi:**
+- Motorun kendisinin canlandırabildiği her şey (konum, ölçek, dönme, opaklık, renk): `export_animation(format="json")` ve parçalar için `export_layers`. JSON her keyframe için süreyi, değeri ve ease'in Roblox (`EasingStyle`, `EasingDirection`) ile DOTween adını verir; motor kodunu bu veriden sen yazarsın. Roblox: `TweenService:Create(nesne, TweenInfo.new(süre, stil, yön), {özellik = değer})`, ardışık keyframe'ler için tween'leri sırayla oynat. Unity: DOTween ya da coroutine / Animator. Unreal: UMG Animation ya da tick'te `FMath::InterpEaseOut` benzeri fonksiyonlar. `dx`/`dy` konuma, `scale` ölçeğe, `pivot` AnchorPoint ya da pivot'a karşılık gelir.
+- Motorun canlandıramadığı efektler (kırpılmış parlama, şekil değiştiren yay, dash akışı): `format="spritesheet"` (Unity sprite animasyonu, Unreal flipbook / SubUV, Roblox `ImageRectOffset`). Kare sayısını düşük tut: fps 12-24, kısa süre; Roblox'ta sheet 1024 px'i geçmesin.
+- Kullanıcıya göstermek için `format="gif"`; kalite ve saydamlık gerekiyorsa `apng` ya da `webp`.
+
 ## 9-slice kuralları (panel, buton, tooltip, bar)
 
 Motorun köşeleri bozmadan esnetebilmesi için merkezin tek düze olması gerekir.
@@ -209,5 +252,6 @@ Motor helper dosyaları bu server'da derlenip denenmedi; kullanıcı ilk kullan�
 - Gerçekçi tarzda stilize alışkanlıkları sürdürmek: kalın kontur, her yerde glow, büyük radius, 4-5 renk. Sonuç oyuncak gibi durur.
 - Gösterge ibresini kadranla aynı gruba koymak (motor döndüremez) ya da `origin` vermeden döndürmek (kendi ortasından döner).
 - Eğik parçalarda farklı `skew` açıları kullanmak.
+- Animasyonu film şeridine bakmadan export etmek; her şeye bounce / elastic vermek; motorun tween'leyebileceği basit hareketi sprite sheet'e gömmek (gereksiz doku).
 - Aynı şeyi 6 kere elle çizmek: `duplicate_element` ve `align_elements(distribute=...)` kullan.
 - Karakter portresi, illüstrasyon gibi şeyleri şekillerle çizmeye çalışmak. Onlar bu aracın işi değil: yer tutucu bir çerçeve çiz, kullanıcı görseli verirse `add_image` ile yerleştir.

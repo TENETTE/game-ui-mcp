@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .fonts import FontLibrary
-from .render import Renderer
+from .render import Renderer, shift_element
 
 ELEMENT_TYPES = ("rect", "ellipse", "polygon", "line", "path", "text", "icon", "image", "arc", "ticks")
 MAX_CANVAS = 8192
@@ -268,19 +268,14 @@ class Store:
         for e in canvas["elements"]:
             if e.get("clip") in ids:
                 e.pop("clip", None)
+        for anim in canvas.get("animations", {}).values():
+            anim["tracks"] = [t for t in anim["tracks"] if t["target"] not in ids]
         self.save_canvas(canvas)
         return sorted(ids)
 
     @staticmethod
     def shift(el: dict, dx: float, dy: float) -> None:
-        if "points" in el and el["type"] in ("polygon", "line"):
-            el["points"] = [[float(p[0]) + dx, float(p[1]) + dy] for p in el["points"]]
-        elif "cx" in el:
-            el["cx"], el["cy"] = float(el["cx"]) + dx, float(el["cy"]) + dy
-        else:
-            el["x"], el["y"] = float(el.get("x", 0)) + dx, float(el.get("y", 0)) + dy
-        if el.get("origin"):
-            el["origin"] = [float(el["origin"][0]) + dx, float(el["origin"][1]) + dy]
+        shift_element(el, dx, dy)
 
     def move_elements(self, canvas: dict, elements: list[dict], dx: float, dy: float, checkpoint: bool = True) -> None:
         if checkpoint:
@@ -332,6 +327,89 @@ class Store:
         if props:
             warnings = self.update_element(canvas, new_el, props, checkpoint=False)
         return new_el, warnings
+
+    # ---- animations
+
+    def animations(self, canvas: dict) -> dict:
+        return canvas.setdefault("animations", {})
+
+    def get_animation(self, canvas: dict, name: str) -> tuple[str, dict]:
+        anims = self.animations(canvas)
+        key = name if name in anims else slugify(name, "anim")
+        if key not in anims:
+            known = ", ".join(sorted(anims)) or "(none yet - call create_animation)"
+            raise ValueError(f"Animation '{name}' not found on canvas '{canvas['id']}'. Animations: {known}")
+        return key, anims[key]
+
+    def create_animation(self, canvas: dict, name: str, duration: float, loop: bool, fps: float) -> tuple[str, dict, bool]:
+        duration, fps = float(duration), float(fps)
+        if not 0.01 <= duration <= 120:
+            raise ValueError("duration must be between 0.01 and 120 seconds")
+        if not 1 <= fps <= 120:
+            raise ValueError("fps must be between 1 and 120")
+        key = slugify(name, "anim")
+        anims = self.animations(canvas)
+        existing = anims.get(key)
+        if existing:
+            latest = max((k["t"] for tr in existing["tracks"] for k in tr["keyframes"]), default=0.0)
+            if latest > duration + 1e-9:
+                raise ValueError(f"duration {duration:g}s is shorter than an existing keyframe at {latest:g}s")
+        self.checkpoint(canvas)
+        if existing:
+            existing.update(duration=duration, loop=bool(loop), fps=fps)
+        else:
+            anims[key] = {"duration": duration, "loop": bool(loop), "fps": fps, "tracks": []}
+        self.save_canvas(canvas)
+        return key, anims[key], existing is None
+
+    def set_track(self, canvas: dict, anim: dict, target: str, prop: str, keyframes: list[dict],
+                  pivot: list[float] | None, checkpoint: bool = True) -> tuple[list[dict], list[str]]:
+        from .animation import apply_animation, track_targets
+        prop = str(prop).strip()
+        if not prop or prop.split(".")[0] in ("id", "type", "group", "clip"):
+            raise ValueError(f"'{prop}' cannot be animated")
+        elements = track_targets(canvas, target)
+        if not elements:
+            ids = ", ".join(e["id"] for e in canvas["elements"]) or "(canvas is empty)"
+            groups = ", ".join(sorted({e["group"] for e in canvas["elements"] if e.get("group")})) or "(none)"
+            raise ValueError(f"Animation target '{target}' not found. Use an element id ({ids}) or "
+                             f"'group:<name>' (groups: {groups}).")
+        track = {"target": target, "property": prop, "keyframes": keyframes}
+        if pivot:
+            if len(pivot) != 2:
+                raise ValueError("pivot must be [x, y]")
+            track["pivot"] = [float(pivot[0]), float(pivot[1])]
+        # pose the canvas at every keyframe and render the targets once, so bad values fail now
+        warnings: list[str] = []
+        probe = {"tracks": [track]}
+        for key in keyframes:
+            frame, _ = apply_animation(canvas, probe, key["t"], self.theme.get("colors", {}))
+            for el in track_targets(frame, target):
+                try:
+                    warnings += self._validate(frame, el)
+                except Exception as exc:
+                    raise ValueError(f"keyframe at {key['t']:g}s ({prop} = {key['value']!r}) cannot be drawn: {exc}") from exc
+        if checkpoint:
+            self.checkpoint(canvas)
+        anim["tracks"] = [t for t in anim["tracks"] if not (t["target"] == target and t["property"] == prop)]
+        anim["tracks"].append(track)
+        self.save_canvas(canvas)
+        return elements, sorted(set(warnings))
+
+    def delete_tracks(self, canvas: dict, anim: dict, target: str | None, prop: str | None) -> int:
+        keep = [t for t in anim["tracks"]
+                if not ((target is None or t["target"] == target) and (prop is None or t["property"] == prop))]
+        removed = len(anim["tracks"]) - len(keep)
+        if removed:
+            self.checkpoint(canvas)
+            anim["tracks"] = keep
+            self.save_canvas(canvas)
+        return removed
+
+    def delete_animation(self, canvas: dict, key: str) -> None:
+        self.checkpoint(canvas)
+        self.animations(canvas).pop(key, None)
+        self.save_canvas(canvas)
 
     # ---- theme
 

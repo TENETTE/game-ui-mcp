@@ -498,3 +498,164 @@ def test_batch_supports_arc_and_ticks(ws):
     ])
     assert out["results"][0]["id"] == "track" and out["results"][1]["created"] == ["t_minor"]
     assert s.undo("a")["elements"] == []
+
+
+def test_conic_on_partial_arc_is_centred_on_the_circle(ws):
+    conic = {"type": "conic", "from": 180, "to": 360, "stops": [[0, "#000000"], [1, "#ffffff"]], "dither": False}
+    s.create_canvas("a", 200, 200)
+    s.add_arc("a", 100, 100, 80, 180, 225, thickness=20, color=conic, id="arc")       # first quarter of the sweep
+    start = render("a")[100 - 14, 100 - 79]
+    assert start[3] == 255 and start[0] < 40           # near the start of the sweep: still dark
+    s.update_element("a", "arc", {"end_angle": 360})
+    px = render("a")
+    assert abs(int(px[100 - 14, 100 - 79][0]) - int(start[0])) <= 2     # same colour whatever the sweep length
+    assert abs(int(px[20, 100][0]) - 128) < 8                           # 12 o'clock is half way
+
+
+# ---------------------------------------------------------------- animation
+
+from game_ui_mcp import animation as am
+
+
+def test_easing_endpoints_and_shapes():
+    for style in am.STYLES:
+        for direction in ("in", "out", "in-out"):
+            name = f"{style}-{direction}"
+            assert abs(am.ease(name, 0)) < 1e-9 and abs(am.ease(name, 1) - 1) < 1e-9, name
+    assert am.ease("quad-in", 0.5) == 0.25 and am.ease("quad-out", 0.5) == 0.75
+    assert am.ease("back-out", 0.6) > 1                         # overshoots
+    assert am.ease("step", 0.99) == 0 and am.ease("step", 1) == 1
+    assert abs(am.ease([0, 0, 1, 1], 0.3) - 0.3) < 1e-6          # linear cubic-bezier
+    assert am.ease_name("OutBack") == "back-out" and am.ease_name("InOutQuad") == "quad-in-out"
+    assert am.ease_name("ease-out") == "cubic-out" and am.ease_name("in-expo") == "expo-in"
+    assert am.engine_ease("expo-out") == {"roblox": {"EasingStyle": "Exponential", "EasingDirection": "Out"},
+                                          "dotween": "OutExpo"}
+    with pytest.raises(ValueError):
+        am.parse_ease("wobbly")
+
+
+def test_value_interpolation():
+    assert am.lerp_value(10, 20, 0.25, {}) == 12.5
+    assert am.lerp_value([0, 10], [10, 30], 0.5, {}) == [5, 20]
+    assert am.lerp_value("#000000", "#ffffff", 0.5, {}, True) == "#808080"
+    assert am.lerp_value("#ff0000@0", "#ff0000", 0.5, {}, True) == "#ff000080"      # fade keeps the hue
+    assert am.lerp_value("a", "b", 0.5, {}) == "a" and am.lerp_value("a", "b", 1, {}) == "b"
+    grad = am.lerp_value({"type": "linear", "angle": 0, "stops": [[0, "#000000"], [1, "#000000"]]},
+                         {"type": "linear", "angle": 90, "stops": [[0, "#ffffff"], [1, "#000000"]]}, 0.5, {}, True)
+    assert grad["angle"] == 45 and grad["stops"][0] == [0, "#808080"]
+
+
+def test_keyframes_move_scale_and_fade(ws):
+    s.create_canvas("a", 200, 100)
+    s.add_rect("a", 20, 40, 20, 20, fill="#ffffff", id="box")
+    s.create_animation("a", "slide", 1.0)
+    out = s.set_keyframes("a", "slide", "box", "dx", [[0, 0], [1, 100]])
+    assert out["elements"] == ["box"] and out["keyframes"][1] == {"t": 1.0, "value": 100}
+    s.set_keyframes("a", "slide", "box", "opacity", [{"t": 0, "value": 1}, {"t": 1, "value": 0.5}])
+    st = s.store()
+    c = st.get("a")
+    _, anim = st.get_animation(c, "slide")
+
+    def frame(t):
+        posed, _ = am.apply_animation(c, anim, t, {})
+        return np.asarray(st.renderer(posed).render())
+
+    assert frame(0)[50, 30][3] == 255 and frame(0)[50, 80][3] == 0
+    half = frame(0.5)
+    assert half[50, 80][3] == 191 and half[50, 30][3] == 0          # moved 50 px, 75% opaque
+    assert frame(1)[50, 130][3] == 128
+    assert render("a")[50, 30][3] == 255                             # the canvas itself is untouched
+
+    s.create_animation("a", "pop", 0.5)
+    s.set_keyframes("a", "pop", "box", "scale", [[0, 1], [0.5, 2, "linear"]])
+    _, pop = st.get_animation(c, "pop")
+    posed, _ = am.apply_animation(c, pop, 0.5, {})
+    alpha = np.asarray(st.renderer(posed).render())[..., 3]
+    assert int((alpha == 255).sum()) == 1600                         # 40x40, grown around its own centre
+    assert alpha[31, 11] == 255 and alpha[69, 49] == 255 and alpha[50, 9] == 0
+
+
+def test_group_target_pivot_and_offset(ws):
+    s.create_canvas("a", 200, 200)
+    s.add_rect("a", 100, 98, 60, 4, fill="#ff0000", group="hand", id="h1")
+    s.create_animation("a", "spin", 2.0, loop=True)
+    out = s.set_keyframes("a", "spin", "group:hand", "rotation", [[0, 0], [1, 90]], pivot=[100, 100], offset=0.5)
+    assert [k["t"] for k in out["keyframes"]] == [0.5, 1.5]
+    image, info = s.preview("a", animation="spin", time=1.5)
+    assert json.loads(info)["time"] == 1.5
+    st = s.store()
+    posed, _ = am.apply_animation(st.get("a"), st.get_animation(st.get("a"), "spin")[1], 1.5, {})
+    alpha = np.asarray(st.renderer(posed).render())[..., 3]
+    assert alpha[140, 100] == 255 and alpha[100, 140] == 0           # swung down around the pivot
+
+
+def test_animation_validation_and_cleanup(ws):
+    s.create_canvas("a", 100, 100)
+    s.add_rect("a", 10, 10, 20, 20, id="r")
+    with pytest.raises(ValueError):
+        s.set_keyframes("a", "nope", "r", "dx", [[0, 0]])
+    s.create_animation("a", "x", 1.0)
+    with pytest.raises(ValueError):
+        s.set_keyframes("a", "x", "ghost", "dx", [[0, 0], [1, 5]])
+    with pytest.raises(ValueError):
+        s.set_keyframes("a", "x", "r", "dx", [[0, 0], [2, 5]])              # past the end
+    with pytest.raises(ValueError):
+        s.set_keyframes("a", "x", "r", "style.fill", [[0, "#fff"], [1, "#notacolor"]])
+    with pytest.raises(ValueError):
+        s.set_keyframes("a", "x", "r", "dx", [[0, 0], [1, 5, "wobble"]])
+    assert s.get_animations("a")["animations"][0]["tracks"] == []
+    s.set_keyframes("a", "x", "r", "width", [[0, 0], [1, 20]])               # collapsing to zero is allowed
+    s.set_keyframes("a", "x", "r", "dx", [[0, 0], [1, 5]])
+    assert s.delete_keyframes("a", "x", target="r", property="dx")["tracks_left"] == 1
+    with pytest.raises(ValueError):
+        s.create_animation("a", "x", 0.5)                                    # shorter than its keyframes
+    s.duplicate_canvas("a", "b")
+    assert len(s.get_animations("b", "x")["tracks"]) == 1                    # animations are copied
+    s.delete_elements("a", ids=["r"])
+    assert s.get_animations("a", "x")["tracks"] == []                        # dead tracks are pruned
+    assert s.delete_animation("a", "x")["animations_left"] == []
+
+
+def test_preview_and_export_animation(ws):
+    s.create_canvas("a", 64, 64)
+    s.add_ellipse("a", 16, 32, 8, fill="#00ff00", id="dot")
+    s.create_animation("a", "bounce", 0.5, loop=True, fps=10)
+    s.set_keyframes("a", "bounce", "dot", "dx", [[0, 0], [0.25, 32, "quad-out"], [0.5, 0, "quad-in"]])
+    image, info = s.preview_animation("a", "bounce", frames=4)
+    meta = json.loads(info)
+    assert image.data[:4] == b"\x89PNG" and len(meta["times"]) == 4 and meta["times"][-1] < 0.5
+
+    sheet = s.export_animation("a", "bounce", format="spritesheet", path=str(ws / "o" / "b.png"))
+    fw, fh = sheet["frame_size"]
+    assert sheet["frames"] == 5 and sheet["columns"] == 3
+    assert fh == 16 and 44 <= fw <= 48                 # trimmed to the area the dot sweeps at the sampled times
+    data = json.loads(Path(sheet["json"]).read_text())
+    assert data["offset"] == [8.0, 24.0] and data["loop"] is True and data["fps"] == 10
+    assert Image.open(sheet["file"]).size == (fw * 3, 32)
+
+    frames = s.export_animation("a", "bounce", format="frames", path=str(ws / "o" / "seq"), trim=False)
+    assert len(list((ws / "o" / "seq").glob("*.png"))) == 5 and frames["frame_size"] == [64, 64]
+
+    for fmt, ext in (("gif", "gif"), ("apng", "png"), ("webp", "webp")):
+        out = s.export_animation("a", "bounce", format=fmt, path=str(ws / "o" / f"b_anim.{ext}"))
+        im = Image.open(out["file"])
+        assert getattr(im, "n_frames", 1) in (4, 5), fmt      # writers may merge two identical neighbours
+
+    js = s.export_animation("a", "bounce", format="json", path=str(ws / "o" / "b.anim.json"))
+    desc = json.loads(Path(js["file"]).read_text())
+    key = desc["tracks"][0]["keyframes"][1]
+    assert key["ease"] == "quad-out" and key["roblox"]["EasingStyle"] == "Quad" and key["dotween"] == "OutQuad"
+    assert desc["tracks"][0]["layers"] == ["base"]
+    with pytest.raises(ValueError):
+        s.export_animation("a", "bounce", format="mp4")
+
+
+def test_batch_animation_ops_and_undo(ws):
+    s.create_canvas("a", 50, 50)
+    out = s.batch("a", [
+        {"op": "add_rect", "id": "r", "x": 5, "y": 5, "width": 10, "height": 10},
+        {"op": "create_animation", "name": "go", "duration": 0.3},
+        {"op": "set_keyframes", "animation": "go", "target": "r", "property": "dx", "keyframes": [[0, 0], [0.3, 20]]},
+    ])
+    assert out["results"][1]["animation"] == "go" and out["results"][2]["property"] == "dx"
+    assert s.undo("a")["undone"] and s.get_animations("a")["animations"] == []

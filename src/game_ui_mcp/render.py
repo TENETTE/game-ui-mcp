@@ -521,6 +521,7 @@ class Geometry:
         self.rect: tuple | None = None
         self.ellipse: tuple | None = None
         self.box: Box = (0, 0, 0, 0)
+        self.paint_box: Box | None = None      # reference box for gradients when it differs from ``box``
 
 
 def vector_geometry(el: dict, res: float) -> Geometry:
@@ -528,22 +529,26 @@ def vector_geometry(el: dict, res: float) -> Geometry:
     t = el["type"]
     if t == "rect":
         x, y, w, h = (float(el[k]) for k in ("x", "y", "width", "height"))
-        if w <= 0 or h <= 0:
-            raise ValueError("rect width and height must be > 0")
+        if w < 0 or h < 0:
+            raise ValueError("rect width and height cannot be negative")
         corner = str(el.get("corner", "round")).lower()
         if corner not in ("round", "cut"):
             raise ValueError("rect corner must be 'round' or 'cut'")
+        g.box = (x, y, x + w, y + h)
+        if w == 0 or h == 0:
+            return g                      # collapsed (e.g. a bar animating from zero): draws nothing
         g.kind, g.rect = "rect", (x, y, w, h, el.get("radius", 0), corner)
         g.fills = [geo.rect_path(x, y, w, h, el.get("radius", 0), corner, res)]
-        g.box = (x, y, x + w, y + h)
     elif t == "ellipse":
         cx, cy, rx = float(el["cx"]), float(el["cy"]), float(el["rx"])
-        ry = float(el.get("ry") or rx)
-        if rx <= 0 or ry <= 0:
-            raise ValueError("ellipse radii must be > 0")
+        ry = float(rx if el.get("ry") is None else el["ry"])
+        if rx < 0 or ry < 0:
+            raise ValueError("ellipse radii cannot be negative")
+        g.box = (cx - rx, cy - ry, cx + rx, cy + ry)
+        if rx == 0 or ry == 0:
+            return g
         g.kind, g.ellipse = "ellipse", (cx, cy, rx, ry)
         g.fills = [geo.ellipse_path(cx, cy, rx, ry, res)]
-        g.box = (cx - rx, cy - ry, cx + rx, cy + ry)
     elif t == "polygon":
         if el.get("points"):
             pts = [(float(p[0]), float(p[1])) for p in el["points"]]
@@ -573,8 +578,11 @@ def vector_geometry(el: dict, res: float) -> Geometry:
         width = max(0.25, float(el.get("thickness", 4)))
         if radius <= 0:
             raise ValueError("arc radius must be > 0")
+        # gradients (conic sweeps above all) refer to the whole circle, whatever part of it is drawn
+        g.paint_box = (cx - radius - width / 2, cy - radius - width / 2, cx + radius + width / 2, cy + radius + width / 2)
         if abs(end - start) < 1e-6:
-            raise ValueError("arc start_angle and end_angle must differ")
+            g.box = (cx, cy, cx, cy)
+            return g                      # empty sweep (a value arc at zero): draws nothing
         full = abs(end - start) >= 360 - 1e-6
         pts = geo.arc_path(cx, cy, radius, start, start + 360 if full else end, res)
         if full:
@@ -590,6 +598,7 @@ def vector_geometry(el: dict, res: float) -> Geometry:
         width = max(0.25, float(el.get("width", 2)))
         if count < 2 or radius <= 0 or length <= 0:
             raise ValueError("ticks need count >= 2, radius > 0 and length > 0")
+        g.paint_box = (cx - radius, cy - radius, cx + radius, cy + radius)
         every = int(el.get("every", 1) or 1)
         skip_every = int(el.get("skip_every", 0) or 0)
         full = abs(end - start) >= 360 - 1e-6
@@ -710,7 +719,13 @@ class Renderer:
         """Bounds of the element geometry in canvas units (no effects), after rotation."""
         st = resolve_style(el.get("style"), self.theme)
         box = self._geom_box(el, st)
-        return geo.rotated_bbox(box, float(el.get("rotation", 0) or 0), self._pivot(el, box))
+        pivot = self._pivot(el, box)
+        sx = float(el.get("scale_x", el.get("scale", 1)) or 0)
+        sy = float(el.get("scale_y", el.get("scale", 1)) or 0)
+        if sx != 1 or sy != 1:
+            box = (pivot[0] + (box[0] - pivot[0]) * sx, pivot[1] + (box[1] - pivot[1]) * sy,
+                   pivot[0] + (box[2] - pivot[0]) * sx, pivot[1] + (box[3] - pivot[1]) * sy)
+        return geo.rotated_bbox(box, float(el.get("rotation", 0) or 0), pivot)
 
     @staticmethod
     def _pivot(el: dict, box: Box) -> tuple[float, float]:
@@ -951,6 +966,42 @@ class Renderer:
         return self._image_layer(el, region)[0]
 
     def render_element(self, el: dict):
+        """Render one element to (layer, x, y, blend). Handles scale_x / scale_y, which grow or shrink
+        the finished element (effects included) around its pivot, the way an engine scales a widget."""
+        sx = float(el.get("scale_x", el.get("scale", 1)) or 0)
+        sy = float(el.get("scale_y", el.get("scale", 1)) or 0)
+        if sx == 1 and sy == 1:
+            return self._render_plain(el)
+        if sx <= 0 or sy <= 0:
+            return None
+        if max(sx, sy) > 16:
+            raise ValueError("scale is limited to 16")
+        k = self.k
+        m = max(sx, sy)
+        plain = {key: value for key, value in el.items() if key not in ("scale", "scale_x", "scale_y", "clip")}
+        sub = Renderer(self.canvas, self.theme, self.fonts, k * m)      # true vector scale, not a resized bitmap
+        result = sub._render_plain(plain, clip_region=False)
+        self.warnings += sub.warnings
+        if result is None:
+            return None
+        layer, px0, py0, blend = result
+        if sx != sy:
+            layer = layer.resize((max(1, int(round(layer.width * sx / m))), max(1, int(round(layer.height * sy / m)))),
+                                 Image.LANCZOS)
+        st = resolve_style(el.get("style"), self.theme)
+        pvx, pvy = self._pivot(el, self._geom_box(plain, st))
+        ox = int(round(pvx * k - (pvx * k * m - px0) * sx / m))
+        oy = int(round(pvy * k - (pvy * k * m - py0) * sy / m))
+        clip_id = el.get("clip")
+        if clip_id:
+            target = self._by_id.get(clip_id)
+            if target is None:
+                raise ValueError(f"clip target '{clip_id}' does not exist on this canvas")
+            cm = self.shape_mask(target, (ox, oy, layer.width, layer.height))
+            layer.putalpha(ImageChops.multiply(layer.getchannel("A"), cm))
+        return layer, ox, oy, blend
+
+    def _render_plain(self, el: dict, clip_region: bool = True):
         st = resolve_style(el.get("style"), self.theme)
         t = el["type"]
         k = self.k
@@ -976,7 +1027,7 @@ class Renderer:
             cx, cy = pivot
             region = self._region((cx - half, cy - half, cx + half, cy + half), pad, clip=False)
         else:
-            region = self._region(gbox, pad)
+            region = self._region(gbox, pad, clip=clip_region)
         if region is None:
             return None
         px0, py0, w, h = region
@@ -1004,7 +1055,8 @@ class Renderer:
         else:
             return None
 
-        rbox_plain = geo.rotated_bbox(box, rot, pivot)
+        paint_ref = vector_geometry(el, 1.0).paint_box if t in ("arc", "ticks") else None
+        rbox_plain = geo.rotated_bbox(paint_ref or box, rot, pivot)
         box_px = (rbox_plain[0] * k - px0, rbox_plain[1] * k - py0, rbox_plain[2] * k - px0, rbox_plain[3] * k - py0)
         layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
 
@@ -1066,6 +1118,18 @@ class Renderer:
         if blend not in BLENDS:
             raise ValueError(f"style.blend must be one of {', '.join(BLENDS)}")
         return layer, px0, py0, blend
+
+
+def shift_element(el: dict, dx: float, dy: float) -> None:
+    """Move an element (and its rotation pivot) by (dx, dy) in place."""
+    if "points" in el and el["type"] in ("polygon", "line"):
+        el["points"] = [[float(p[0]) + dx, float(p[1]) + dy] for p in el["points"]]
+    elif "cx" in el:
+        el["cx"], el["cy"] = float(el["cx"]) + dx, float(el["cy"]) + dy
+    else:
+        el["x"], el["y"] = float(el.get("x", 0)) + dx, float(el.get("y", 0)) + dy
+    if el.get("origin"):
+        el["origin"] = [float(el["origin"][0]) + dx, float(el["origin"][1]) + dy]
 
 
 # --------------------------------------------------------------------------- preview helpers

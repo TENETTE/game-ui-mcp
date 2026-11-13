@@ -13,7 +13,7 @@ from game_ui_mcp import server as ui
 from game_ui_mcp.icons import icon_names
 from game_ui_mcp.store import Store
 
-OUT = Path(__file__).parent
+OUT = Path(__file__).resolve().parent
 ui.set_store(Store(Path(tempfile.mkdtemp()) / "ws"))
 
 ui.set_theme(
