@@ -8,17 +8,24 @@ Claude'un (ya da MCP destekleyen başka bir AI'ın) **oyun UI'ı çizmesini** sa
 
 ![Örnek HUD](examples/hud_mockup.png)
 
-Yukarıdaki görsellerin tamamı [`examples/demo.py`](examples/demo.py) içindeki tool çağrılarıyla çizildi.
+Gerçekçi tarz (yarış, simülasyon, AAA) da çizebiliyor: kadran, ibre, karbon ve metal doku, eğik sekmeler, cam paneller.
+
+![Gerçekçi yarış HUD'u](examples/racing_hud.png)
+
+![Gerçekçi parçalar](examples/realistic_kit.png)
+
+Görsellerin tamamı [`examples/demo.py`](examples/demo.py) ve [`examples/demo_racing.py`](examples/demo_racing.py) içindeki tool çağrılarıyla çizildi.
 
 ## Ne yapabiliyor
 
-- **Şekiller:** dikdörtgen (yuvarlak ya da kesik köşe), elips, çokgen, yıldız, çizgi, SVG path
-- **Stil:** düz renk, linear / radial gradient, çizgili / noktalı / ızgara doku, kenar çizgisi (iç, orta, dış), gölge, glow, iç gölge, bevel, opaklık, döndürme, başka bir şekle kırpma (`clip`)
-- **Yazı:** 6 gömülü font (Inter, Rajdhani, Orbitron, Cinzel, Fredoka, Bangers) + bilgisayardaki fontlar, satır kaydırma, genişliğe sığdırma, kontur, Türkçe büyük harf (`uppercase: "tr"`)
+- **Şekiller:** dikdörtgen (yuvarlak ya da kesik köşe, eğik), elips, çokgen, yıldız, çizgi (kesikli olabilir), yay, kadran çizgileri, SVG path
+- **Stil:** düz renk, linear / radial / conic gradient, çizgili / noktalı / ızgara / karbon / fırçalı metal doku, kenar çizgisi (iç, orta, dış), gölge, glow, iç gölge, bevel, bulanıklık, opaklık, karışım modları, bir pivot etrafında döndürme, başka bir şekle kırpma (`clip`)
+- **Gösterge:** `add_arc` + `add_ticks` ile devir saati, hız göstergesi, turbo, segmentli LED sıraları; ibre için pivot'lu döndürme
+- **Yazı:** 10 gömülü font (Inter, Barlow Condensed, Bebas Neue, Michroma, JetBrains Mono, Rajdhani, Orbitron, Cinzel, Fredoka, Bangers) + bilgisayardaki fontlar, italik, satır kaydırma, genişliğe sığdırma, kontur, Türkçe büyük harf (`uppercase: "tr"`)
 - **İkon:** 72 hazır oyun ikonu, çizgi ve dolu hali ([hepsi](examples/icons.png))
 - **Tema:** renk token'ları (`$primary`) ve isimli stiller; bütün kit tutarlı kalır
 - **Önizleme:** AI çizdiğini resim olarak geri görür (yakınlaştırma, eleman kutuları, oyun sahnesi arka planı)
-- **Dışa aktarma:** PNG (1x, 2x), otomatik 9-slice, atlas, motor başına hazır değerler ve yardımcı scriptler
+- **Dışa aktarma:** PNG (1x, 2x), otomatik 9-slice, atlas, parça parça katman çıktısı (ibre, kadran, yay ayrı), motor başına hazır değerler ve yardımcı scriptler
 
 ## Kurulum (Windows)
 
@@ -35,6 +42,7 @@ Deneme (örnek görselleri yeniden üretir):
 
 ```powershell
 .venv\Scripts\python examples\demo.py
+.venv\Scripts\python examples\demo_racing.py
 ```
 
 ### Claude Desktop'a bağlama
@@ -82,11 +90,11 @@ Başka bir klasör için `GAME_UI_MCP_DIR` ortam değişkenini ayarla (config'te
 | Grup | Tool'lar |
 | --- | --- |
 | Canvas | `create_canvas`, `list_canvases`, `get_canvas`, `update_canvas`, `duplicate_canvas`, `delete_canvas` |
-| Çizim | `add_rect`, `add_ellipse`, `add_line`, `add_polygon`, `add_path`, `add_text`, `add_icon`, `add_image` |
+| Çizim | `add_rect`, `add_ellipse`, `add_line`, `add_polygon`, `add_path`, `add_arc`, `add_ticks`, `add_text`, `add_icon`, `add_image` |
 | Düzenleme | `update_element`, `delete_elements`, `duplicate_element`, `move_elements`, `reorder_element`, `align_elements`, `batch`, `undo` |
 | Tema ve bilgi | `set_theme`, `get_theme`, `list_fonts`, `list_icons`, `measure_text` |
 | Önizleme | `preview`, `contact_sheet` |
-| Dışa aktarma | `export_png`, `export_asset`, `export_atlas`, `write_engine_helpers` |
+| Dışa aktarma | `export_png`, `export_asset`, `export_layers`, `export_atlas`, `write_engine_helpers` |
 
 Stil nesnesi kısaca:
 
@@ -104,6 +112,8 @@ Stil nesnesi kısaca:
 
 Renkler: `#rrggbb`, `#rrggbbaa`, `rgba(...)`, `$token`; sonuna `@0.5` eklenince alfa olur.
 
+Açılar (yay, kadran çizgisi, conic gradient): derece, 0 = saat 3 yönü, saat yönünde artar. Klasik bir gösterge 135'ten 405'e süpürür.
+
 ## Motorlara aktarma
 
 `export_asset` PNG'nin yanına `<ad>.gameui.json` yazar ve klasördeki `game_ui_manifest.json` dosyasını günceller. `nine_slice: "auto"` esneyecek orta bölgeyi kendisi bulur ve dokuyu küçültür.
@@ -114,12 +124,16 @@ Renkler: `#rrggbb`, `#rrggbbaa`, `rgba(...)`, `$token`; sonuna `@0.5` eklenince 
 | Unreal | Brush `Draw As: Box`, Margin (L, T, R, B, 0-1) | `import_game_ui.py`: texture'ları UI ayarlarıyla içe aktarır, margin'leri log'a yazar |
 | Roblox | `SliceCenter`, `SliceScale` | `GameUiAssets.luau`: `GameUi.apply(imageLabel, "ad")` |
 
+Hareketli parçalar (ibre, dolan yay) için `export_layers`: her `group` ayrı PNG olur, `<ad>.layout.json` her parçanın konumunu ve dönme merkezini verir. Assetto Corsa (CSP Lua) gibi PNG kullanan her ortamda bu çıktılar doğrudan kullanılabilir.
+
 Roblox'ta görselleri Studio'ya kendin yüklemen gerekir (server internete çıkmaz); asset id'lerini sonra `write_engine_helpers(roblox_ids=...)` ile işlersin.
 
 ## Sınırlar
 
 - Karakter portresi, illüstrasyon, fotoğraf gibi şeyleri üretmez. Bunlar için hazır bir görseli `add_image` ile yerleştirebilirsin.
 - Stroke birleşimleri çokgen ve path'lerde yuvarlaktır (dikdörtgenlerde keskin).
+- Arka planı bulanıklaştıran gerçek "buzlu cam" PNG'ye gömülemez; o efekt motor tarafında yapılır (Unreal'da `BackgroundBlur`). Burada camın koyu, yarı saydam hali çizilir.
+- Çok büyük blur'lu gölgelerde 8 bit bantlanma görülebilir (gradient'ler dither'lanır, gölgeler dither'lanmaz).
 - Yazıda harf aralığı verilince kerning uygulanmaz.
 - Orbitron fontunda Ğ / ğ yok; tool böyle durumlarda uyarı döndürür.
 - Motor tarafındaki yardımcı dosyalar (C#, Unreal Python, Luau) bu repoda yalnızca üretiliyor; Unity, Unreal ve Roblox Studio içinde henüz denenmedi.

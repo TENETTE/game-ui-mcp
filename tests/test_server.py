@@ -379,3 +379,122 @@ def test_pixel_aligned_shapes_do_not_bleed(ws):
     s.add_rect("a", 10, 12, 20, 10, fill="#ffffff", stroke={"color": "#ff0000", "width": 2})
     alpha = render("a")[..., 3]
     assert int((alpha > 0).sum()) == 200 and int((alpha == 255).sum()) == 200
+
+
+# ---------------------------------------------------------------- realistic / gauge features
+
+def test_arc_covers_only_its_sweep(ws):
+    s.create_canvas("a", 200, 200)
+    s.add_arc("a", 100, 100, 80, 180, 360, thickness=10, color="#ffffff")     # top half ring
+    alpha = render("a")[..., 3]
+    assert alpha[20, 100] == 255                 # 12 o'clock is on the band
+    assert alpha[180, 100] == 0                  # 6 o'clock is not
+    assert alpha[100, 100] == 0                  # centre is empty
+    assert alpha[102, 20] == 0 and alpha[98, 20] == 255      # flat end exactly at the start angle
+
+
+def test_dashed_butt_line_leaves_clean_gaps(ws):
+    s.create_canvas("a", 100, 20)
+    s.add_line("a", [[0, 10], [100, 10]], width=10, cap="butt", dash=[10, 10], color="#ffffff")
+    row = render("a")[10, :, 3]
+    assert row[5] == 255 and row[15] == 0 and row[25] == 255 and row[35] == 0
+    assert int((row == 255).sum()) == 50
+
+
+def test_ticks_with_labels_form_one_group(ws):
+    s.create_canvas("a", 300, 300)
+    out = s.add_ticks("a", 150, 150, 120, 135, 405, count=9, major_every=4, labels=["0", "50", "100"], id="spd")
+    assert out["group"] == "spd"
+    assert out["created"] == ["spd_minor", "spd_major", "spd_label0", "spd_label1", "spd_label2"]
+    alpha = render("a")[..., 3]
+    assert alpha[35, 150] == 255                 # the middle major tick points straight up
+    assert alpha[150, 150] == 0
+    with pytest.raises(ValueError):
+        s.add_ticks("a", 150, 150, 120, 135, 405, count=9, major_every=4, labels=["only", "two"])
+    assert len(s.get_canvas("a")["elements"]) == 5            # failed call left nothing behind
+    s.move_elements("a", 10, 0, group="spd")
+    assert s.get_canvas("a", ids=["spd_label1"])["elements"][0]["bbox_xywh"][0] > 150
+
+
+def test_rotation_around_origin_pivot(ws):
+    s.create_canvas("a", 200, 200)
+    s.add_rect("a", 100, 98, 80, 4, fill="#ff0000", origin=[100, 100], rotation=90, id="needle")
+    alpha = render("a")[..., 3]
+    assert alpha[150, 100] == 255                # now points down from the pivot
+    assert alpha[100, 150] == 0
+    box = s.get_canvas("a")["elements"][0]["bbox_xywh"]
+    assert abs(box[0] - 98) < 0.6 and abs(box[1] - 100) < 0.6 and abs(box[3] - 80) < 0.6
+
+
+def test_skew_makes_a_parallelogram(ws):
+    s.create_canvas("a", 200, 100)
+    s.add_rect("a", 50, 20, 100, 60, fill="#ffffff", skew=20)
+    alpha = render("a")[..., 3]
+    top, bottom = np.nonzero(alpha[22] == 255)[0], np.nonzero(alpha[78] == 255)[0]
+    assert top.min() > bottom.min() + 15 and top.max() > bottom.max() + 15      # top edge shifted right
+    assert abs(len(top) - len(bottom)) <= 1
+
+
+def test_conic_gradient_and_textures(ws):
+    s.create_canvas("a", 100, 100)
+    s.add_rect("a", 0, 0, 100, 100, fill={"type": "conic", "stops": [[0, "#000000"], [1, "#ffffff"]], "dither": False})
+    px = render("a")
+    assert px[50, 90][0] < 20 or px[50, 90][0] > 235          # seam sits at 3 o'clock
+    assert abs(int(px[90, 50][0]) - 64) < 8                   # 6 o'clock = a quarter of the way round
+    assert abs(int(px[50, 10][0]) - 128) < 8                  # 9 o'clock = half way
+    for kind in ("carbon", "brushed"):
+        s.create_canvas(kind, 64, 64)
+        s.add_rect(kind, 0, 0, 64, 64, fill={"type": kind, "color": "#888888", "color2": "#222222"})
+        values = render(kind)[..., 0]
+        assert values.min() >= 0x22 and values.max() <= 0x88 and values.std() > 3
+
+
+def test_italic_real_and_faux(ws):
+    s.create_canvas("a", 300, 120)
+    real = s.add_text("a", "187", 10, 10, size=60, font="Barlow Condensed", weight=700, italic=True)
+    faux = s.add_text("a", "187", 10, 60, size=40, font="Inter", weight=700, italic=True)
+    upright = s.measure_text("187", size=40, font="Inter", weight=700)
+    assert "warnings" not in real
+    assert faux["bbox_xywh"][2] > upright["width"] + 2        # slanted box is wider
+
+
+def test_blur_and_blend_modes(ws):
+    s.create_canvas("a", 100, 100, "#808080")
+    s.add_rect("a", 40, 40, 20, 20, fill="#ffffff", style={"blur": 12})
+    px = render("a", background=True)
+    assert px[50, 50][0] > px[50, 64][0] > 0x80 and px[50, 50][0] < 255       # light spreads past the shape, softened
+    for mode, expected in (("multiply", 0x40), ("screen", 0xC0)):
+        s.create_canvas(mode, 10, 10, "#808080")
+        s.add_rect(mode, 0, 0, 10, 10, fill="#808080", style={"blend": mode})
+        assert abs(int(render(mode, background=True)[5, 5][0]) - expected) <= 2
+    with pytest.raises(ValueError):
+        s.add_rect("a", 0, 0, 5, 5, style={"blend": "dissolve"})
+
+
+def test_export_layers_writes_parts_and_layout(ws):
+    s.create_canvas("gauge", 200, 200)
+    s.add_ellipse("gauge", 100, 100, 90, fill="#111111", group="dial")
+    s.add_rect("gauge", 100, 98, 70, 4, fill="#ff0000", group="needle", origin=[100, 100])
+    s.add_text("gauge", "x", 5, 5, size=10)
+    out = s.export_layers("gauge", out_dir=str(ws / "layers"))
+    layers = {layer["name"]: layer for layer in out["layers"]}
+    assert set(layers) == {"dial", "needle", "base"}
+    assert layers["needle"]["origin"] == [100, 100]
+    assert layers["needle"]["x"] == 98 and layers["needle"]["width"] == 74        # trimmed with 2px padding
+    needle = Image.open(ws / "layers" / layers["needle"]["file"])
+    assert needle.size == (74, 8)
+    layout = json.loads(Path(out["layout"]).read_text())
+    assert layout["canvas"]["width"] == 200 and [l["name"] for l in layout["layers"]] == ["dial", "needle", "base"]
+    with pytest.raises(ValueError):
+        s.export_layers("gauge", out_dir=str(ws / "layers"), groups=["ghost"])
+
+
+def test_batch_supports_arc_and_ticks(ws):
+    s.create_canvas("a", 200, 200)
+    out = s.batch("a", [
+        {"op": "add_arc", "cx": 100, "cy": 100, "radius": 80, "start_angle": 135, "end_angle": 405, "id": "track"},
+        {"op": "add_ticks", "cx": 100, "cy": 100, "radius": 70, "start_angle": 135, "end_angle": 405, "count": 5,
+         "id": "t"},
+    ])
+    assert out["results"][0]["id"] == "track" and out["results"][1]["created"] == ["t_minor"]
+    assert s.undo("a")["elements"] == []

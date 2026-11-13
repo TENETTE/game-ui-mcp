@@ -121,16 +121,20 @@ class FontLibrary:
                 weights = "variable"
             else:
                 weights = sorted({e["weight"] for e in entries if not e["italic"]}) or sorted({e["weight"] for e in entries})
-            out.append({"family": self._display[key], "source": source, "weights": weights})
+            item = {"family": self._display[key], "source": source, "weights": weights}
+            if any(e["italic"] for e in entries):
+                item["italic"] = True
+            out.append(item)
         return out
 
-    def resolve(self, family: str | None, weight: int) -> tuple[str | None, int | None]:
-        """Return (path, variable_weight). path None means the built-in fallback font."""
+    def resolve(self, family: str | None, weight: int, italic: bool = False) -> tuple[str | None, int | None, bool]:
+        """Return (path, variable_weight, faux_italic). faux_italic means the family has no italic
+        file, so the renderer should slant the upright glyphs instead."""
         if not family:
             family = "Inter"
         key = family.lower().strip()
         if os.path.isfile(family) and Path(family).suffix.lower() in FONT_EXTS:
-            return family, None
+            return family, None, italic
         if key not in self._index:
             self._ensure_system()
         if key not in self._index:
@@ -141,12 +145,15 @@ class FontLibrary:
                 "or drop a .ttf/.otf into the workspace 'fonts' folder."
             )
         entries = self._index[key]
-        for e in entries:
-            if e["variable"] and not e["italic"]:
-                return e["path"], weight
+        slanted = [e for e in entries if e["italic"]]
         upright = [e for e in entries if not e["italic"]] or entries
-        best = min(upright, key=lambda e: abs(e["weight"] - weight))
-        return best["path"], None
+        pool = slanted if (italic and slanted) else upright
+        faux = italic and not slanted
+        for e in pool:
+            if e["variable"]:
+                return e["path"], weight, faux
+        best = min(pool, key=lambda e: abs(e["weight"] - weight))
+        return best["path"], None, faux
 
 
 def _axis_name(axis: dict) -> str:

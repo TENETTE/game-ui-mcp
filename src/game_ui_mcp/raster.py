@@ -96,12 +96,16 @@ def stroke_polylines(items: list[tuple[np.ndarray, bool, float, bool]], w: int, 
             a, b, d, length = a[ok], b[ok], d[ok], length[ok]
             n = np.stack([-d[:, 1], d[:, 0]], axis=1) / length[:, None] * r
             push(np.stack([a + n, b + n, b - n, a - n], axis=1))
-        joints = p if (closed or round_caps) else p[1:-1]
-        if len(joints):
+        if closed or round_caps:
             segs = int(max(8, min(72, np.ceil(2 * np.pi * r / 3.0))))
             ang = np.linspace(0, 2 * np.pi, segs, endpoint=False)
             circle = np.stack([np.cos(ang), np.sin(ang)], axis=1) * r
-            push(joints[:, None, :] + circle[None, :, :])
+            push(p[:, None, :] + circle[None, :, :])
+        elif ok.any() and len(a) > 1:
+            # flat (butt) ends: bevel the inner joints with wedges so nothing pokes past the two ends
+            joint, n_in, n_out = b[:-1], n[:-1], n[1:]
+            push(np.stack([joint, joint + n_in, joint + n_out], axis=1))
+            push(np.stack([joint, joint - n_in, joint - n_out], axis=1))
     if not x0s:
         return np.zeros((h, w), dtype=np.uint8)
     acc = _accumulate(np.concatenate(x0s), np.concatenate(y0s), np.concatenate(x1s), np.concatenate(y1s),

@@ -1,17 +1,17 @@
 ---
 name: game-ui-mcp
-description: Oyun UI'ı (menü, HUD, buton, panel, bar, ikon, envanter) çizmek için game-ui-mcp server'ını kullanır. Unity, Unreal Engine ve Roblox Studio için PNG + 9-slice üretir. "UI yap", "buton/panel/HUD çiz", "Roblox UI", "UMG", "uGUI" gibi isteklerde kullan.
+description: Oyun UI'ı (menü, HUD, buton, panel, bar, gösterge, ikon) çizerken game-ui-mcp server'ının tool'larını kullanır: stilize (Roblox, cartoon) ve gerçekçi (yarış, simülasyon, AAA) tarz; Unity, Unreal, Roblox ve Assetto Corsa için PNG, 9-slice ve katman çıktısı.
 ---
 
 # game-ui-mcp ile oyun UI'ı çizmek
 
-Bu skill, `game-ui-mcp` MCP server'ının çizim tool'larını (create_canvas, add_rect, add_text, preview, export_asset...) iyi kullanmanın yolunu anlatır. Server'da AI görsel üretimi yok: her piksel senin çağırdığın şekil, yazı, ikon ve efektlerden gelir. Kalite tamamen senin tasarım kararlarına ve kendi çıktına bakıp düzeltmene bağlı.
+Bu skill, `game-ui-mcp` MCP server'ının çizim tool'larını (create_canvas, add_rect, add_arc, add_ticks, add_text, preview, export_asset...) iyi kullanmanın yolunu anlatır. Server'da AI görsel üretimi yok: her piksel senin çağırdığın şekil, yazı, ikon ve efektlerden gelir. Kalite tamamen senin tasarım kararlarına ve kendi çıktına bakıp düzeltmene bağlı.
 
 Tool'lar listede yoksa (`create_canvas`, `preview` görünmüyorsa) server bağlı değildir. Kullanıcıya server'ı Claude'a bağlaması gerektiğini söyle (repo README'sinde kurulum var) ve çizmiş gibi davranma.
 
 ## Çalışma sırası
 
-1. **Brief.** Motor (Unity / Unreal / Roblox), platform, tür ve hava, hangi parçalar lazım. Eksikse en fazla 2-3 soru sor; kullanıcı "sen karar ver" dediyse karar ver ve ne seçtiğini yaz.
+1. **Brief.** Motor (Unity / Unreal / Roblox / Assetto Corsa app'i), platform, tür, hangi parçalar lazım ve **stil ailesi**: gerçekçi mi (yarış, simülasyon, AAA) yoksa stilize mi (cartoon, arcade, sci-fi, fantastik). İkisinin kuralları farklı; "Stil ailesi" bölümüne göre ilerle. Eksikse en fazla 2-3 soru sor; kullanıcı "sen karar ver" dediyse karar ver ve ne seçtiğini yaz.
 2. **Tema.** İlk iş `set_theme`. Renkleri ve tekrar eden stilleri orada tanımla, sonra her yerde `$token` ve stil adı kullan. Tek tek hex yazma: kit tutarsızlaşır.
 3. **Canvas.** Her asset ayrı canvas, asset'in gerçek boyutunda. Ekran tasarımı ise 1920x1080 tek canvas (mockup).
 4. **Çiz.** `batch` ile, elemanlara açık `id` vererek. Tek tek `add_*` çağrısı yavaş.
@@ -38,7 +38,7 @@ Tool'lar listede yoksa (`create_canvas`, `preview` görünmüyorsa) server bağl
 
 Palet kuralı: 1 zemin, 1-2 yüzey tonu, 1 ana renk, 1 vurgu, yazı + soluk yazı, durum renkleri (tehlike, başarı, altın). Daha fazlası dağınık görünür. Türkçe metinde `uppercase: "tr"` kullan (i → İ doğru çıkar).
 
-Font seçimi (`list_fonts`): Inter (temiz arayüz), Rajdhani / Orbitron (sci-fi, teknoloji), Cinzel (fantastik, ortaçağ), Fredoka (yuvarlak, casual), Bangers (çizgi roman, arcade). Bir kitte en fazla 2 aile. Orbitron'da Ğ/ğ yok; tool uyarı verirse fontu değiştir.
+Font seçimi (`list_fonts`): Inter (temiz, modern AAA menü), Barlow Condensed (motorsport, gerçekçi HUD; gerçek italiği var), Bebas Neue (uzun başlık harfleri), Michroma (geniş gösterge paneli yazısı), JetBrains Mono (sabit genişlikli rakam: süre, telemetri), Rajdhani / Orbitron (sci-fi, teknoloji), Cinzel (fantastik, ortaçağ), Fredoka (yuvarlak, casual), Bangers (çizgi roman, arcade). Bir kitte en fazla 2 aile (gerçekçi tarzda tipik ikili: Barlow Condensed + JetBrains Mono). Orbitron'da Ğ/ğ yok; tool uyarı verirse fontu değiştir.
 
 ## Canvas boyutu ve kenar payı
 
@@ -46,6 +46,63 @@ Font seçimi (`list_fonts`): Inter (temiz arayüz), Rajdhani / Orbitron (sci-fi,
 - Koordinatları tam sayı ver. Yarım pikseller kenarı bulanıklaştırır.
 - Tipik boyutlar (1x): ikon 64 veya 128, envanter slotu 96, buton 280-360 × 80-110, 9-slice panel 192-256 kare, bar 360×64.
 - Keskinlik için `scales: [1, 2]` export et. Roblox'ta görsel 1024 px'i geçmesin; tool geçerse uyarır.
+
+## Stil ailesi: stilize mi, gerçekçi mi
+
+| | Stilize (Roblox, cartoon, arcade) | Gerçekçi (yarış, simülasyon, AAA) |
+| --- | --- | --- |
+| Renk | canlı, çok renkli | nötr koyu zemin + tek vurgu rengi; renk yalnızca anlam taşır (kırmızı = limit, yeşil = iyi, mor = en iyi tur) |
+| Kenar | kalın stroke (3-5 px), büyük radius | kıl inceliğinde çizgi (1-1.5 px), küçük radius (2-8) ya da keskin köşe |
+| Efekt | belirgin glow, kalın gölge, parlama şeridi | çok yumuşak geniş gölge; glow sadece gerçekten ışık yayan şeyde (LED, ibre, aktif değer) |
+| Yazı | iri, konturlu, eğlenceli font | dar grotesk; küçük açık aralıklı BÜYÜK HARF etiket + iri rakam; kontur yok |
+| Yüzey | düz renk + gradient | koyu cam (yarı saydam), karbon, fırçalı metal |
+| Yoğunluk | dolu, sıkı | ferah; az eleman, net hiyerarşi |
+
+Kullanıcı bir oyunu örnek verdiyse (Forza, Assetto Corsa, bir AAA oyun) o oyunun arayüzünü birebir kopyalama: logo, isim ve aynı yerleşim olmaz. Tasarım dilini al (oranlar, tipografi disiplini, renk kullanımı) ve özgün bir düzen kur.
+
+## Gerçekçi tarz kuralları
+
+1. **Palet:** zemin `#07080a`-`#14171c` arası, yazı `#f2f4f7`, soluk yazı `#8b929c`, çizgi `#ffffff@0.14`, tek vurgu (ör. kırmızı `#ff3b30`). Durum renkleri (amber, yeşil, mavi, mor) yalnızca veri için.
+2. **Cam panel:** `fill` koyu ve %85 opak dikey gradient (`#171a20d9` → `#0b0d10d9`), `stroke` 1 px ve kendisi gradient (üstte `#ffffff@0.26`, altta `#ffffff@0.05`: üst kenar ışık alır), `shadow` blur 24-28, dy 12, alfa 0.5. Radius 6-8. Vurgu için panelin sol kenarına 3-4 px renkli şerit (`clip` ile).
+3. **Tipografi:** etiket = Barlow Condensed 600, 14-17 px, `uppercase`, `letter_spacing` 2-3, soluk renk. Değer = Barlow Condensed 700 `italic`, etiketin 2.5-8 katı boyut. Süre ve telemetri = JetBrains Mono (rakamlar zıplamaz). Etiketi sola, değeri sağa hizala (`middle-left` / `middle-right`), satırları 1 px çizgiyle ayır.
+4. **Eğim:** hız hissi için `skew` 10-14 derece; bütün eğik parçalarda aynı açı. Eğik rect'in içindeki yazı italik olsun.
+5. **Malzeme:** karbon `{"type":"carbon","color":"#3b4048","color2":"#111317","size":4}`; fırçalı metal `{"type":"brushed","color":"#b9c0c8","color2":"#6d747d","amount":0.7}`; torna metal (göbek, düğme) `{"type":"conic","stops":["#eef1f4","#646b75","#f7f9fa","#4c525a","#dfe4e9","#5c636d","#eef1f4"]}`. Dokuyu küçük alanlarda kullan (başlık şeridi, düğme, çerçeve); bütün paneli karbonla kaplama.
+6. **Işık:** LED, ibre ve dolu yay kendi renginde `glow` alır (alfa 0.5-0.75, blur 10-18). Panel ve yazıya glow verme. Sis ya da ışık hüzmesi için `style.blur` verilmiş yarı saydam elips.
+7. **Geçişler:** gradient'ler otomatik dither'lanır, koyu yumuşak geçişlerde bantlanma olmaz. Çok büyük blur'lu gölgede bant görürsen blur'u küçült ya da alfayı düşür.
+
+### Gösterge (devir, hız, turbo, yakıt)
+
+Açılar: 0 = saat 3 yönü, saat yönünde artar. Klasik kadran 135 → 405 (270 derecelik süpürme). Değer açısı = `135 + 270 × oran`.
+
+```json
+[{"op":"add_ellipse","group":"dial","cx":220,"cy":220,"rx":206,
+  "fill":{"type":"radial","stops":[[0,"#1c2026"],[0.72,"#0c0e11"],[1,"#050607"]]},
+  "stroke":{"color":{"type":"linear","angle":70,"stops":["#7b838d","#1b1e23","#565d66"]},"width":6},
+  "style":{"shadow":{"color":"#000000@0.65","blur":40,"dy":16},"inner_shadow":{"color":"#000000@0.9","blur":26,"dy":6}}},
+ {"op":"add_arc","group":"dial","cx":220,"cy":220,"radius":186,"start_angle":135,"end_angle":405,"thickness":12,"color":"#ffffff@0.07"},
+ {"op":"add_arc","group":"dial","cx":220,"cy":220,"radius":166,"start_angle":345,"end_angle":405,"thickness":5,"color":"#ff3b30"},
+ {"op":"add_ticks","id":"rpm","group":"dial","cx":220,"cy":220,"radius":176,"start_angle":135,"end_angle":405,
+  "count":37,"major_every":4,"length":8,"width":1.5,"major_length":17,"major_width":3,
+  "color":"#ffffff@0.42","major_color":"#f2f4f7","labels":["0","1","2","3","4","5","6","7","8","9"],
+  "label_size":26,"label_font":"Barlow Condensed","label_weight":600,"label_italic":true,"label_color":"#d5dae1"},
+ {"op":"add_arc","group":"value","cx":220,"cy":220,"radius":186,"start_angle":135,"end_angle":335,"thickness":12,
+  "color":{"type":"conic","from":135,"to":405,"stops":[[0,"#dfe6ee"],[0.62,"#f2f4f7"],[0.76,"#ffb020"],[0.9,"#ff3b30"]]},
+  "style":{"glow":{"color":"#ffb020@0.55","blur":18}}},
+ {"op":"add_polygon","group":"needle","origin":[220,220],"rotation":335,
+  "points":[[186,215.5],[388,218.8],[388,221.2],[186,224.5]],
+  "fill":{"type":"linear","angle":90,"stops":["#ff6a60","#ff3b30","#b3170f"]},
+  "style":{"glow":{"color":"#ff3b30@0.75","blur":14},"shadow":{"color":"#000000@0.7","blur":8,"dy":5}}},
+ {"op":"add_ellipse","group":"hub","cx":220,"cy":220,"rx":22,
+  "fill":{"type":"conic","stops":["#e6eaef","#5a616b","#f4f6f8","#474d55","#cfd5dc","#5a616b","#e6eaef"]},
+  "stroke":{"color":"#000000@0.7","width":1.5}}]
+```
+Canvas 440×460. İbre sağa bakan ince bir çokgen olarak çizilir, `origin` göbektir, `rotation` değer açısıdır. `count` = (büyük aralık sayısı × ara bölme) + 1; yukarıda 9 × 4 + 1 = 37. Alttaki açık dilime vites ya da birim yazısı koy. Parçalara `group` ver: motor tarafında ibre ve yay ayrı oynar.
+
+**Segmentli yay / LED sırası:** `add_arc` ya da `add_line` + `dash: [dolu, boş]` + `cap: "butt"`. Önce sönük tam sıra (`#ffffff@0.09`), üstüne aynı başlangıçtan daha kısa parlak sıra (renk gradient'i + glow). Vites ışıkları: yeşil → amber → kırmızı.
+
+**Eğik sıra sekmesi:** kırmızı gradient'li `skew: 14` rect + `bevel` 1.5 + italik "P3"; yanına aynı eğimde cam rect içinde etiket ve değer.
+
+**Karbon buton:** `skew: 12` rect, karbon dolgu, 1.5 px gradient stroke, üst yarıda `#ffffff@0.14 → 0` parlama (clip), altta 6 px vurgu şeridi (clip + glow), italik büyük harf yazı ve yumuşak gölge.
 
 ## Derinlik veren katman sırası
 
@@ -89,7 +146,7 @@ Canvas 320×96. Yazı `anchor: "center"` ile gövdenin tam ortasına: dikey orta
 
 **9-slice panel:** aşağıdaki kurallara göre; merkez düz kalmalı.
 
-**HUD mockup:** 1920×1080 canvas, arka plan olarak koyu gradient. Parçaları güvenli alan içinde tut (kenarlardan ≥ 32 px). `preview(background="game")` ile oyun sahnesi üstünde okunuyor mu bak.
+**HUD mockup:** 1920×1080 canvas, arka plan olarak koyu gradient (gerçekçi tarzda üstüne `blur` verilmiş sis elipsi ve radial vinyet). Parçaları güvenli alan içinde tut (kenarlardan ≥ 32 px). `preview(background="game")` ile oyun sahnesi üstünde okunuyor mu bak.
 
 ## 9-slice kuralları (panel, buton, tooltip, bar)
 
@@ -133,6 +190,12 @@ Bir şey beklediğin gibi çıkmadıysa `get_canvas(details=true)` ile gerçek d
 
 **Unreal:** `export_asset(engine="unreal", out_dir=<klasör>)` → `write_engine_helpers("unreal", <klasör>)` → editörde Python ile `import_game_ui.py` çalıştırılır. Texture'lar UI ayarlarıyla gelir; her brush için `Draw As: Box` ve `Margin` (L, T, R, B, 0-1 arası) log'a yazılır. Widget tarafında `UImage` / `UButton` brush'larına bu değerleri gir.
 
+**Hareketli parçalar (gösterge, ibre, dolan yay):** tek PNG yetmez. Elemanlara `group` ver ve `export_layers` kullan: her grup ayrı PNG olur, `<ad>.layout.json` her parçanın x, y, boyut ve `origin` (pivot) değerini verir. İbreyi export etmeden önce `rotation: 0` yap (sağa bakar halde), motor döndürsün.
+- Unreal: ibre `UImage`, `RenderTransformPivot` = pivot / boyut (0-1), `SetRenderTransformAngle(açı)`. Dolan yay için UI material'da radial maske + skaler parametre. Cam panel arkası için `BackgroundBlur` widget'ı.
+- Unity: ibre `RectTransform.pivot` + `localEulerAngles.z = -açı` (Unity saat yönünün tersini pozitif sayar). Dolan yay: `Image.type = Filled`, `fillMethod = Radial360`, `fillAmount`.
+- Roblox: ibre `AnchorPoint` + `Rotation`. Dolan yay için segmentli (dash'li) tasarım seç ve segmentleri ayrı görsel olarak aç/kapat; arka plan bulanıklığı yoktur, camı daha opak yap.
+- Assetto Corsa (CSP Lua app): PNG'leri app klasörüne koy, `ui.transparentWindow` içinde `ui.drawImage` ile çiz. Döndürme ve kırpma fonksiyonlarının adını CSP Lua SDK'sından doğrula, ezberden yazma.
+
 Motor helper dosyaları bu server'da derlenip denenmedi; kullanıcı ilk kullanımda hata görürse hata mesajına göre düzelt.
 
 ## Sık yapılan hatalar
@@ -143,5 +206,8 @@ Motor helper dosyaları bu server'da derlenip denenmedi; kullanıcı ilk kullan�
 - Gölge için kenar payı bırakmamak.
 - Her parçaya glow vermek; çok ince (1 px) açık renk stroke'u büyük boyutta kullanmak.
 - Yazıyı zemine çok yakın tonda bırakmak.
+- Gerçekçi tarzda stilize alışkanlıkları sürdürmek: kalın kontur, her yerde glow, büyük radius, 4-5 renk. Sonuç oyuncak gibi durur.
+- Gösterge ibresini kadranla aynı gruba koymak (motor döndüremez) ya da `origin` vermeden döndürmek (kendi ortasından döner).
+- Eğik parçalarda farklı `skew` açıları kullanmak.
 - Aynı şeyi 6 kere elle çizmek: `duplicate_element` ve `align_elements(distribute=...)` kullan.
 - Karakter portresi, illüstrasyon gibi şeyleri şekillerle çizmeye çalışmak. Onlar bu aracın işi değil: yer tutucu bir çerçeve çiz, kullanıcı görseli verirse `add_image` ile yerleştir.

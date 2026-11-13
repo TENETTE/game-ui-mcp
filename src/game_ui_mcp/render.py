@@ -23,8 +23,10 @@ from .icons import get_icon
 
 SS = 4
 MAX_MASK_PIXELS = 40_000_000
-TEXT_STYLE_KEYS = ("font", "weight", "size", "letter_spacing", "line_height", "uppercase")
-VECTOR_TYPES = {"rect", "ellipse", "polygon", "line", "path", "icon"}
+TEXT_STYLE_KEYS = ("font", "weight", "size", "letter_spacing", "line_height", "uppercase", "italic")
+VECTOR_TYPES = {"rect", "ellipse", "polygon", "line", "path", "icon", "arc", "ticks"}
+LINE_TYPES = {"line", "icon", "arc", "ticks"}
+BLENDS = ("normal", "add", "screen", "multiply", "overlay")
 CUT_K = math.tan(math.pi / 8)
 
 Box = tuple[float, float, float, float]
@@ -210,7 +212,26 @@ def _pattern_cov(spec: dict, kind: str, size: tuple[int, int], origin: tuple[flo
         dx = np.abs((np.mod(rx / cell + 0.5, 1.0) - 0.5) * cell)
         dy = np.abs((np.mod(ry / cell + 0.5, 1.0) - 0.5) * cell)
         return np.clip((lw / 2 - np.minimum(dx, dy)) * k + 0.5, 0, 1)
-    raise ValueError(f"Unknown fill type '{kind}'. Use linear, radial, stripes, dots or grid.")
+    if kind == "carbon":
+        # 2x2 twill weave: alternating cells shaded along x or along y
+        cu, cv = rx / cell, ry / cell
+        fu, fv = np.mod(cu, 1.0), np.mod(cv, 1.0)
+        horizontal = (np.floor(cu) + np.floor(cv)) % 2 == 0
+        shade = np.where(horizontal, fu, fv)
+        return np.clip(0.15 + 0.85 * shade, 0, 1)
+    if kind == "brushed":
+        # brushed metal: fine streaks running along the angle direction
+        seed = zlib.crc32(repr(sorted((str(a), str(b)) for a, b in spec.items())).encode())
+        rng = np.random.default_rng(seed)
+        amount = max(0.0, min(1.0, float(spec.get("amount", 0.5))))
+        span = max(h, w) * 2 + 8
+        fine = rng.normal(0, 1, span * 2)
+        coarse = np.repeat(rng.normal(0, 1, span // 6 + 2), 12)[: span * 2]
+        streak = 0.65 * fine + 0.35 * coarse
+        idx = np.clip((ry * k + span).astype(np.int64), 0, span * 2 - 1)
+        grain = rng.normal(0, 0.25, (h, w))
+        return np.clip(0.5 + (streak[idx] + grain) * 0.22 * amount, 0, 1)
+    raise ValueError(f"Unknown fill type '{kind}'. Use linear, radial, conic, stripes, dots, grid, carbon or brushed.")
 
 
 def paint(mask: Image.Image, spec: Any, box_px: Box, colors: dict, k: float) -> Image.Image | None:
@@ -226,7 +247,7 @@ def paint(mask: Image.Image, spec: Any, box_px: Box, colors: dict, k: float) -> 
     kind = str(spec.get("type", "linear")).lower()
     x0, y0, x1, y1 = box_px
     bw, bh = max(1e-6, x1 - x0), max(1e-6, y1 - y0)
-    if kind in ("linear", "radial"):
+    if kind in ("linear", "radial", "conic"):
         offs, cols = _stops(spec, colors)
         ys, xs = np.mgrid[0:h, 0:w].astype(np.float64)
         xs += 0.5
@@ -236,6 +257,21 @@ def paint(mask: Image.Image, spec: Any, box_px: Box, colors: dict, k: float) -> 
             ca, sa = math.cos(ang), math.sin(ang)
             length = abs(bw * ca) + abs(bh * sa)
             t = ((xs - (x0 + x1) / 2) * ca + (ys - (y0 + y1) / 2) * sa) / max(1e-6, length) + 0.5
+        elif kind == "conic":
+            cx = x0 + bw * float(spec.get("cx", 0.5))
+            cy = y0 + bh * float(spec.get("cy", 0.5))
+            a_from = float(spec.get("from", 0))
+            a_to = float(spec.get("to", a_from + 360))
+            span = a_to - a_from
+            if abs(span) < 1e-6:
+                raise ValueError("conic gradient: 'from' and 'to' angles must differ")
+            ang = np.degrees(np.arctan2(ys - cy, xs - cx))            # 0 = 3 o'clock, clockwise
+            rel = np.mod((ang - a_from) * (1 if span > 0 else -1), 360.0)
+            width = min(360.0, abs(span))
+            t = rel / width
+            if width < 360:
+                dead = 360.0 - width                                   # split the unused sector between both ends
+                t = np.where(rel <= width, t, np.where(rel - width < dead / 2, 1.0, 0.0))
         else:
             cx = x0 + bw * float(spec.get("cx", 0.5))
             cy = y0 + bh * float(spec.get("cy", 0.5))
@@ -245,6 +281,12 @@ def paint(mask: Image.Image, spec: Any, box_px: Box, colors: dict, k: float) -> 
             else:
                 t = np.hypot((xs - cx) / max(1e-6, bw * rad), (ys - cy) / max(1e-6, bh * rad))
         rgba = _ramp(np.clip(t, 0, 1), offs, cols)
+        if spec.get("dither", True):
+            # half-a-level noise before rounding hides 8-bit banding in soft gradients
+            rng = np.random.default_rng(zlib.crc32(repr(spec.get("stops") or spec.get("colors") or "").encode()))
+            rgba[..., :3] += rng.uniform(-0.5, 0.5, (h, w, 1))
+            soft = (rgba[..., 3] > 0.5) & (rgba[..., 3] < 254.5)
+            rgba[..., 3] += np.where(soft, rng.uniform(-0.5, 0.5, (h, w)), 0.0)
     else:
         c1 = np.array(parse_color(spec.get("color", "#ffffff@0.15"), colors), dtype=np.float64)
         c2 = np.array(parse_color(spec.get("color2", spec.get("background", "transparent")), colors), dtype=np.float64)
@@ -296,6 +338,21 @@ def composite(dst: Image.Image, src: Image.Image, ox: int, oy: int, blend: str =
         alpha = np.clip(b[..., 3:4] + s[..., 3:4] * (1 - ba), 0, 255)
         safe = np.where(alpha > 0, alpha / 255.0, 1.0)
         out = np.concatenate([np.clip(rgb / safe, 0, 255), alpha], axis=-1)
+        merged = Image.fromarray((out + 0.5).astype(np.uint8), "RGBA")
+    elif blend in ("screen", "multiply", "overlay"):
+        b = np.asarray(base, dtype=np.float64) / 255.0
+        s = np.asarray(part, dtype=np.float64) / 255.0
+        bc, sc, ba, sa = b[..., :3], s[..., :3], b[..., 3:4], s[..., 3:4]
+        if blend == "multiply":
+            mixed = bc * sc
+        elif blend == "screen":
+            mixed = 1 - (1 - bc) * (1 - sc)
+        else:
+            mixed = np.where(bc <= 0.5, 2 * bc * sc, 1 - 2 * (1 - bc) * (1 - sc))
+        pre = (1 - sa) * bc * ba + (1 - ba) * sc * sa + ba * sa * mixed
+        alpha = ba + sa - ba * sa
+        safe = np.where(alpha > 0, alpha, 1.0)
+        out = np.concatenate([np.clip(pre / safe, 0, 1), alpha], axis=-1) * 255.0
         merged = Image.fromarray((out + 0.5).astype(np.uint8), "RGBA")
     else:
         merged = Image.alpha_composite(base, part)
@@ -351,7 +408,9 @@ class TextLayout:
         self.align = str(el.get("align") or self.h).lower()
         max_width = el.get("max_width")
         fit_width = el.get("fit_width")
-        self.path, self.var_weight = fonts.resolve(self.family, self.weight)
+        italic = bool(el.get("italic", st.get("italic")))
+        self.path, self.var_weight, faux = fonts.resolve(self.family, self.weight, italic)
+        self.skew = float(el.get("skew", 0) or 0) + (12.0 if faux else 0.0)
 
         self._load()
         if fit_width:
@@ -505,8 +564,47 @@ def vector_geometry(el: dict, res: float) -> Geometry:
             raise ValueError("line needs at least 2 points")
         width = max(0.25, float(el.get("width", 2)))
         closed = bool(el.get("closed", False))
-        g.lines = [(pts, closed, width, str(el.get("cap", "round")).lower())]
+        g.lines = _dashed(el, pts, closed, width, str(el.get("cap", "round")).lower())
         x0, y0, x1, y1 = geo.bbox_of([pts])
+        g.box = (x0 - width / 2, y0 - width / 2, x1 + width / 2, y1 + width / 2)
+    elif t == "arc":
+        cx, cy, radius = float(el["cx"]), float(el["cy"]), float(el["radius"])
+        start, end = float(el.get("start_angle", 0)), float(el.get("end_angle", 360))
+        width = max(0.25, float(el.get("thickness", 4)))
+        if radius <= 0:
+            raise ValueError("arc radius must be > 0")
+        if abs(end - start) < 1e-6:
+            raise ValueError("arc start_angle and end_angle must differ")
+        full = abs(end - start) >= 360 - 1e-6
+        pts = geo.arc_path(cx, cy, radius, start, start + 360 if full else end, res)
+        if full:
+            pts = pts[:-1]
+        g.lines = _dashed(el, pts, full, width, str(el.get("cap", "butt")).lower())
+        x0, y0, x1, y1 = geo.bbox_of([pts])
+        g.box = (x0 - width / 2, y0 - width / 2, x1 + width / 2, y1 + width / 2)
+    elif t == "ticks":
+        cx, cy, radius = float(el["cx"]), float(el["cy"]), float(el["radius"])
+        start, end = float(el.get("start_angle", 0)), float(el.get("end_angle", 360))
+        count = int(el.get("count", 11))
+        length = float(el.get("length", 8))
+        width = max(0.25, float(el.get("width", 2)))
+        if count < 2 or radius <= 0 or length <= 0:
+            raise ValueError("ticks need count >= 2, radius > 0 and length > 0")
+        every = int(el.get("every", 1) or 1)
+        skip_every = int(el.get("skip_every", 0) or 0)
+        full = abs(end - start) >= 360 - 1e-6
+        step = (end - start) / (count if full else count - 1)
+        cap = str(el.get("cap", "butt")).lower()
+        for i in range(count):
+            if i % every or (skip_every and i % skip_every == 0):
+                continue
+            a = math.radians(start + step * i)
+            ca, sa = math.cos(a), math.sin(a)
+            g.lines.append(([(cx + radius * ca, cy + radius * sa),
+                             (cx + (radius - length) * ca, cy + (radius - length) * sa)], False, width, cap))
+        if not g.lines:
+            raise ValueError("ticks: every / skip_every removed every tick")
+        x0, y0, x1, y1 = geo.bbox_of([pts for pts, _, _, _ in g.lines])
         g.box = (x0 - width / 2, y0 - width / 2, x1 + width / 2, y1 + width / 2)
     elif t in ("path", "icon"):
         if t == "icon":
@@ -536,6 +634,25 @@ def vector_geometry(el: dict, res: float) -> Geometry:
     else:
         raise ValueError(f"Not a vector element type: {t}")
     return g
+
+
+def _dashed(el: dict, pts: list, closed: bool, width: float, cap: str) -> list:
+    dash = el.get("dash")
+    if not dash:
+        return [(pts, closed, width, cap)]
+    if isinstance(dash, (int, float)):
+        dash = [dash, dash]
+    pieces = geo.dash_polyline(pts, closed, dash, float(el.get("dash_offset", 0) or 0))
+    if not pieces:
+        raise ValueError("dash pattern left nothing to draw")
+    return [(piece, False, width, cap) for piece in pieces]
+
+
+def _skew_tan(el: dict) -> float:
+    skew = float(el.get("skew", 0) or 0)
+    if abs(skew) > 75:
+        raise ValueError("skew must be between -75 and 75 degrees")
+    return math.tan(math.radians(skew))
 
 
 def _inset_rect(rect: tuple, delta: float, res: float) -> list[geo.Point] | None:
@@ -593,16 +710,32 @@ class Renderer:
         """Bounds of the element geometry in canvas units (no effects), after rotation."""
         st = resolve_style(el.get("style"), self.theme)
         box = self._geom_box(el, st)
-        return geo.rotated_bbox(box, float(el.get("rotation", 0) or 0))
+        return geo.rotated_bbox(box, float(el.get("rotation", 0) or 0), self._pivot(el, box))
+
+    @staticmethod
+    def _pivot(el: dict, box: Box) -> tuple[float, float]:
+        """Rotation centre: the element's ``origin`` [x, y] if given, else the middle of its box."""
+        origin = el.get("origin")
+        if origin:
+            try:
+                return float(origin[0]), float(origin[1])
+            except (TypeError, IndexError, ValueError) as exc:
+                raise ValueError("origin must be [x, y]") from exc
+        return (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
 
     # ---- internals
 
     def _geom_box(self, el: dict, st: dict) -> Box:
         t = el["type"]
         if t in VECTOR_TYPES:
-            return vector_geometry(el, 1.0).box
+            box = vector_geometry(el, 1.0).box
+            lean = abs(_skew_tan(el)) * (box[3] - box[1]) / 2
+            return (box[0] - lean, box[1], box[2] + lean, box[3])
         if t == "text":
-            return TextLayout(el, st, self.fonts, 4.0).box_units()
+            layout = TextLayout(el, st, self.fonts, 4.0)
+            box = layout.box_units()
+            lean = abs(math.tan(math.radians(layout.skew))) * (box[3] - box[1]) / 2
+            return (box[0] - lean, box[1], box[2] + lean, box[3])
         if t == "image":
             x, y = float(el.get("x", 0)), float(el.get("y", 0))
             w, h = self._image_size(el)
@@ -656,8 +789,15 @@ class Renderer:
         bw, bh = w * ss, h * ss
         offset = np.array([px0 * ss, py0 * ss], dtype=np.float64)
 
+        lean = _skew_tan(el)
+        mid_y = (g.box[1] + g.box[3]) / 2
+
         def px(pts) -> np.ndarray:
-            return np.asarray(pts, dtype=np.float64) * f - offset
+            arr = np.asarray(pts, dtype=np.float64)
+            if lean:
+                arr = arr.copy()
+                arr[:, 0] += (mid_y - arr[:, 1]) * lean
+            return arr * f - offset
 
         def fill(polys) -> np.ndarray:
             return raster.fill_polygons([px(p) for p in polys], bw, bh, "evenodd")
@@ -678,7 +818,7 @@ class Renderer:
                 shape = shape & ~(lines(g.knock) & interior)
 
         smask = None
-        if stroke and el["type"] not in ("line", "icon"):
+        if stroke and el["type"] not in LINE_TYPES:
             sw, align = stroke["width"], stroke["align"]
             if g.kind in ("rect", "ellipse"):
                 grow = {"inside": 0.0, "center": sw / 2, "outside": sw}[align]
@@ -708,8 +848,9 @@ class Renderer:
         stroke_img = Image.fromarray(smask, "L") if smask is not None else None
         rot = float(el.get("rotation", 0) or 0)
         if rot:
-            cx = ((g.box[0] + g.box[2]) / 2 * k - px0) * ss
-            cy = ((g.box[1] + g.box[3]) / 2 * k - py0) * ss
+            pvx, pvy = self._pivot(el, g.box)
+            cx = (pvx * k - px0) * ss
+            cy = (pvy * k - py0) * ss
             shape_img = shape_img.rotate(-rot, resample=Image.BICUBIC, center=(cx, cy))
             if stroke_img is not None:
                 stroke_img = stroke_img.rotate(-rot, resample=Image.BICUBIC, center=(cx, cy))
@@ -734,10 +875,21 @@ class Renderer:
         if stroke:
             smask = Image.new("L", big, 0)
             layout.draw(ImageDraw.Draw(smask), px0 * ss, py0 * ss, max(1, int(round(stroke["width"] * k * ss))))
+        bx0, by0, bx1, by1 = layout.box_px
+        if layout.skew:
+            lean = math.tan(math.radians(layout.skew))
+            mid = (by0 + by1) / 2 - py0 * ss
+            matrix = (1, lean, -lean * mid, 0, 1, 0)       # output (x, y) samples input (x + lean * (y - mid), y)
+            shape = shape.transform(big, Image.AFFINE, matrix, resample=Image.BICUBIC)
+            if smask is not None:
+                smask = smask.transform(big, Image.AFFINE, matrix, resample=Image.BICUBIC)
         rot = float(el.get("rotation", 0) or 0)
         if rot:
-            bx0, by0, bx1, by1 = layout.box_px
-            cx, cy = (bx0 + bx1) / 2 - px0 * ss, (by0 + by1) / 2 - py0 * ss
+            if el.get("origin"):
+                pvx, pvy = self._pivot(el, (0, 0, 0, 0))
+                cx, cy = (pvx * k - px0) * ss, (pvy * k - py0) * ss
+            else:
+                cx, cy = (bx0 + bx1) / 2 - px0 * ss, (by0 + by1) / 2 - py0 * ss
             shape = shape.rotate(-rot, resample=Image.BICUBIC, center=(cx, cy))
             if smask is not None:
                 smask = smask.rotate(-rot, resample=Image.BICUBIC, center=(cx, cy))
@@ -780,7 +932,11 @@ class Renderer:
         layer.paste(img, (ox, oy))
         rot = float(el.get("rotation", 0) or 0)
         if rot:
-            layer = layer.rotate(-rot, resample=Image.BICUBIC, center=(ox + tw / 2, oy + th / 2))
+            centre = (ox + tw / 2, oy + th / 2)
+            if el.get("origin"):
+                pvx, pvy = self._pivot(el, (0, 0, 0, 0))
+                centre = (pvx * k - px0, pvy * k - py0)
+            layer = layer.rotate(-rot, resample=Image.BICUBIC, center=centre)
         return layer.getchannel("A"), layer
 
     def shape_mask(self, el: dict, region) -> Image.Image:
@@ -810,11 +966,14 @@ class Renderer:
                 stroke["width"] / 2 if stroke["align"] == "center" else 0.0)
         gbox = (box[0] - grow, box[1] - grow, box[2] + grow, box[3] + grow)
         rot = float(el.get("rotation", 0) or 0)
-        pad = fx.pad() + (3 if t == "text" else 1)
+        soften = max(0.0, float(st.get("blur", 0) or 0))
+        pad = fx.pad() + soften * 1.5 + (3 if t == "text" else 1)
+        pivot = self._pivot(el, box)
         if rot:
             # the unrotated shape is drawn first, so the region must hold every orientation
-            half = math.hypot(gbox[2] - gbox[0], gbox[3] - gbox[1]) / 2
-            cx, cy = (gbox[0] + gbox[2]) / 2, (gbox[1] + gbox[3]) / 2
+            half = max(math.hypot(px_ - pivot[0], py_ - pivot[1])
+                       for px_ in (gbox[0], gbox[2]) for py_ in (gbox[1], gbox[3]))
+            cx, cy = pivot
             region = self._region((cx - half, cy - half, cx + half, cy + half), pad, clip=False)
         else:
             region = self._region(gbox, pad)
@@ -834,7 +993,7 @@ class Renderer:
         else:
             raise ValueError(f"Unknown element type '{t}'")
 
-        fill_spec = st.get("fill", "#ffffff" if (stroke is None or t in ("line", "icon", "text")) else None)
+        fill_spec = st.get("fill", "#ffffff" if (stroke is None or t in LINE_TYPES or t == "text") else None)
         has_fill = color_layer is not None or not _is_none(fill_spec)
         if has_fill and smask is not None:
             sil = ImageChops.lighter(shape, smask)
@@ -845,7 +1004,7 @@ class Renderer:
         else:
             return None
 
-        rbox_plain = geo.rotated_bbox(box, float(el.get("rotation", 0) or 0))
+        rbox_plain = geo.rotated_bbox(box, rot, pivot)
         box_px = (rbox_plain[0] * k - px0, rbox_plain[1] * k - py0, rbox_plain[2] * k - px0, rbox_plain[3] * k - py0)
         layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
 
@@ -890,6 +1049,10 @@ class Renderer:
         if stroke_img is not None:
             layer = Image.alpha_composite(layer, stroke_img)
 
+        if soften > 0:
+            # blur in premultiplied space so transparent pixels do not bleed dark fringes
+            layer = layer.convert("RGBa").filter(ImageFilter.GaussianBlur(soften * k / 2)).convert("RGBA")
+
         clip_id = el.get("clip")
         if clip_id:
             target = self._by_id.get(clip_id)
@@ -900,8 +1063,8 @@ class Renderer:
         if opacity < 1:
             layer.putalpha(layer.getchannel("A").point(lambda v: int(v * opacity + 0.5)))
         blend = str(st.get("blend", "normal")).lower()
-        if blend not in ("normal", "add"):
-            raise ValueError("style.blend must be 'normal' or 'add'")
+        if blend not in BLENDS:
+            raise ValueError(f"style.blend must be one of {', '.join(BLENDS)}")
         return layer, px0, py0, blend
 
 

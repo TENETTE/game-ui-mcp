@@ -12,7 +12,7 @@ from typing import Any
 from .fonts import FontLibrary
 from .render import Renderer
 
-ELEMENT_TYPES = ("rect", "ellipse", "polygon", "line", "path", "text", "icon", "image")
+ELEMENT_TYPES = ("rect", "ellipse", "polygon", "line", "path", "text", "icon", "image", "arc", "ticks")
 MAX_CANVAS = 8192
 MAX_UNDO = 40
 
@@ -279,6 +279,8 @@ class Store:
             el["cx"], el["cy"] = float(el["cx"]) + dx, float(el["cy"]) + dy
         else:
             el["x"], el["y"] = float(el.get("x", 0)) + dx, float(el.get("y", 0)) + dy
+        if el.get("origin"):
+            el["origin"] = [float(el["origin"][0]) + dx, float(el["origin"][1]) + dy]
 
     def move_elements(self, canvas: dict, elements: list[dict], dx: float, dy: float, checkpoint: bool = True) -> None:
         if checkpoint:
@@ -359,7 +361,7 @@ class Store:
             for name in self.theme["styles"]:
                 st = resolve_style(name, self.theme)
                 shape_style = {k: v for k, v in st.items() if k not in ("font", "weight", "size", "letter_spacing",
-                                                                       "line_height", "uppercase")}
+                                                                       "line_height", "uppercase", "italic")}
                 el = {"id": "p", "type": "rect", "x": 2, "y": 2, "width": 12, "height": 12, "style": shape_style}
                 probe["elements"] = [el]
                 Renderer(probe, self.theme, self.fonts).render()

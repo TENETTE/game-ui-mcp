@@ -296,12 +296,61 @@ def bbox_of(point_lists: Iterable[Iterable[Point]]) -> tuple[float, float, float
     return (min(xs), min(ys), max(xs), max(ys))
 
 
-def rotated_bbox(box: tuple[float, float, float, float], degrees: float) -> tuple[float, float, float, float]:
-    """Axis-aligned bounds of ``box`` rotated clockwise by ``degrees`` around its centre."""
+def arc_path(cx: float, cy: float, radius: float, start_deg: float, end_deg: float, res: float = 4.0) -> list[Point]:
+    """Points along a circular arc. Angles in degrees, 0 = 3 o'clock, clockwise (y points down)."""
+    return _arc_points(cx, cy, radius, radius, math.radians(start_deg), math.radians(end_deg), res)
+
+
+def dash_polyline(points: Sequence[Point], closed: bool, dash: Sequence[float], offset: float = 0.0) -> list[list[Point]]:
+    """Cut a polyline into dashes. ``dash`` is [on, off, on, off, ...] lengths."""
+    pattern = [max(0.01, float(v)) for v in dash]
+    if len(pattern) % 2:
+        pattern = pattern * 2
+    pts = list(points) + ([points[0]] if closed and len(points) > 2 else [])
+    total = sum(pattern)
+    pos = offset % total
+    idx = 0
+    while pos >= pattern[idx]:
+        pos -= pattern[idx]
+        idx = (idx + 1) % len(pattern)
+    remaining = pattern[idx] - pos
+    drawing = idx % 2 == 0
+    out: list[list[Point]] = []
+    cur: list[Point] = [pts[0]] if drawing else []
+    for a, b in zip(pts, pts[1:]):
+        seg = math.dist(a, b)
+        if seg < 1e-9:
+            continue
+        travelled = 0.0
+        while seg - travelled > remaining + 1e-9:
+            travelled += remaining
+            t = travelled / seg
+            cut = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t)
+            if drawing:
+                cur.append(cut)
+                if len(cur) >= 2:
+                    out.append(cur)
+                cur = []
+            else:
+                cur = [cut]
+            idx = (idx + 1) % len(pattern)
+            remaining = pattern[idx]
+            drawing = idx % 2 == 0
+        remaining -= seg - travelled
+        if drawing:
+            cur.append(b)
+    if drawing and len(cur) >= 2:
+        out.append(cur)
+    return out
+
+
+def rotated_bbox(box: tuple[float, float, float, float], degrees: float,
+                 pivot: Point | None = None) -> tuple[float, float, float, float]:
+    """Axis-aligned bounds of ``box`` rotated clockwise by ``degrees`` around ``pivot`` (default: its centre)."""
     if not degrees:
         return box
     x0, y0, x1, y1 = box
-    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    cx, cy = pivot if pivot is not None else ((x0 + x1) / 2, (y0 + y1) / 2)
     a = math.radians(degrees)
     c, s = math.cos(a), math.sin(a)
     xs, ys = [], []

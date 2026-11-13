@@ -48,13 +48,21 @@ to any color for alpha, e.g. "#ffffff@0.2", "$primary@0.6".
 Fill: a color, or a gradient/pattern object:
   {"type":"linear","angle":90,"stops":[[0,"#3b82f6"],[1,"#1d4ed8"]]}   (angle 0 = left->right, 90 = top->bottom)
   {"type":"radial","cx":0.5,"cy":0.5,"r":0.5,"stops":[...]}            (cx/cy/r relative to the element box)
+  {"type":"conic","from":135,"to":405,"stops":[...]}                   (sweep around the box centre; angles as in add_arc)
   {"type":"stripes"|"dots"|"grid","color":"#fff@0.08","color2":"transparent","size":8,"angle":45}
+  {"type":"carbon","color":"#2a2d33","color2":"#0d0e10","size":4}      (carbon-fibre weave)
+  {"type":"brushed","color":"#9aa3ad","color2":"#5c646e","angle":0,"amount":0.5}   (brushed metal)
 
 Style object (every key optional; `style` may also be a theme style name, or {"use":"name", ...overrides}):
-  fill, stroke {color, width, align: inside|center|outside}, opacity, blend: normal|add, noise: 0-1,
+  fill, stroke {color, width, align: inside|center|outside}, opacity, noise: 0-1, blur: px (softens the
+  whole element: light blooms, haze), blend: normal|add|screen|multiply|overlay,
   shadow {color, blur, dx, dy, spread, knockout}, glow {color, blur, strength, spread},
   inner_shadow {color, blur, dx, dy}, inner_glow {color, blur}, bevel {size, highlight, shadow}.
   shadow / glow / inner_shadow / inner_glow also accept a list for stacked effects.
+
+Angles (add_arc, add_ticks, conic): degrees, 0 = 3 o'clock, clockwise. A classic gauge sweeps 135 -> 405.
+Any element takes rotation (degrees clockwise) and origin [x, y] as the pivot (default: its centre) -
+e.g. a needle pivoting on the gauge hub. Shapes and text take skew (degrees) for slanted, italic looks.
 
 Always call `preview` after a group of changes and actually inspect the image before exporting.
 """
@@ -161,7 +169,7 @@ def _prepare(etype: str, args: dict) -> dict:
     color = props.pop("color", None)
     if color is not None and fill is None:
         fill = color
-    if etype in ("line", "icon"):
+    if etype in ("line", "icon", "arc", "ticks"):
         stroke = None
     style = _merge_style(props.pop("style", None), fill, stroke)
     if style is not None:
@@ -309,19 +317,23 @@ def delete_canvas(canvas: str):
 @tool
 def add_rect(canvas: str, x: float, y: float, width: float, height: float, radius: float | list[float] = 0,
              corner: str = "round", fill: str | dict | None = None, stroke: str | dict | None = None,
-             style: str | dict | None = None, rotation: float = 0, id: str | None = None,
+             style: str | dict | None = None, rotation: float = 0, skew: float = 0,
+             origin: list[float] | None = None, id: str | None = None,
              group: str | None = None, clip: str | None = None):
     """Add a rectangle (panels, buttons, bars, slots, dividers).
 
     x, y: top-left corner. radius: one number or [top-left, top-right, bottom-right, bottom-left].
     corner: "round" (default) or "cut" (chamfered corners, sci-fi / military look).
     fill / stroke: shortcuts for style.fill / style.stroke (see server instructions for the style object).
+    skew: slant in degrees (top edge moves right) -> parallelogram tabs and banners, racing-style.
+    rotation turns it clockwise around origin [x, y] (default: its centre).
     clip: id of another element whose shape masks this one (e.g. a bar fill clipped to its rounded track).
     Default look with no fill, stroke or style is solid white.
     """
     return _add(canvas, "rect", dict(x=x, y=y, width=width, height=height, radius=radius or None,
                                      corner=None if corner == "round" else corner, fill=fill, stroke=stroke,
-                                     style=style, rotation=rotation or None, id=id, group=group, clip=clip))
+                                     style=style, rotation=rotation or None, skew=skew or None, origin=origin,
+                                     id=id, group=group, clip=clip))
 
 
 @tool
@@ -337,15 +349,19 @@ def add_ellipse(canvas: str, cx: float, cy: float, rx: float, ry: float | None =
 
 @tool
 def add_line(canvas: str, points: list[list[float]], width: float = 2, color: str | dict | None = None,
-             cap: str = "round", closed: bool = False, style: str | dict | None = None,
+             cap: str = "round", closed: bool = False, dash: list[float] | None = None,
+             style: str | dict | None = None,
              id: str | None = None, group: str | None = None, clip: str | None = None):
     """Add a line or polyline through points [[x, y], ...] (dividers, accents, brackets, ticks).
 
     width: thickness. cap: "round" or "butt". color may be a color or a gradient object.
+    dash [on, off] cuts it into segments: with cap "butt" and a thick width that gives LED rows,
+    shift lights and segmented bars (draw a dim full row first, then a shorter bright one on top).
     style can add shadow/glow/opacity; style.stroke does not apply to lines.
     """
     return _add(canvas, "line", dict(points=points, width=width, cap=None if cap == "round" else cap,
-                                     closed=closed or None, color=color, style=style, id=id, group=group, clip=clip))
+                                     closed=closed or None, dash=dash, color=color, style=style, id=id,
+                                     group=group, clip=clip))
 
 
 @tool
@@ -353,25 +369,27 @@ def add_polygon(canvas: str, points: list[list[float]] | None = None, cx: float 
                 cy: float | None = None, radius: float | None = None, sides: int = 6,
                 inner_radius: float | None = None, point_rotation: float = 0, corner_radius: float = 0,
                 fill: str | dict | None = None, stroke: str | dict | None = None,
-                style: str | dict | None = None, rotation: float = 0, id: str | None = None,
-                group: str | None = None, clip: str | None = None):
+                style: str | dict | None = None, rotation: float = 0, origin: list[float] | None = None,
+                id: str | None = None, group: str | None = None, clip: str | None = None):
     """Add a polygon. Either give explicit points [[x, y], ...], or a regular shape with
     cx, cy, radius, sides (3 = triangle, 6 = hexagon, ...). The first vertex points up;
     point_rotation turns it. inner_radius makes a star (sides = number of points).
-    corner_radius rounds the corners."""
+    corner_radius rounds the corners. rotation + origin [x, y] spin it around a pivot
+    (a gauge needle: thin polygon, origin at the hub)."""
     if not points and (cx is None or cy is None or radius is None):
         raise ValueError("Give either points, or cx + cy + radius (+ sides) for a regular polygon")
     return _add(canvas, "polygon", dict(points=points, cx=cx, cy=cy, radius=radius,
                                         sides=None if points else sides, inner_radius=inner_radius,
                                         point_rotation=point_rotation or None, corner_radius=corner_radius or None,
                                         fill=fill, stroke=stroke, style=style, rotation=rotation or None,
-                                        id=id, group=group, clip=clip))
+                                        origin=origin, id=id, group=group, clip=clip))
 
 
 @tool
 def add_path(canvas: str, d: str, x: float = 0, y: float = 0, scale: float = 1,
              fill: str | dict | None = None, stroke: str | dict | None = None,
-             style: str | dict | None = None, rotation: float = 0, id: str | None = None,
+             style: str | dict | None = None, rotation: float = 0, skew: float = 0,
+             origin: list[float] | None = None, id: str | None = None,
              group: str | None = None, clip: str | None = None):
     """Add a free-form shape from SVG path data (commands M L H V C S Q T A Z, absolute or relative).
 
@@ -381,7 +399,125 @@ def add_path(canvas: str, d: str, x: float = 0, y: float = 0, scale: float = 1,
     """
     return _add(canvas, "path", dict(d=d, x=x or None, y=y or None, scale=None if scale == 1 else scale,
                                      fill=fill, stroke=stroke, style=style, rotation=rotation or None,
-                                     id=id, group=group, clip=clip))
+                                     skew=skew or None, origin=origin, id=id, group=group, clip=clip))
+
+
+@tool
+def add_arc(canvas: str, cx: float, cy: float, radius: float, start_angle: float, end_angle: float,
+            thickness: float = 6, color: str | dict | None = None, cap: str = "butt",
+            dash: list[float] | None = None, style: str | dict | None = None, id: str | None = None,
+            group: str | None = None, clip: str | None = None):
+    """Add a circular arc (gauge tracks and fills, rev bands, circular progress, radar rings).
+
+    radius is the centre line of the band, thickness its width. Angles in degrees, 0 = 3 o'clock,
+    clockwise; a classic gauge sweeps from 135 to 405. end - start = 360 gives a full ring.
+    cap: "butt" (flat ends) or "round". dash [on, off] splits it into segments (LED bands, segmented bars).
+    color may be a conic gradient with the same from/to angles, e.g. a rev band going green -> red:
+      {"type":"conic","from":135,"to":405,"stops":[[0,"#22c55e"],[0.7,"#facc15"],[1,"#ef4444"]]}
+    For a value fill, draw the track first, then a second arc ending at start + (end - start) * value.
+    """
+    return _add(canvas, "arc", dict(cx=cx, cy=cy, radius=radius, start_angle=start_angle, end_angle=end_angle,
+                                    thickness=thickness, color=color, cap=None if cap == "butt" else cap,
+                                    dash=dash, style=style, id=id, group=group, clip=clip))
+
+
+def _ticks(c: dict, args: dict) -> dict:
+    """Create minor ticks, major ticks and labels for a dial. The caller owns the undo checkpoint."""
+    st = store()
+    a = {k: _maybe_json(v) for k, v in args.items() if v is not None}
+    try:
+        cx, cy, radius = float(a["cx"]), float(a["cy"]), float(a["radius"])
+        start, end, count = float(a["start_angle"]), float(a["end_angle"]), int(a["count"])
+    except KeyError as exc:
+        raise ValueError(f"add_ticks is missing {exc}") from exc
+    length, width = float(a.get("length", 8)), float(a.get("width", 2))
+    major_every = int(a.get("major_every", 0) or 0)
+    major_length = float(a.get("major_length", length * 1.8))
+    major_width = float(a.get("major_width", width * 1.5))
+    base = slugify(a["id"], "ticks") if a.get("id") else None
+    if base is None:
+        counters = c.setdefault("counters", {})
+        counters["dial"] = counters.get("dial", 0) + 1
+        base = f"dial{counters['dial']}"
+    group = a.get("group") or base
+    common = dict(cx=cx, cy=cy, radius=radius, start_angle=start, end_angle=end, count=count, group=group,
+                  clip=a.get("clip"), cap=a.get("cap"))
+    created = []
+    minor = dict(common, length=length, width=width, id=f"{base}_minor", color=a.get("color"), style=a.get("style"))
+    if major_every > 1:
+        minor["skip_every"] = major_every
+    if major_every != 1:
+        el, _ = st.add_element(c, "ticks", _prepare("ticks", minor), checkpoint=False)
+        created.append(el["id"])
+    if major_every >= 1:
+        major = dict(common, length=major_length, width=major_width, every=major_every, id=f"{base}_major",
+                     color=a.get("major_color", a.get("color")), style=a.get("style"))
+        el, _ = st.add_element(c, "ticks", _prepare("ticks", major), checkpoint=False)
+        created.append(el["id"])
+    warnings: list[str] = []
+    labels = a.get("labels")
+    if labels:
+        import math
+        every = major_every if major_every >= 1 else 1
+        full = abs(end - start) >= 360 - 1e-6
+        positions = [i for i in range(count) if i % every == 0]
+        if len(labels) != len(positions):
+            raise ValueError(f"labels: got {len(labels)} but there are {len(positions)} "
+                             f"{'major ' if major_every >= 1 else ''}ticks to label")
+        size = float(a.get("label_size", 14))
+        label_radius = float(a.get("label_radius", radius - (major_length if major_every >= 1 else length) - size * 0.95))
+        step = (end - start) / (count if full else count - 1)
+        for n, (i, text) in enumerate(zip(positions, labels)):
+            ang = math.radians(start + step * i)
+            label = dict(text=str(text), x=round(cx + label_radius * math.cos(ang), 2),
+                         y=round(cy + label_radius * math.sin(ang), 2), anchor="center", size=size,
+                         font=a.get("label_font"), weight=a.get("label_weight"), italic=a.get("label_italic"),
+                         color=a.get("label_color", a.get("color")), id=f"{base}_label{n}", group=group)
+            el, warn = st.add_element(c, "text", _prepare("text", label), checkpoint=False)
+            warnings += warn
+            created.append(el["id"])
+    out: dict = {"group": group, "created": created}
+    if warnings:
+        out["warnings"] = sorted(set(warnings))
+    return out
+
+
+@tool
+def add_ticks(canvas: str, cx: float, cy: float, radius: float, start_angle: float, end_angle: float, count: int,
+              length: float = 8, width: float = 2, color: str | dict | None = None, major_every: int = 0,
+              major_length: float | None = None, major_width: float | None = None,
+              major_color: str | dict | None = None, labels: list[str] | None = None,
+              label_radius: float | None = None, label_size: float = 14, label_font: str | None = None,
+              label_weight: int | str | None = None, label_italic: bool | None = None,
+              label_color: str | dict | None = None, style: str | dict | None = None,
+              id: str | None = None, group: str | None = None):
+    """Add dial tick marks (speedometer, tachometer, compass, clock) in one call.
+
+    `count` ticks are spread evenly from start_angle to end_angle (both ends included), each drawn from
+    `radius` inwards by `length`. Angles: 0 = 3 o'clock, clockwise; gauges usually run 135 -> 405.
+    major_every=N makes every Nth tick a major tick (longer / thicker / own color); 0 = all the same.
+    labels: one string per major tick (or per tick when there are no majors), placed upright at
+    label_radius (default: just inside the ticks). Example, a 0-8 x1000 rpm dial with 4 minor steps
+    between numbers: count=33, major_every=4, labels=["0","1","2","3","4","5","6","7","8"].
+    Creates elements "<id>_minor", "<id>_major", "<id>_label0..N" in one group, so move_elements(group=...)
+    and delete_elements(group=...) treat the dial as one piece.
+    """
+    st = store()
+    c = st.get(canvas)
+    st.checkpoint(c)
+    try:
+        result = _ticks(c, dict(cx=cx, cy=cy, radius=radius, start_angle=start_angle, end_angle=end_angle, count=count,
+                                length=length, width=width, color=color, major_every=major_every,
+                                major_length=major_length, major_width=major_width, major_color=major_color,
+                                labels=labels, label_radius=label_radius, label_size=label_size,
+                                label_font=label_font, label_weight=label_weight, label_italic=label_italic,
+                                label_color=label_color, style=style, id=id, group=group))
+    except Exception:
+        st.drop_checkpoint(c)
+        st.save_canvas(c)
+        raise
+    st.save_canvas(c)
+    return result
 
 
 @tool
@@ -389,8 +525,9 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
              weight: int | str | None = None, color: str | dict | None = None, anchor: str = "top-left",
              align: str | None = None, max_width: float | None = None, fit_width: float | None = None,
              line_height: float | None = None, letter_spacing: float | None = None,
-             uppercase: bool | str | None = None, stroke: str | dict | None = None,
-             style: str | dict | None = None, rotation: float = 0, id: str | None = None,
+             uppercase: bool | str | None = None, italic: bool | None = None, skew: float = 0,
+             stroke: str | dict | None = None, style: str | dict | None = None, rotation: float = 0,
+             origin: list[float] | None = None, id: str | None = None,
              group: str | None = None, clip: str | None = None):
     """Add text.
 
@@ -402,14 +539,17 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
     color: color or gradient. stroke: outline drawn behind the glyphs, e.g. {"color":"#000","width":3}.
     max_width: wrap lines at this width. fit_width: shrink the size until the text fits this width.
     letter_spacing: extra px between letters. uppercase: true, or "tr" for Turkish i -> İ rules.
+    italic: use the family's italic (Barlow Condensed has one); other fonts are slanted automatically.
+    skew: extra slant in degrees.
     style may carry shadow / glow / opacity and text defaults (font, weight, size, letter_spacing).
     The result's bbox_xywh tells you how much room the text really takes.
     """
     return _add(canvas, "text", dict(text=text, x=x, y=y, size=size, font=font, weight=weight, color=color,
                                      anchor=None if anchor == "top-left" else anchor, align=align,
                                      max_width=max_width, fit_width=fit_width, line_height=line_height,
-                                     letter_spacing=letter_spacing, uppercase=uppercase or None, stroke=stroke,
-                                     style=style, rotation=rotation or None, id=id, group=group, clip=clip))
+                                     letter_spacing=letter_spacing, uppercase=uppercase or None,
+                                     italic=italic or None, skew=skew or None, stroke=stroke, style=style,
+                                     rotation=rotation or None, origin=origin, id=id, group=group, clip=clip))
 
 
 @tool
@@ -449,7 +589,7 @@ def add_image(canvas: str, path: str, x: float, y: float, width: float | None = 
 @tool
 def update_element(canvas: str, id: str, props: dict):
     """Change properties of an element. `props` uses the same names as the add_* tools
-    (x, y, width, radius, text, size, points, rotation, group, clip, visible, ...).
+    (x, y, width, radius, text, size, points, rotation, origin, skew, dash, group, clip, visible, ...).
     A "style" object is merged into the existing style key by key; set a key to null to remove it.
     Shortcuts "fill", "stroke" and "color" work here too. Example:
     {"width": 240, "style": {"glow": {"color": "$accent", "blur": 16}, "shadow": null}}"""
@@ -598,6 +738,7 @@ def align_elements(canvas: str, ids: list[str], align: str | None = None, distri
 
 
 _BATCH_ADD = {"add_rect": "rect", "add_ellipse": "ellipse", "add_line": "line", "add_polygon": "polygon",
+              "add_arc": "arc",
               "add_path": "path", "add_text": "text", "add_icon": "icon", "add_image": "image"}
 
 
@@ -606,8 +747,8 @@ def batch(canvas: str, operations: list[dict]):
     """Run many drawing operations in one call (much faster than one tool call per shape).
 
     Each operation is {"op": "<tool name>", ...the same arguments that tool takes, without canvas}.
-    Supported ops: add_rect, add_ellipse, add_line, add_polygon, add_path, add_text, add_icon, add_image,
-    update_element, delete_elements, move_elements, reorder_element, duplicate_element.
+    Supported ops: add_rect, add_ellipse, add_line, add_polygon, add_path, add_arc, add_ticks, add_text,
+    add_icon, add_image, update_element, delete_elements, move_elements, reorder_element, duplicate_element.
     Give elements explicit "id"s so later operations (clip, update, reorder) can refer to them.
     The batch is atomic: if any operation fails nothing is changed, and the error names the failing op.
     """
@@ -630,6 +771,8 @@ def batch(canvas: str, operations: list[dict]):
                         op_args["path"] = str(Path(op_args["path"]).expanduser())
                     el, warnings = st.add_element(c, etype, _prepare(etype, op_args), checkpoint=False)
                     results.append(_summary(st, c, el, warnings))
+                elif op == "add_ticks":
+                    results.append(_ticks(c, op_args))
                 elif op == "update_element":
                     el = st.find(c, op_args["id"])
                     warnings = st.update_element(c, el, _prepare_update(el, op_args.get("props", {})), checkpoint=False)
@@ -709,7 +852,9 @@ def get_theme():
 
 @tool
 def list_fonts(include_system: bool = False):
-    """List available font families. Bundled: Inter (clean UI), Rajdhani and Orbitron (sci-fi/tech),
+    """List available font families. Bundled: Inter (clean, modern AAA menus), Barlow Condensed (motorsport /
+    realistic HUD, has italics), Bebas Neue (tall display caps), Michroma (wide dashboard lettering),
+    JetBrains Mono (fixed-width digits for timers and telemetry), Rajdhani and Orbitron (sci-fi/tech),
     Cinzel (fantasy/medieval), Fredoka (rounded, casual/cartoon), Bangers (comic/arcade).
     include_system=true also scans fonts installed on this computer. Extra .ttf/.otf files dropped
     into the workspace "fonts" folder are picked up as well."""
@@ -928,6 +1073,76 @@ def export_png(canvas: str, path: str | None = None, scales: list[float] | None 
         files.append({"file": str(out), "scale": scale, "width": img.width, "height": img.height,
                       "trim_offset": list(offset)})
     result: dict = {"files": files}
+    if warnings:
+        result["warnings"] = sorted(set(warnings))
+    return result
+
+
+@tool
+def export_layers(canvas: str, out_dir: str | None = None, name: str | None = None,
+                  groups: list[str] | None = None, scales: list[float] | None = None,
+                  trim: bool = True, padding: int = 2):
+    """Split one canvas into separate PNGs, one per element group, plus a layout JSON that says where
+    each piece sits. Use it when the engine must animate parts independently: a gauge (dial / needle /
+    value arc), a HUD mockup (each widget), a button (background / icon).
+
+    Give elements a `group` while drawing. Elements without a group go to a layer called "base".
+    groups: export only these (default: all, in draw order). trim crops each layer to its pixels and
+    records its x, y in the layout, so the engine can place it exactly.
+    Writes "<name>_<group>.png" and "<name>.layout.json":
+      {"canvas": {"width", "height"}, "layers": [{"name", "file", "x", "y", "width", "height", "order"}]}
+    (x, y, width, height in canvas units at 1x; rotating parts list their "origin" pivot too).
+    """
+    st = store()
+    c = st.get(canvas)
+    folder = _out_dir(out_dir, "layers")
+    base = slugify(name or c["id"], "layers")
+    order: list[str] = []
+    members: dict[str, list[dict]] = {}
+    for el in c["elements"]:
+        if not el.get("visible", True):
+            continue
+        key = el.get("group") or "base"
+        if key not in members:
+            members[key] = []
+            order.append(key)
+        members[key].append(el)
+    wanted = groups or order
+    for g in wanted:
+        if g not in members:
+            raise ValueError(f"No visible elements in group '{g}'. Groups: {', '.join(order) or '(none)'}")
+    layers = []
+    warnings: list[str] = []
+    scale_list = [float(v) for v in (scales or [1])]
+    for g in wanted:
+        ids = {e["id"] for e in members[g]}
+        entry: dict = {"name": g, "order": order.index(g), "elements": sorted(ids)}
+        pivots = [e["origin"] for e in members[g] if e.get("origin")]
+        if pivots:
+            entry["origin"] = pivots[0]
+        files = []
+        for scale in scale_list:
+            if not 0.1 <= scale <= 8:
+                raise ValueError("scale must be between 0.1 and 8")
+            r = st.renderer(c, scale)
+            img = r.render(include_background=False, only=ids)
+            warnings += r.warnings
+            offset = (0, 0)
+            if trim:
+                img, offset = ex.trim(img, int(round(padding * scale)))
+            filename = f"{base}_{slugify(g, 'layer')}{_scale_suffix(scale)}.png"
+            img.save(folder / filename)
+            files.append({"file": filename, "scale": scale, "pixel_width": img.width, "pixel_height": img.height})
+            if scale == scale_list[0]:
+                entry.update(file=filename, x=_round(offset[0] / scale), y=_round(offset[1] / scale),
+                             width=_round(img.width / scale), height=_round(img.height / scale))
+        entry["files"] = files
+        layers.append(entry)
+    layout = {"canvas": {"name": c["id"], "width": c["width"], "height": c["height"]}, "layers": layers}
+    layout_path = folder / f"{base}.layout.json"
+    ex.write_json(layout_path, layout)
+    result: dict = {"folder": str(folder), "layout": str(layout_path),
+                    "layers": [{k: v for k, v in layer.items() if k != "elements"} for layer in layers]}
     if warnings:
         result["warnings"] = sorted(set(warnings))
     return result
