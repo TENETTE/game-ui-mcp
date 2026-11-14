@@ -58,6 +58,9 @@ def test_heavy_4k_500_elements_50_languages(ws):
         assert img.size == (3840, 2160)
         s.export_png("big", path=str(ws / f"big_{run}.png"))
     assert len(set(hashes)) == 1, "renders differ between runs"
-    # shortcut: review once - it re-renders the canvas per text element (~25 s here), see README
-    assert "no glyph" not in str(s.review_canvas("big"))
+    for _ in range(3):
+        t0 = time.perf_counter()
+        assert "no glyph" not in str(s.review_canvas("big"))
+        assert time.perf_counter() - t0 < 15, "review_canvas got slow again (was ~3 s, 28 s before the fix)"
+
     print(f"4K render seconds per run: {[round(t, 2) for t in times]}")

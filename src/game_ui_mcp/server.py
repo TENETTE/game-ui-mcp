@@ -1880,6 +1880,20 @@ def review_canvas(canvas: str, min_contrast: float = 4.5, min_text_size: float =
     # text size + contrast against what is actually behind each text
     cs = min(1.0, 900.0 / max(c["width"], c["height"]))
     with_all = None
+    boxes = {}
+    for e in c["elements"]:
+        try:
+            boxes[e["id"]] = r.element_box(e)
+        except ValueError:
+            pass
+    # The background of a text only needs the elements near it, not a full re-render per text.
+    reach = 64.0            # shortcut: assumes shadows / glows reach < 64 units; widen if huge glows matter
+
+    def nearby(eid: str) -> set[str]:
+        a = boxes[eid]
+        return {o for o, b in boxes.items() if o != eid and b[0] - reach < a[2] and a[0] < b[2] + reach
+                and b[1] - reach < a[3] and a[1] < b[3] + reach}
+
     for el in texts:
         eid = el["id"]
         tst = resolve_style(el.get("style"), st.theme)
@@ -1889,9 +1903,10 @@ def review_canvas(canvas: str, min_contrast: float = 4.5, min_text_size: float =
         try:
             if with_all is None:
                 with_all = np.asarray(st.renderer(c, cs, language=language).render(), dtype=np.float64)
-            hidden = dict(c, elements=[e for e in c["elements"] if e is not el])
-            without = np.asarray(st.renderer(hidden, cs, language=language).render(), dtype=np.float64)
             bx = r.element_box(el)
+            hidden = dict(c, elements=[e for e in c["elements"] if e is not el])
+            without = np.asarray(st.renderer(hidden, cs, language=language).render(only=nearby(eid)),
+                                 dtype=np.float64)
         except ValueError:
             continue
         H, W = with_all.shape[:2]

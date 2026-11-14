@@ -240,7 +240,7 @@ Roblox'ta görselleri Studio'ya kendin yüklemen gerekir (server internete çık
 
 Çizim motoru Pillow + numpy üzerine kurulu: şekiller 4 kat çözünürlükte piksel merkezine göre taranır, sonra küçültülür; efektler çıkış çözünürlüğünde uygulanır. Latin / Yunan / Kiril yazı Pillow ile çizilir; şekillendirme ya da yedek font gereken yazı `shaping.py` içinde HarfBuzz (uharfbuzz) ve python-bidi ile dizilir, glif konturları aynı tarayıcıyla çizilir (Pillow'un Windows tekerleklerinde Raqm olmadığı için). Sınırlar: Tay / Lao / Khmer için sözlüklü kelime bölme yok (taşan kelime harf kümesi sınırından bölünür), renkli emoji tek renk çizilir, yay üstü yazı yalnızca Latin / Yunan / Kiril.
 
-`tests/test_stress.py`: 4K canvas, 500 eleman, 50 dil satırı, 3 kez render + export (çıktılar birebir aynı olmalı). Not: `review_canvas` kontrast için her yazı elemanında canvas'ı yeniden çizer; 50 yazılı 4K ekranda ~25 sn sürer. MCP Python SDK'nın 1.x ve 2.x sürümleriyle çalışır.
+`tests/test_stress.py`: 4K canvas, 500 eleman, 50 dil satırı, 3 kez render + export (çıktılar birebir aynı olmalı). `review_canvas` kontrast için her yazının arkasını yalnızca çevresindeki elemanlarla yeniden çizer (64 birimden uzağa uzanan dev glow'lar hesaba girmez); bu ekranda ~3 sn. MCP Python SDK'nın 1.x ve 2.x sürümleriyle çalışır.
 
 ## Fontlar
 
