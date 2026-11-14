@@ -370,7 +370,7 @@ def _image_fill(mask: Image.Image, spec: dict, box_px: Box, k: float) -> Image.I
     """Use a picture as paint: {"type": "image", "path": ..., "fit": "cover" | "stretch" | "tile", "scale": 1}."""
     path = Path(str(spec.get("path", ""))).expanduser()
     if not path.is_file():
-        raise ValueError(f"image fill: file not found: {path}")
+        raise ValueError(f"image fill: file not found: {path.resolve()} - use an absolute path (relative paths resolve against the server's working folder, not yours)")
     key = (str(path), path.stat().st_mtime)
     if key not in _IMAGE_CACHE:
         if len(_IMAGE_CACHE) > 16:
@@ -859,7 +859,7 @@ def vector_geometry(el: dict, res: float) -> Geometry:
     if t == "rect":
         x, y, w, h = (float(el[k]) for k in ("x", "y", "width", "height"))
         if w < 0 or h < 0:
-            raise ValueError("rect width and height cannot be negative")
+            raise ValueError("rect width and height cannot be negative - move x/y to the other corner and use positive sizes")
         corner = str(el.get("corner", "round")).lower()
         if corner not in ("round", "cut"):
             raise ValueError("rect corner must be 'round' or 'cut'")
@@ -882,7 +882,7 @@ def vector_geometry(el: dict, res: float) -> Geometry:
         if el.get("points"):
             pts = [(float(p[0]), float(p[1])) for p in el["points"]]
             if len(pts) < 3:
-                raise ValueError("polygon needs at least 3 points")
+                raise ValueError("polygon needs at least 3 points, like [[0, 0], [10, 0], [5, 8]]")
         else:
             pts = geo.regular_polygon(float(el["cx"]), float(el["cy"]), float(el["radius"]), int(el.get("sides", 6)),
                                       float(el["inner_radius"]) if el.get("inner_radius") else None,
@@ -895,7 +895,7 @@ def vector_geometry(el: dict, res: float) -> Geometry:
     elif t == "line":
         pts = [(float(p[0]), float(p[1])) for p in el.get("points", [])]
         if len(pts) < 2:
-            raise ValueError("line needs at least 2 points")
+            raise ValueError("line needs at least 2 points, like [[0, 0], [100, 0]]")
         width = max(0.25, float(el.get("width", 2)))
         closed = bool(el.get("closed", False))
         g.lines = _dashed(el, pts, closed, width, str(el.get("cap", "round")).lower())
@@ -941,7 +941,7 @@ def vector_geometry(el: dict, res: float) -> Geometry:
             g.lines.append(([(cx + radius * ca, cy + radius * sa),
                              (cx + (radius - length) * ca, cy + (radius - length) * sa)], False, width, cap))
         if not g.lines:
-            raise ValueError("ticks: every / skip_every removed every tick")
+            raise ValueError("ticks: every / skip_every removed every tick - raise count or lower skip_every")
         x0, y0, x1, y1 = geo.bbox_of([pts for pts, _, _, _ in g.lines])
         g.box = (x0 - width / 2, y0 - width / 2, x1 + width / 2, y1 + width / 2)
     elif t == "path":
@@ -964,7 +964,7 @@ def _dashed(el: dict, pts: list, closed: bool, width: float, cap: str) -> list:
         dash = [dash, dash]
     pieces = geo.dash_polyline(pts, closed, dash, float(el.get("dash_offset", 0) or 0))
     if not pieces:
-        raise ValueError("dash pattern left nothing to draw")
+        raise ValueError("dash pattern left nothing to draw - make the dash longer than 0 or the gap shorter")
     return [(piece, False, width, cap) for piece in pieces]
 
 
@@ -1181,7 +1181,7 @@ class Renderer:
     def _load_image(self, el: dict) -> Image.Image:
         path = Path(str(el.get("path", ""))).expanduser()
         if not path.is_file():
-            raise ValueError(f"Image file not found: {path}")
+            raise ValueError(f"Image file not found: {path.resolve()} - use an absolute path (relative paths resolve against the server's working folder, not yours)")
         return Image.open(path).convert("RGBA")
 
     def _region(self, box: Box, pad: float, clip: bool = True) -> tuple[int, int, int, int] | None:

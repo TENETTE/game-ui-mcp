@@ -533,7 +533,7 @@ def export_bitmap_font(name: str, characters: str = "0123456789+-x%.,:!", size: 
         if ch not in chars and ch not in "\n\r\t":
             chars.append(ch)
     if not chars:
-        raise ValueError("characters is empty")
+        raise ValueError("characters is empty - pass the text whose glyphs you need, e.g. '0123456789:'")
     if len(chars) > 256:
         raise ValueError("at most 256 characters")
     fill, stroke, style = _maybe_json(fill), _maybe_json(stroke), _maybe_json(style)

@@ -133,7 +133,7 @@ def arrange(renderer: Renderer, elements: list[dict], mode: str, gap: float, col
             padding: float, align: str, justify: str) -> tuple[tuple[float, float, float, float], list[tuple[dict, float, float]]]:
     """Plan moves that lay elements out in a row, column or grid. Returns (content box, [(el, dx, dy)])."""
     if not elements:
-        raise ValueError("nothing to arrange")
+        raise ValueError("nothing to arrange - pass element ids or a group that has elements")
     boxes = [renderer.element_box(e) for e in elements]
     sizes = [(b[2] - b[0], b[3] - b[1]) for b in boxes]
     mode = mode.lower()

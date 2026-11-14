@@ -208,7 +208,7 @@ def convert(svg_text: str, x: float, y: float, width: float | None, height: floa
     try:
         root = ET.fromstring(svg_text.strip())
     except ET.ParseError as exc:
-        raise ValueError(f"Could not parse SVG: {exc}") from exc
+        raise ValueError(f"Could not parse SVG: {exc} - pass complete, well-formed <svg>...</svg> markup") from exc
     if _local(root.tag) != "svg":
         raise ValueError("root element must be <svg>")
     vb = [float(v) for v in _NUM.findall(root.get("viewBox", ""))]

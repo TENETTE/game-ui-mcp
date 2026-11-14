@@ -163,7 +163,7 @@ def pack_atlas(images: list[tuple[str, Image.Image]], padding: int = 2, max_size
                power_of_two: bool = False) -> tuple[Image.Image, dict]:
     """Shelf-pack images into one atlas. Returns (atlas, frames{name: {x,y,w,h}})."""
     if not images:
-        raise ValueError("Nothing to pack")
+        raise ValueError("Nothing to pack - give at least one canvas or image")
     order = sorted(images, key=lambda it: (-it[1].height, -it[1].width))
     total_area = sum((im.width + padding) * (im.height + padding) for _, im in order)
     widest = max(im.width for _, im in order) + padding * 2

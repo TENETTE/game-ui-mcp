@@ -61,6 +61,21 @@ def test_shader_rejects_anything_but_math(ws, code):
         s.add_rect("c", 0, 0, 10, 10, style={"fill": {"type": "shader", "code": code}})
 
 
+def test_shader_too_heavy_is_refused_before_running(ws):
+    from game_ui_mcp import shader
+    heavy = ";".join(f"q{i} = voronoi(x/9 + {i}, y/9)" for i in range(70)) + "; r = q1; g = 0; b = 0"
+    with pytest.raises(ValueError, match="too heavy"):
+        shader.evaluate({"code": heavy}, (1024, 1024), (0, 0, 1024, 1024), 1.0, {})
+    shader.evaluate({"code": "n = fbm(x, y, 8); r = n; g = n; b = n"}, (64, 64), (0, 0, 64, 64), 1.0, {})
+
+
+@pytest.mark.parametrize("code,params", [("r = where(u > 0.5); g = 0; b = 0", {}), ("r = t; g = 0; b = 0", {"t": [1]})])
+def test_shader_misuse_gives_shader_error(ws, code, params):
+    s.create_canvas("c", 8, 8)
+    with pytest.raises(ValueError, match="shader"):
+        s.add_rect("c", 0, 0, 8, 8, style={"fill": {"type": "shader", "code": code, "params": params}})
+
+
 def test_shader_huge_power_fails_fast(ws):
     s.create_canvas("c", 10, 10)
     with pytest.raises(ValueError, match="shader"):

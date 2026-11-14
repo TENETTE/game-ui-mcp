@@ -132,8 +132,20 @@ def tool(fn):
     def wrapper(*args, **kwargs):
         try:
             result = fn(*args, **kwargs)
-        except (ValueError, TypeError, KeyError, OSError) as exc:
-            raise ToolError(str(exc)) from exc
+        except ToolError:
+            raise
+        except MemoryError as exc:
+            raise ToolError(f"{fn.__name__}: out of memory. Use a smaller canvas, scale, region or frame count "
+                            "and call again.") from exc
+        except KeyError as exc:
+            raise ToolError(f"{fn.__name__}: missing key {exc}. Add it to the argument and call again.") from exc
+        except (ValueError, TypeError, OSError) as exc:
+            raise ToolError(f"{fn.__name__}: {exc}\nFix that argument and call {fn.__name__} again "
+                            "(do not repeat the identical call).") from exc
+        except Exception as exc:        # the SDK would hide this text, leaving the model with nothing to act on
+            raise ToolError(f"{fn.__name__}: unexpected {type(exc).__name__}: {exc}. This is likely a game-ui-mcp "
+                            "bug, not your input. Do not repeat the identical call: change the value that "
+                            "triggers it, split the step into smaller calls, or take another route.") from exc
         if isinstance(result, dict):
             return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
         return result
@@ -1729,7 +1741,7 @@ def _backdrop_any(background: str, size: tuple[int, int], c: dict, scale: float,
         from .viewing import image_backdrop
         full = image_backdrop(text, (max(1, round(c["width"] * scale)), max(1, round(c["height"] * scale))))
         if full is None:
-            raise ValueError(f"background image not found: {text}")
+            raise ValueError(f"background image not found: {Path(text).expanduser().resolve()} - use an absolute path (relative paths resolve against the server's working folder, not yours)")
         ox, oy = round(origin[0] * scale), round(origin[1] * scale)
         return full.crop((ox, oy, ox + size[0], oy + size[1]))
     return backdrop(size, text, store().theme.get("colors", {}))
@@ -1744,7 +1756,7 @@ def contact_sheet(canvases: list[str] | None = None, columns: int = 4, cell: int
     st = store()
     ids = canvases or list(st.canvases)
     if not ids:
-        raise ValueError("No canvases to show")
+        raise ValueError("No canvases to show - create_canvas first, or pass canvas ids")
     items = [st.get(i) for i in ids]
     columns = max(1, min(8, int(columns), len(items)))
     cell = max(96, min(512, int(cell)))
@@ -2065,7 +2077,7 @@ def view_image(path: str, max_size: int = 1024, palette: int = 8):
     to lightest) so you can match a reference's palette with set_theme instead of guessing."""
     src = Path(path).expanduser()
     if not src.is_file():
-        raise ValueError(f"Image file not found: {src}")
+        raise ValueError(f"Image file not found: {src.resolve()} - use an absolute path (relative paths resolve against the server's working folder, not yours)")
     try:
         img = PILImage.open(src)
         img.load()
@@ -2437,7 +2449,7 @@ def export_psd(canvas: str, path: str | None = None, scale: float = 1, include_b
                              "clip": props["clip"] and has_base, "visible": visible})
         has_base = True
     if not stack_layers:
-        raise ValueError("The canvas is empty")
+        raise ValueError("The canvas is empty - add elements (or make hidden layers visible) before exporting")
     merged = r.render(include_background=include_background)
     psd_mod.write_psd(out, r.width, r.height, stack_layers, merged)
     result: dict = {"file": str(out), "size": [r.width, r.height],

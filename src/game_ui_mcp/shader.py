@@ -17,6 +17,7 @@ from .colors import parse_color
 
 MAX_CODE = 6000
 MAX_STATEMENTS = 80
+MAX_WORK = 85e6          # noise-call units x pixels, ~10 s: an 8-octave fbm still fits a full 4K fill
 
 
 def _fract(a):
@@ -116,7 +117,24 @@ def compile_code(code: str):
     assigned = {t.id for n in ast.walk(tree) if isinstance(n, ast.Assign) for t in n.targets}
     if not {"r", "g", "b"} <= assigned:
         raise ValueError("shader code must assign r, g and b (0..1); a (alpha 0..1) is optional")
-    return compile(tree, "<shader>", "exec")
+    return compile(tree, "<shader>", "exec"), _cost(tree)
+
+
+def _cost(tree) -> float:
+    """Work per pixel in 'noise calls' (one is ~0.12 s per megapixel), so a heavy formula is refused, not run."""
+    units = 0.1 * len(tree.body)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            name = node.func.id
+            if name == "fbm":
+                oct_arg = node.args[2] if len(node.args) > 2 else None
+                units += min(8.0, max(1.0, oct_arg.value)) if isinstance(oct_arg, ast.Constant) else \
+                    (5.0 if oct_arg is None else 8.0)
+            elif name == "voronoi":
+                units += 4.0
+            elif name in ("noise", "rand"):
+                units += 1.0
+    return units
 
 
 def _env(params: dict, colors: dict) -> dict:
@@ -127,15 +145,21 @@ def _env(params: dict, colors: dict) -> dict:
         if isinstance(value, str):                          # a colour: name_r, name_g, name_b, name_a
             r, g, b, a = parse_color(value, colors)
             env.update({f"{key}_r": r / 255, f"{key}_g": g / 255, f"{key}_b": b / 255, f"{key}_a": a / 255})
-        else:
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
             env[key] = float(value)
+        else:
+            raise ValueError(f"shader param '{key}' must be a number or a colour string, got {type(value).__name__}")
     return env
 
 
 def evaluate(spec: dict, size: tuple[int, int], box_px, k: float, colors: dict) -> np.ndarray:
     """RGBA float array 0..255 of shape (h, w, 4) for the shader fill."""
-    code = compile_code(str(spec.get("code", "")))
+    code, units = compile_code(str(spec.get("code", "")))
     w_px, h_px = size
+    if units * w_px * h_px > MAX_WORK:
+        raise ValueError(f"shader code is too heavy for a {w_px}x{h_px} px fill (~{units:.0f} noise calls per "
+                         f"pixel, limit ~{MAX_WORK / (w_px * h_px):.0f}): use fewer fbm octaves or "
+                         "voronoi/noise calls, or compute a value once and reuse it")
     x0, y0, x1, y1 = box_px
     ys, xs = np.mgrid[0:h_px, 0:w_px].astype(np.float64)
     xs += 0.5
@@ -152,6 +176,10 @@ def evaluate(spec: dict, size: tuple[int, int], box_px, k: float, colors: dict) 
             raise ValueError(f"shader code failed: {exc}") from exc
     out = np.empty((h_px, w_px, 4))
     for i, name in enumerate(OUTPUTS):
-        val = ns.get(name, 1.0)
-        out[..., i] = np.nan_to_num(np.clip(np.broadcast_to(np.asarray(val, dtype=np.float64), (h_px, w_px)), 0, 1))
+        try:
+            val = np.broadcast_to(np.asarray(ns.get(name, 1.0), dtype=np.float64), (h_px, w_px))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"shader output '{name}' must be one number per pixel (where() needs 3 arguments: "
+                             "condition, value_if_true, value_if_false)") from exc
+        out[..., i] = np.nan_to_num(np.clip(val, 0, 1))
     return out * 255.0

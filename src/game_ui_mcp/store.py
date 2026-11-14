@@ -456,7 +456,7 @@ class Store:
             fb = (bb[0] * 2 - pad_big, bb[1] * 2 - pad_big, bb[2] * 2 - pad_big, bb[3] * 2 - pad_big)
             box = fb if box is None else (min(box[0], fb[0]), min(box[1], fb[1]), max(box[2], fb[2]), max(box[3], fb[3]))
         if box is None:
-            raise ValueError("nothing is painted on this canvas")
+            raise ValueError("nothing is painted on this canvas - add visible elements first")
         pad = float(padding)
         x0, y0 = math.floor(box[0] - 1 - pad), math.floor(box[1] - 1 - pad)
         x1, y1 = math.ceil(box[2] + 1 + pad), math.ceil(box[3] + 1 + pad)
