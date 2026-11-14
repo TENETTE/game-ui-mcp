@@ -659,3 +659,285 @@ def test_batch_animation_ops_and_undo(ws):
     ])
     assert out["results"][1]["animation"] == "go" and out["results"][2]["property"] == "dx"
     assert s.undo("a")["undone"] and s.get_animations("a")["animations"] == []
+
+
+# ---------------------------------------------------------------- quality tools: strokes, light, masks, fills
+
+from game_ui_mcp import effects as fxlib
+
+
+def test_round_dilation_and_float_blur():
+    dot = np.zeros((21, 21), dtype=np.uint8)
+    dot[10, 10] = 255
+    grown = fxlib.dilate(dot, 3)
+    assert int((grown == 255).sum()) == 29                    # every pixel within 3 px: a disc, not a square
+    assert grown[10, 13] == 255 and grown[13, 13] == 0 and np.array_equal(grown, grown.T)
+    assert np.array_equal(fxlib.erode(fxlib.dilate(dot, 2), 2), dot)
+    field = np.zeros((40, 40))
+    field[10:30, 10:30] = 1.0
+    soft = fxlib.blur_float(field, 6)
+    assert abs(soft.sum() - field.sum()) < 1e-6 and 0.4 < soft[10, 20] < 0.6
+
+
+def test_multiple_strokes_with_offset(ws):
+    s.create_canvas("a", 100, 100)
+    s.add_rect("a", 30, 30, 40, 40, fill="#0000ff", id="r",
+               stroke=[{"color": "#ff0000", "width": 4, "align": "outside"},
+                       {"color": "#00ff00", "width": 3, "align": "outside", "offset": 6}])
+    px = render("a")
+    assert tuple(px[50, 50][:3]) == (0, 0, 255)
+    assert tuple(px[50, 28]) == (255, 0, 0, 255)               # 0-4 px outside: red
+    assert px[50, 25][3] == 0                                  # 4-6 px: the gap
+    assert tuple(px[50, 22]) == (0, 255, 0, 255)               # 6-9 px: green
+    assert px[50, 19][3] == 0
+    assert s.get_canvas("a")["elements"][0]["bbox_xywh"] == [30, 30, 40, 40]
+
+
+def test_text_double_outline(ws):
+    s.create_canvas("a", 200, 80)
+    s.add_text("a", "GO", 100, 40, size=40, weight="bold", anchor="center", color="#ffffff",
+               stroke=[{"color": "#ff0000", "width": 3}, {"color": "#0000ff", "width": 3, "offset": 3}])
+    px = render("a")
+    colors = {tuple(c) for c in px[px[..., 3] == 255][:, :3].tolist()}
+    assert (255, 255, 255) in colors and (255, 0, 0) in colors and (0, 0, 255) in colors
+
+
+def test_light_shades_towards_and_away_from_the_source(ws):
+    s.create_canvas("a", 120, 120)
+    s.add_rect("a", 20, 20, 80, 80, radius=10, fill="#808080",
+               style={"light": {"angle": 225, "size": 8, "depth": 1.5}})        # light from the top-left
+    px = render("a").astype(int)
+    assert px[60, 23][0] > 0x80 + 20 and px[23, 60][0] > 0x80 + 20              # left and top edges catch light
+    assert px[60, 97][0] < 0x80 - 20 and px[97, 60][0] < 0x80 - 20              # right and bottom fall away
+    assert abs(px[60, 60][0] - 0x80) <= 2                                        # the flat middle is untouched
+    assert px[60, 60][3] == 255 and px[5, 5][3] == 0
+    with pytest.raises(ValueError):
+        s.add_rect("a", 0, 0, 10, 10, style={"light": {"profile": "wavy"}})
+
+
+def test_mask_fades_and_adjust_recolours(ws):
+    s.create_canvas("a", 100, 20)
+    s.add_rect("a", 0, 0, 100, 20, fill="#ff0000",
+               style={"mask": {"type": "linear", "angle": 0, "stops": ["#000000", "#000000@0"], "dither": False}})
+    alpha = render("a")[10, :, 3]
+    assert alpha[2] > 245 and abs(int(alpha[50]) - 128) < 6 and alpha[97] < 10
+    s.create_canvas("b", 20, 20)
+    s.add_rect("b", 0, 0, 20, 20, fill="#cc3311", style={"adjust": {"saturation": -1}}, id="g")
+    r, g, b, _ = render("b")[10, 10]
+    assert r == g == b
+    s.update_element("b", "g", {"style": {"adjust": {"brightness": 0.2}}})
+    assert render("b")[10, 10][0] == 0xCC + 51
+
+
+def test_gradient_spaces_and_new_fills(ws):
+    def mid(space):
+        s.create_canvas(space, 100, 10)
+        s.add_rect(space, 0, 0, 100, 10, fill={"type": "linear", "angle": 0, "space": space, "dither": False,
+                                               "stops": ["#0000ff", "#ffff00"]})
+        px = render(space)
+        return px[5, 0], px[5, 50], px[5, 99]
+
+    mids = {}
+    for space in ("srgb", "linear", "oklab"):
+        first, mids[space], last = mid(space)
+        assert first[2] > 240 and first[0] < 30 and last[0] > 240 and last[2] < 30      # both ends keep their colour
+    srgb_mid, oklab_mid = mids["srgb"].astype(int), mids["oklab"].astype(int)
+    assert abs(int(srgb_mid[0]) - int(srgb_mid[2])) < 12                                 # sRGB passes through grey
+    assert max(oklab_mid[:3]) - min(oklab_mid[:3]) > 60                                  # OKLab keeps colour
+    for kind in ("hex", "clouds"):
+        s.create_canvas(kind, 64, 64)
+        s.add_rect(kind, 0, 0, 64, 64, fill={"type": kind, "color": "#ffffff", "color2": "#000000", "size": 16})
+        values = render(kind)[..., 0]
+        assert values.min() < 40 and values.max() > 200
+    with pytest.raises(ValueError):
+        s.add_rect("hex", 0, 0, 5, 5, fill={"type": "linear", "space": "cmyk", "stops": ["#000", "#fff"]})
+
+
+def test_image_fill_cover_and_tile(ws):
+    s.create_canvas("tex", 4, 4)
+    s.add_rect("tex", 0, 0, 2, 4, fill="#ff0000")
+    s.add_rect("tex", 2, 0, 2, 4, fill="#0000ff")
+    path = s.export_png("tex", str(ws / "tex.png"))["files"][0]["file"]
+    s.create_canvas("a", 40, 20)
+    s.add_ellipse("a", 20, 10, 18, 9, fill={"type": "image", "path": path, "fit": "cover"}, id="e")
+    px = render("a")
+    assert px[10, 8][0] > 200 and px[10, 32][2] > 200 and px[1, 1][3] == 0
+    s.update_element("a", "e", {"fill": {"type": "image", "path": path, "fit": "tile"}})
+    row = render("a")[10, 6:34, :3]
+    reds = int((row[:, 0] > 200).sum())
+    assert 10 <= reds <= 18                                    # the 4px texture repeats: about half red
+    with pytest.raises(ValueError):
+        s.add_rect("a", 0, 0, 5, 5, fill={"type": "image", "path": str(ws / "missing.png")})
+
+
+def test_extra_blend_modes(ws):
+    expected = {"darken": 0x40, "lighten": 0xC0, "difference": 0x80, "hard-light": 0x80, "color-dodge": 0xFF}
+    for mode, value in expected.items():
+        s.create_canvas(mode, 4, 4, "#c0c0c0")
+        s.add_rect(mode, 0, 0, 4, 4, fill="#404040", style={"blend": mode})
+        got = int(render(mode, background=True)[2, 2][0])
+        want = value if mode not in ("hard-light", "color-dodge") else None
+        if mode == "hard-light":
+            want = round(2 * 0xC0 / 255 * 0x40 / 255 * 255)
+        if mode == "color-dodge":
+            want = min(255, round(0xC0 / 255 / (1 - 0x40 / 255) * 255))
+        assert abs(got - want) <= 2, mode
+
+
+# ---------------------------------------------------------------- layers
+
+def test_layers_stack_and_active_layer(ws):
+    s.create_canvas("a", 60, 60)
+    s.add_rect("a", 0, 0, 60, 60, fill="#ff0000", id="early")              # before any layer: goes to base
+    out = s.create_layer("a", "top")
+    assert out["active_layer"] == "top"
+    s.add_rect("a", 10, 10, 40, 40, fill="#00ff00", id="g")
+    s.create_layer("a", "under", position="below:top")
+    s.add_rect("a", 0, 0, 60, 60, fill="#0000ff", id="b")                  # added last but on a lower layer
+    info = s.get_canvas("a")
+    assert [l["layer"] for l in info["layers_bottom_to_top"]] == ["base", "under", "top"]
+    assert info["active_layer"] == "under"
+    assert {e["id"]: e.get("layer") for e in info["elements"]} == {"early": None, "g": "top", "b": "under"}
+    px = render("a")
+    assert tuple(px[30, 30][:3]) == (0, 255, 0) and tuple(px[3, 3][:3]) == (0, 0, 255)
+    s.update_layer("a", "under", position="top")
+    assert tuple(render("a")[30, 30][:3]) == (0, 0, 255)
+    s.set_layer("a", "top", ids=["early"])
+    assert s.get_canvas("a", ids=["early"])["elements"][0]["layer"] == "top"
+    with pytest.raises(ValueError):
+        s.create_layer("a", "base")
+    with pytest.raises(ValueError):
+        s.add_rect("a", 0, 0, 5, 5, layer="nope")
+    with pytest.raises(ValueError):
+        s.create_layer("a", "bad", blend="sparkle")
+    assert len(s.get_canvas("a")["layers_bottom_to_top"]) == 2             # failed calls added nothing
+
+
+def test_layer_opacity_treats_the_layer_as_one_image(ws):
+    s.create_canvas("a", 60, 30)
+    s.create_layer("a", "ghost", opacity=0.5)
+    s.add_rect("a", 0, 0, 40, 30, fill="#ffffff")
+    s.add_rect("a", 20, 0, 40, 30, fill="#ffffff")
+    alpha = render("a")[15, :, 3]
+    assert alpha[10] == 128 and alpha[30] == 128 and alpha[50] == 128      # the overlap is not doubled
+
+
+def test_clipped_layer_paints_only_inside_its_base(ws):
+    s.create_canvas("a", 100, 100)
+    s.create_layer("a", "body")
+    s.add_ellipse("a", 50, 50, 30, fill="#808080")
+    s.create_layer("a", "shade", clip=True, blend="multiply")
+    s.add_rect("a", 50, 0, 50, 100, fill="#808080")                        # darkens the right half only
+    px = render("a")
+    assert tuple(px[50, 35]) == (128, 128, 128, 255)
+    assert abs(int(px[50, 65][0]) - 64) <= 1 and px[50, 65][3] == 255
+    assert px[50, 90][3] == 0 and px[10, 90][3] == 0                       # nothing spills outside the body
+    s.update_layer("a", "body", visible=False)
+    assert render("a")[..., 3].max() == 0                                  # hiding the base hides what clips to it
+    s.update_layer("a", "body", visible=True)
+    image, info = s.preview("a", layers=["shade"])
+    assert image.data[:4] == b"\x89PNG"
+
+
+def test_layer_style_outlines_the_merged_shape(ws):
+    s.create_canvas("a", 120, 80)
+    s.create_layer("a", "blob", style={"stroke": {"color": "#ff0000", "width": 3, "align": "outside"}})
+    s.add_ellipse("a", 45, 40, 25, fill="#ffffff")
+    s.add_ellipse("a", 75, 40, 25, fill="#ffffff")
+    px = render("a")
+    assert tuple(px[40, 60][:3]) == (255, 255, 255)                        # where the circles overlap: no outline
+    assert tuple(px[40, 18][:3]) == (255, 0, 0) and tuple(px[40, 102][:3]) == (255, 0, 0)
+    assert px[40, 14][3] == 0
+    s.update_layer("a", "blob", style={"stroke": None, "shadow": {"color": "#000000", "blur": 0, "dx": 6, "dy": 0}})
+    px = render("a")
+    assert tuple(px[40, 103]) == (0, 0, 0, 255) and tuple(px[40, 60][:3]) == (255, 255, 255)
+
+
+def test_layer_rename_delete_and_undo(ws):
+    s.create_canvas("a", 40, 40)
+    s.create_layer("a", "one")
+    s.add_rect("a", 0, 0, 10, 10, id="r1")
+    s.create_layer("a", "two")
+    s.add_rect("a", 20, 20, 10, 10, id="r2")
+    s.update_layer("a", "one", name="first", activate=True)
+    info = s.get_canvas("a")
+    assert info["active_layer"] == "first" and info["elements"][0]["layer"] == "first"
+    out = s.delete_layer("a", "two", keep_elements=True)
+    assert out["elements_kept"] == ["r2"] and "layer" not in s.get_canvas("a", ids=["r2"])["elements"][0]
+    out = s.delete_layer("a", "first")
+    assert out["elements_deleted"] == ["r1"]
+    assert [e["id"] for e in s.get_canvas("a")["elements"]] == ["r2"]
+    assert s.undo("a")["undone"]
+    assert [l["layer"] for l in s.get_canvas("a")["layers_bottom_to_top"]] == ["base", "first"]
+
+
+def test_batch_layers_and_layer_animation_target(ws):
+    s.create_canvas("a", 100, 40)
+    s.batch("a", [
+        {"op": "create_layer", "name": "back"},
+        {"op": "add_rect", "id": "bg", "x": 0, "y": 0, "width": 100, "height": 40, "fill": "#000000"},
+        {"op": "create_layer", "name": "front", "opacity": 0.5},
+        {"op": "add_rect", "id": "a1", "x": 0, "y": 10, "width": 10, "height": 10},
+        {"op": "add_rect", "id": "a2", "x": 0, "y": 25, "width": 10, "height": 10},
+        {"op": "create_animation", "name": "slide", "duration": 1},
+        {"op": "set_keyframes", "animation": "slide", "target": "layer:front", "property": "dx",
+         "keyframes": [[0, 0], [1, 50]]},
+    ])
+    desc = s.get_animations("a", "slide")
+    assert desc["tracks"][0]["elements"] == ["a1", "a2"]
+    st = s.store()
+    posed, _ = am.apply_animation(st.get("a"), st.get_animation(st.get("a"), "slide")[1], 1.0, {})
+    px = np.asarray(st.renderer(posed).render())
+    assert px[15, 55][0] == 128 and px[30, 55][0] == 128 and px[15, 5][0] == 0
+
+
+def test_export_layers_by_layer(ws):
+    s.create_canvas("a", 100, 100)
+    s.create_layer("a", "body")
+    s.add_ellipse("a", 50, 50, 30, fill="#808080")
+    s.create_layer("a", "shade", clip=True, blend="multiply")
+    s.add_rect("a", 50, 0, 50, 100, fill="#808080")
+    s.create_layer("a", "badge")
+    s.add_rect("a", 5, 5, 10, 10, fill="#ff0000", origin=[10, 10])
+    merged = s.export_layers("a", out_dir=str(ws / "m"))
+    assert merged["split_by"] == "layer" and [l["name"] for l in merged["layers"]] == ["body", "badge"]
+    body = merged["layers"][0]
+    assert body["merged"] == ["shade"] and body["x"] == 18 and body["width"] == 64
+    img = np.asarray(Image.open(ws / "m" / body["file"]))
+    assert abs(int(img[32, 45][0]) - 64) <= 1 and img[32, 15][0] == 128          # shading is baked into the body
+    assert merged["layers"][1]["origin"] == [10, 10]
+    split = s.export_layers("a", out_dir=str(ws / "s"), merge_clipped=False, trim=False)
+    assert [l["name"] for l in split["layers"]] == ["body", "shade", "badge"]
+    assert split["layers"][1]["blend"] == "multiply" and "multiply" in split["notes"][0]
+    shade = np.asarray(Image.open(ws / "s" / split["layers"][1]["file"]))
+    assert shade[50, 65][3] == 255 and shade[50, 90][3] == 0                    # exported already clipped
+    groups = s.export_layers("a", out_dir=str(ws / "g"), by="group")
+    assert groups["split_by"] == "group"
+    with pytest.raises(ValueError):
+        s.export_layers("a", out_dir=str(ws / "x"), layers=["ghost"])
+
+
+def test_export_psd_keeps_the_stack(ws):
+    psd_tools = pytest.importorskip("psd_tools")
+    s.create_canvas("a", 80, 60, "#202020")
+    s.add_rect("a", 0, 0, 20, 20, fill="#ffffff")                               # implicit base layer
+    s.create_layer("a", "Gövde")
+    s.add_ellipse("a", 40, 30, 20, fill="#ff0000")
+    s.create_layer("a", "shade", clip=True, blend="multiply", opacity=0.5)
+    s.add_rect("a", 40, 0, 40, 60, fill="#000000")
+    s.create_layer("a", "hidden", visible=False)
+    s.add_rect("a", 60, 40, 10, 10, fill="#00ff00")
+    out = s.export_psd("a", str(ws / "a.psd"), scale=2)
+    assert out["size"] == [160, 120]
+    psd = psd_tools.PSDImage.open(out["file"])
+    assert psd.size == (160, 120) and [l.name for l in psd] == ["background", "base", "gövde", "shade", "hidden"]
+    shade = psd[3]
+    assert shade.blend_mode.name == "MULTIPLY" and shade.opacity == 128 and shade.clipping
+    assert not psd[4].visible and psd[2].bbox == (40, 20, 120, 100)
+    stored = np.asarray(psd.topil().convert("RGBA")).astype(int)
+    ours = render("a", 2.0, background=True).astype(int)
+    assert np.abs(stored - ours).max() <= 1                                     # the flattened preview matches
+    body = np.asarray(psd[2].topil().convert("RGBA"))
+    assert tuple(body[40, 40]) == (255, 0, 0, 255)
+    with pytest.raises(ValueError):
+        s.export_psd("a", str(ws / "a.png"))

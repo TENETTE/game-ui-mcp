@@ -263,10 +263,16 @@ def normalize_keyframes(keyframes: Any, duration: float, offset: float = 0.0) ->
 
 
 def track_targets(canvas: dict, target: str) -> list[dict]:
-    """Elements addressed by a track target: an element id, or 'group:<name>'."""
+    """Elements addressed by a track target: an element id, 'group:<name>' or 'layer:<name>'."""
     if target.startswith("group:"):
         name = target.split(":", 1)[1]
         return [e for e in canvas["elements"] if e.get("group") == name]
+    if target.startswith("layer:"):
+        name = target.split(":", 1)[1]
+        named = {l["name"] for l in canvas.get("layers") or []}
+        if name == "base":
+            return [e for e in canvas["elements"] if e.get("layer") not in named]
+        return [e for e in canvas["elements"] if e.get("layer") == name]
     return [e for e in canvas["elements"] if e["id"] == target]
 
 

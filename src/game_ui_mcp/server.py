@@ -27,9 +27,10 @@ except ImportError:  # MCP Python SDK 1.x
 
 from . import animation as anim_mod
 from . import export as ex
+from . import psd as psd_mod
 from . import engines
 from .icons import icon_names
-from .render import TextLayout, backdrop, resolve_style
+from .render import TextLayout, backdrop, composite as _composite, resolve_style
 from .store import Store, slugify
 
 INSTRUCTIONS = """\
@@ -53,13 +54,29 @@ Fill: a color, or a gradient/pattern object:
   {"type":"stripes"|"dots"|"grid","color":"#fff@0.08","color2":"transparent","size":8,"angle":45}
   {"type":"carbon","color":"#2a2d33","color2":"#0d0e10","size":4}      (carbon-fibre weave)
   {"type":"brushed","color":"#9aa3ad","color2":"#5c646e","angle":0,"amount":0.5}   (brushed metal)
+  {"type":"hex","color":"#fff@0.1","size":16,"line_width":1}           (honeycomb lines)
+  {"type":"clouds","color":"#fff@0.3","color2":"transparent","size":48,"octaves":4,"seed":1,"contrast":1.5}
+  {"type":"image","path":"C:/textures/metal.png","fit":"cover"|"stretch"|"tile","scale":1}   (your own texture)
+  Gradients take "space":"oklab" for vivid, even blends between distant hues (default "srgb").
 
 Style object (every key optional; `style` may also be a theme style name, or {"use":"name", ...overrides}):
-  fill, stroke {color, width, align: inside|center|outside}, opacity, noise: 0-1, blur: px (softens the
-  whole element: light blooms, haze), blend: normal|add|screen|multiply|overlay,
+  fill, opacity, noise: 0-1, blur: px (softens the whole element: light blooms, haze),
+  stroke {color, width, align: inside|center|outside, offset} - or a list of strokes for double outlines,
+  blend: normal|add|screen|multiply|overlay|soft-light|hard-light|color-dodge|color-burn|darken|lighten|difference,
   shadow {color, blur, dx, dy, spread, knockout}, glow {color, blur, strength, spread},
-  inner_shadow {color, blur, dx, dy}, inner_glow {color, blur}, bevel {size, highlight, shadow}.
+  inner_shadow {color, blur, dx, dy}, inner_glow {color, blur}, bevel {size, highlight, shadow},
+  light {angle, altitude, size, depth, profile: round|chisel, highlight, shadow, gloss, soften} - lights the
+    shape as a raised 3D surface (angle = where the light comes from; 225 = top-left),
+  mask: a fill spec whose alpha fades the element out (e.g. a linear gradient from opaque to "#000@0"),
+  adjust {brightness, contrast, saturation: -1..1, hue: degrees, tint: color, invert}.
   shadow / glow / inner_shadow / inner_glow also accept a list for stacked effects.
+
+Layers (create_layer): a canvas is a stack of layers, bottom to top; new elements go to the active layer.
+A layer has its own opacity, blend mode and style - layer styles (shadow, glow, stroke, light, blur, adjust,
+mask...) apply to everything on the layer as one merged shape. clip=true confines a layer to the pixels of
+the layer below: that is how you paint shading and highlights freely on top of a base shape (dark soft
+shapes on a multiply layer, light ones on a screen or overlay layer). export_layers / export_psd give the
+stack back as separate images or an editable PSD.
 
 Angles (add_arc, add_ticks, conic): degrees, 0 = 3 o'clock, clockwise. A classic gauge sweeps 135 -> 405.
 Any element takes rotation (degrees clockwise) and origin [x, y] as the pivot (default: its centre) -
@@ -158,6 +175,8 @@ def _box(st: Store, canvas: dict, el: dict) -> list[float]:
 
 def _summary(st: Store, canvas: dict, el: dict, warnings: list[str] | None = None) -> dict:
     out = {"id": el["id"], "type": el["type"], "bbox_xywh": _box(st, canvas, el)}
+    if el.get("layer"):
+        out["layer"] = el["layer"]
     x, y, w, h = out["bbox_xywh"]
     if x < -0.5 or y < -0.5 or x + w > canvas["width"] + 0.5 or y + h > canvas["height"] + 0.5:
         out["note"] = "extends outside the canvas and will be cut off on export"
@@ -258,7 +277,8 @@ def list_canvases():
 
 @tool
 def get_canvas(canvas: str, details: bool = False, ids: list[str] | None = None):
-    """Describe a canvas: element ids in draw order (bottom first) with type, group and bounding box.
+    """Describe a canvas: its layers (bottom to top) and element ids in draw order with type, layer, group
+    and bounding box.
 
     details=true also returns every stored property (use it before editing an element you did not just create).
     ids limits the result to those elements.
@@ -270,7 +290,7 @@ def get_canvas(canvas: str, details: bool = False, ids: list[str] | None = None)
         if ids and el["id"] not in ids:
             continue
         item: dict = {"id": el["id"], "type": el["type"], "bbox_xywh": _box(st, c, el)}
-        for key in ("group", "clip"):
+        for key in ("layer", "group", "clip"):
             if el.get(key):
                 item[key] = el[key]
         if el.get("visible") is False:
@@ -282,8 +302,32 @@ def get_canvas(canvas: str, details: bool = False, ids: list[str] | None = None)
         if details:
             item["props"] = {k: v for k, v in el.items() if k not in ("id", "type")}
         items.append(item)
-    return {"canvas": c["id"], "name": c.get("name"), "width": c["width"], "height": c["height"],
-            "background": c.get("background"), "elements": items}
+    out = {"canvas": c["id"], "name": c.get("name"), "width": c["width"], "height": c["height"],
+           "background": c.get("background"), "elements": items}
+    if c.get("layers"):
+        out["layers_bottom_to_top"] = _layer_list(c)
+        out["active_layer"] = c.get("active_layer")
+    if c.get("animations"):
+        out["animations"] = sorted(c["animations"])
+    return out
+
+
+def _layer_list(c: dict) -> list[dict]:
+    names = {layer["name"] for layer in c.get("layers", [])}
+    out = []
+    loose = sum(1 for e in c["elements"] if e.get("layer") not in names)
+    if loose:
+        out.append({"layer": "base", "elements": loose, "note": "implicit bottom layer for elements without a layer"})
+    for layer in c.get("layers", []):
+        item: dict = {"layer": layer["name"], "elements": sum(1 for e in c["elements"] if e.get("layer") == layer["name"])}
+        for key in ("opacity", "blend", "clip", "visible"):
+            if key in layer and layer[key] not in (None, 1, 1.0, "normal") and not (key == "clip" and not layer[key]) \
+                    and not (key == "visible" and layer[key]):
+                item[key] = layer[key]
+        if layer.get("style"):
+            item["style"] = layer["style"]
+        out.append(item)
+    return out
 
 
 @tool
@@ -320,6 +364,93 @@ def delete_canvas(canvas: str):
     return {"deleted": c["id"]}
 
 
+# --------------------------------------------------------------------------- layer tools
+
+def _layer_settings(opacity, blend, clip, visible, style) -> dict:
+    out: dict = {}
+    if opacity is not None:
+        out["opacity"] = max(0.0, min(1.0, float(opacity)))
+    if blend is not None:
+        out["blend"] = str(blend).lower()
+    if clip is not None:
+        out["clip"] = bool(clip)
+    if visible is not None:
+        out["visible"] = bool(visible)
+    style = _maybe_json(style)
+    if style is not None:
+        out["style"] = style
+    return out
+
+
+@tool
+def create_layer(canvas: str, name: str, opacity: float = 1, blend: str = "normal", clip: bool = False,
+                 visible: bool = True, style: str | dict | None = None, position: str | None = None):
+    """Add a layer to the canvas and make it the active one: every element you add afterwards lands on it
+    (or pass layer="..." to an add tool). Layers stack bottom to top; elements drawn before any layer
+    exists stay in the implicit bottom layer "base".
+
+    Build in passes the way an artist does, one layer each: base shapes -> shading -> highlights ->
+    details -> text. That keeps each pass adjustable (opacity, blend, hide) and exportable on its own.
+
+    opacity: 0-1 for the whole layer. blend: how the layer mixes with what is below - "normal",
+      "multiply" (shadows, tinting), "screen" / "add" (light, glow), "overlay" / "soft-light" (contrast,
+      colored light), "color-dodge", "color-burn", "hard-light", "darken", "lighten", "difference".
+    clip=true: the layer only shows where the layer directly below it has pixels. Paint freely on a
+      clipped layer - soft dark ellipses for shading, light streaks for gloss - and nothing spills outside
+      the base shape. Several clipped layers in a row all clip to the same base.
+    style: effects applied to the merged content of the layer as one shape - shadow, glow, stroke (one
+      outline around a whole icon + text group), light (emboss), inner_shadow, blur, adjust, mask.
+      Use it instead of repeating an effect on every element.
+    position: "top" (default), "bottom", "above:<layer>", "below:<layer>" or an index (0 = lowest).
+    """
+    st = store()
+    c = st.get(canvas)
+    layer = st.create_layer(c, name, _layer_settings(None if opacity == 1 else opacity, None if blend == "normal" else blend,
+                                                     clip or None, None if visible else False, style), position)
+    return {"layer": layer["name"], "active_layer": c.get("active_layer"), "layers_bottom_to_top": _layer_list(c)}
+
+
+@tool
+def update_layer(canvas: str, layer: str, name: str | None = None, opacity: float | None = None,
+                 blend: str | None = None, clip: bool | None = None, visible: bool | None = None,
+                 style: dict | str | None = None, position: str | None = None, activate: bool | None = None):
+    """Change a layer: rename, opacity, blend mode, clip, show / hide, restack (position), or its style
+    (merged key by key into the current style; set a key to null to remove that effect).
+    activate=true makes it the layer new elements go to. Hiding a layer is a quick way to compare a
+    design with and without a shading pass."""
+    st = store()
+    c = st.get(canvas)
+    target = st.get_layer(c, layer)
+    changes = _layer_settings(opacity, blend, clip, visible, style)
+    if name:
+        changes["name"] = name
+    updated = st.update_layer(c, target, changes, position, activate)
+    return {"layer": updated["name"], "active_layer": c.get("active_layer"), "layers_bottom_to_top": _layer_list(c)}
+
+
+@tool
+def delete_layer(canvas: str, layer: str, keep_elements: bool = False):
+    """Delete a layer. Its elements are deleted with it, unless keep_elements=true, which drops them
+    into the bottom "base" layer instead."""
+    st = store()
+    c = st.get(canvas)
+    affected = st.delete_layer(c, st.get_layer(c, layer), keep_elements)
+    return {"deleted": layer, "elements_kept" if keep_elements else "elements_deleted": affected,
+            "layers_bottom_to_top": _layer_list(c)}
+
+
+@tool
+def set_layer(canvas: str, layer: str, ids: list[str] | None = None, group: str | None = None):
+    """Move existing elements (by ids, or a whole group) to another layer. layer="base" takes them out of
+    all layers. Their order among themselves is kept."""
+    st = store()
+    c = st.get(canvas)
+    elements = st.select(c, ids, group)
+    name = None if layer.strip().lower() == "base" else st.get_layer(c, layer)["name"]
+    st.assign_layer(c, elements, name)
+    return {"layer": name or "base", "moved": [e["id"] for e in elements], "layers_bottom_to_top": _layer_list(c)}
+
+
 # --------------------------------------------------------------------------- drawing tools
 
 @tool
@@ -327,7 +458,7 @@ def add_rect(canvas: str, x: float, y: float, width: float, height: float, radiu
              corner: str = "round", fill: str | dict | None = None, stroke: str | dict | None = None,
              style: str | dict | None = None, rotation: float = 0, skew: float = 0,
              origin: list[float] | None = None, id: str | None = None,
-             group: str | None = None, clip: str | None = None):
+             group: str | None = None, clip: str | None = None, layer: str | None = None):
     """Add a rectangle (panels, buttons, bars, slots, dividers).
 
     x, y: top-left corner. radius: one number or [top-left, top-right, bottom-right, bottom-left].
@@ -341,25 +472,25 @@ def add_rect(canvas: str, x: float, y: float, width: float, height: float, radiu
     return _add(canvas, "rect", dict(x=x, y=y, width=width, height=height, radius=radius or None,
                                      corner=None if corner == "round" else corner, fill=fill, stroke=stroke,
                                      style=style, rotation=rotation or None, skew=skew or None, origin=origin,
-                                     id=id, group=group, clip=clip))
+                                     id=id, group=group, clip=clip, layer=layer))
 
 
 @tool
 def add_ellipse(canvas: str, cx: float, cy: float, rx: float, ry: float | None = None,
                 fill: str | dict | None = None, stroke: str | dict | None = None,
                 style: str | dict | None = None, rotation: float = 0, id: str | None = None,
-                group: str | None = None, clip: str | None = None):
+                group: str | None = None, clip: str | None = None, layer: str | None = None):
     """Add a circle or ellipse centred at (cx, cy). Omit ry for a circle.
     Good for avatar frames, orbs, round buttons, radial glows (use a radial gradient fill)."""
     return _add(canvas, "ellipse", dict(cx=cx, cy=cy, rx=rx, ry=ry, fill=fill, stroke=stroke, style=style,
-                                        rotation=rotation or None, id=id, group=group, clip=clip))
+                                        rotation=rotation or None, id=id, group=group, clip=clip, layer=layer))
 
 
 @tool
 def add_line(canvas: str, points: list[list[float]], width: float = 2, color: str | dict | None = None,
              cap: str = "round", closed: bool = False, dash: list[float] | None = None,
              style: str | dict | None = None,
-             id: str | None = None, group: str | None = None, clip: str | None = None):
+             id: str | None = None, group: str | None = None, clip: str | None = None, layer: str | None = None):
     """Add a line or polyline through points [[x, y], ...] (dividers, accents, brackets, ticks).
 
     width: thickness. cap: "round" or "butt". color may be a color or a gradient object.
@@ -369,7 +500,7 @@ def add_line(canvas: str, points: list[list[float]], width: float = 2, color: st
     """
     return _add(canvas, "line", dict(points=points, width=width, cap=None if cap == "round" else cap,
                                      closed=closed or None, dash=dash, color=color, style=style, id=id,
-                                     group=group, clip=clip))
+                                     group=group, clip=clip, layer=layer))
 
 
 @tool
@@ -378,7 +509,7 @@ def add_polygon(canvas: str, points: list[list[float]] | None = None, cx: float 
                 inner_radius: float | None = None, point_rotation: float = 0, corner_radius: float = 0,
                 fill: str | dict | None = None, stroke: str | dict | None = None,
                 style: str | dict | None = None, rotation: float = 0, origin: list[float] | None = None,
-                id: str | None = None, group: str | None = None, clip: str | None = None):
+                id: str | None = None, group: str | None = None, clip: str | None = None, layer: str | None = None):
     """Add a polygon. Either give explicit points [[x, y], ...], or a regular shape with
     cx, cy, radius, sides (3 = triangle, 6 = hexagon, ...). The first vertex points up;
     point_rotation turns it. inner_radius makes a star (sides = number of points).
@@ -390,7 +521,7 @@ def add_polygon(canvas: str, points: list[list[float]] | None = None, cx: float 
                                         sides=None if points else sides, inner_radius=inner_radius,
                                         point_rotation=point_rotation or None, corner_radius=corner_radius or None,
                                         fill=fill, stroke=stroke, style=style, rotation=rotation or None,
-                                        origin=origin, id=id, group=group, clip=clip))
+                                        origin=origin, id=id, group=group, clip=clip, layer=layer))
 
 
 @tool
@@ -398,7 +529,7 @@ def add_path(canvas: str, d: str, x: float = 0, y: float = 0, scale: float = 1,
              fill: str | dict | None = None, stroke: str | dict | None = None,
              style: str | dict | None = None, rotation: float = 0, skew: float = 0,
              origin: list[float] | None = None, id: str | None = None,
-             group: str | None = None, clip: str | None = None):
+             group: str | None = None, clip: str | None = None, layer: str | None = None):
     """Add a free-form shape from SVG path data (commands M L H V C S Q T A Z, absolute or relative).
 
     Use it for custom icons, banners, ribbons, angled HUD frames, curved bars. The path is scaled by
@@ -407,14 +538,14 @@ def add_path(canvas: str, d: str, x: float = 0, y: float = 0, scale: float = 1,
     """
     return _add(canvas, "path", dict(d=d, x=x or None, y=y or None, scale=None if scale == 1 else scale,
                                      fill=fill, stroke=stroke, style=style, rotation=rotation or None,
-                                     skew=skew or None, origin=origin, id=id, group=group, clip=clip))
+                                     skew=skew or None, origin=origin, id=id, group=group, clip=clip, layer=layer))
 
 
 @tool
 def add_arc(canvas: str, cx: float, cy: float, radius: float, start_angle: float, end_angle: float,
             thickness: float = 6, color: str | dict | None = None, cap: str = "butt",
             dash: list[float] | None = None, style: str | dict | None = None, id: str | None = None,
-            group: str | None = None, clip: str | None = None):
+            group: str | None = None, clip: str | None = None, layer: str | None = None):
     """Add a circular arc (gauge tracks and fills, rev bands, circular progress, radar rings).
 
     radius is the centre line of the band, thickness its width. Angles in degrees, 0 = 3 o'clock,
@@ -426,7 +557,7 @@ def add_arc(canvas: str, cx: float, cy: float, radius: float, start_angle: float
     """
     return _add(canvas, "arc", dict(cx=cx, cy=cy, radius=radius, start_angle=start_angle, end_angle=end_angle,
                                     thickness=thickness, color=color, cap=None if cap == "butt" else cap,
-                                    dash=dash, style=style, id=id, group=group, clip=clip))
+                                    dash=dash, style=style, id=id, group=group, clip=clip, layer=layer))
 
 
 def _ticks(c: dict, args: dict) -> dict:
@@ -449,7 +580,7 @@ def _ticks(c: dict, args: dict) -> dict:
         base = f"dial{counters['dial']}"
     group = a.get("group") or base
     common = dict(cx=cx, cy=cy, radius=radius, start_angle=start, end_angle=end, count=count, group=group,
-                  clip=a.get("clip"), cap=a.get("cap"))
+                  clip=a.get("clip"), cap=a.get("cap"), layer=a.get("layer"))
     created = []
     minor = dict(common, length=length, width=width, id=f"{base}_minor", color=a.get("color"), style=a.get("style"))
     if major_every > 1:
@@ -480,7 +611,8 @@ def _ticks(c: dict, args: dict) -> dict:
             label = dict(text=str(text), x=round(cx + label_radius * math.cos(ang), 2),
                          y=round(cy + label_radius * math.sin(ang), 2), anchor="center", size=size,
                          font=a.get("label_font"), weight=a.get("label_weight"), italic=a.get("label_italic"),
-                         color=a.get("label_color", a.get("color")), id=f"{base}_label{n}", group=group)
+                         color=a.get("label_color", a.get("color")), id=f"{base}_label{n}", group=group,
+                         layer=a.get("layer"))
             el, warn = st.add_element(c, "text", _prepare("text", label), checkpoint=False)
             warnings += warn
             created.append(el["id"])
@@ -498,7 +630,7 @@ def add_ticks(canvas: str, cx: float, cy: float, radius: float, start_angle: flo
               label_radius: float | None = None, label_size: float = 14, label_font: str | None = None,
               label_weight: int | str | None = None, label_italic: bool | None = None,
               label_color: str | dict | None = None, style: str | dict | None = None,
-              id: str | None = None, group: str | None = None):
+              id: str | None = None, group: str | None = None, layer: str | None = None):
     """Add dial tick marks (speedometer, tachometer, compass, clock) in one call.
 
     `count` ticks are spread evenly from start_angle to end_angle (both ends included), each drawn from
@@ -519,7 +651,7 @@ def add_ticks(canvas: str, cx: float, cy: float, radius: float, start_angle: flo
                                 major_length=major_length, major_width=major_width, major_color=major_color,
                                 labels=labels, label_radius=label_radius, label_size=label_size,
                                 label_font=label_font, label_weight=label_weight, label_italic=label_italic,
-                                label_color=label_color, style=style, id=id, group=group))
+                                label_color=label_color, style=style, id=id, group=group, layer=layer))
     except Exception:
         st.drop_checkpoint(c)
         st.save_canvas(c)
@@ -536,7 +668,7 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
              uppercase: bool | str | None = None, italic: bool | None = None, skew: float = 0,
              stroke: str | dict | None = None, style: str | dict | None = None, rotation: float = 0,
              origin: list[float] | None = None, id: str | None = None,
-             group: str | None = None, clip: str | None = None):
+             group: str | None = None, clip: str | None = None, layer: str | None = None):
     """Add text.
 
     (x, y) is where `anchor` sits: "top-left", "center" (centre of a button), "middle-left",
@@ -557,13 +689,13 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
                                      max_width=max_width, fit_width=fit_width, line_height=line_height,
                                      letter_spacing=letter_spacing, uppercase=uppercase or None,
                                      italic=italic or None, skew=skew or None, stroke=stroke, style=style,
-                                     rotation=rotation or None, origin=origin, id=id, group=group, clip=clip))
+                                     rotation=rotation or None, origin=origin, id=id, group=group, clip=clip, layer=layer))
 
 
 @tool
 def add_icon(canvas: str, name: str, x: float, y: float, size: float = 24, color: str | dict | None = None,
              variant: str = "line", stroke_width: float = 2, style: str | dict | None = None,
-             rotation: float = 0, id: str | None = None, group: str | None = None, clip: str | None = None):
+             rotation: float = 0, id: str | None = None, group: str | None = None, clip: str | None = None, layer: str | None = None):
     """Add a built-in icon (see list_icons) inside the square at (x, y) with side `size`.
 
     variant: "line" (outline) or "solid" (closed shapes filled). stroke_width is in 24-grid units
@@ -575,21 +707,21 @@ def add_icon(canvas: str, name: str, x: float, y: float, size: float = 24, color
     return _add(canvas, "icon", dict(name=name, x=x, y=y, size=size, color=color,
                                      variant=None if variant == "line" else variant,
                                      stroke_width=None if stroke_width == 2 else stroke_width, style=style,
-                                     rotation=rotation or None, id=id, group=group, clip=clip))
+                                     rotation=rotation or None, id=id, group=group, clip=clip, layer=layer))
 
 
 @tool
 def add_image(canvas: str, path: str, x: float, y: float, width: float | None = None, height: float | None = None,
               fit: str = "stretch", radius: float | list[float] = 0, tint: str | None = None,
               style: str | dict | None = None, rotation: float = 0, id: str | None = None,
-              group: str | None = None, clip: str | None = None):
+              group: str | None = None, clip: str | None = None, layer: str | None = None):
     """Place an existing image file (PNG/JPG/WebP) from disk, e.g. a character portrait, a logo, or a
     PNG exported earlier. Give width and/or height (the missing one keeps the aspect ratio).
     fit: "stretch", "contain" or "cover". radius rounds the corners. tint recolors using the alpha
     (handy for white icons). style can add shadow / glow / opacity."""
     return _add(canvas, "image", dict(path=str(Path(path).expanduser()), x=x, y=y, width=width, height=height,
                                       fit=None if fit == "stretch" else fit, radius=radius or None, tint=tint,
-                                      style=style, rotation=rotation or None, id=id, group=group, clip=clip))
+                                      style=style, rotation=rotation or None, id=id, group=group, clip=clip, layer=layer))
 
 
 # --------------------------------------------------------------------------- editing tools
@@ -756,7 +888,7 @@ def batch(canvas: str, operations: list[dict]):
 
     Each operation is {"op": "<tool name>", ...the same arguments that tool takes, without canvas}.
     Supported ops: add_rect, add_ellipse, add_line, add_polygon, add_path, add_arc, add_ticks, add_text,
-    add_icon, add_image, create_animation, set_keyframes, update_element, delete_elements, move_elements, reorder_element, duplicate_element.
+    add_icon, add_image, create_layer, update_layer, set_layer, create_animation, set_keyframes, update_element, delete_elements, move_elements, reorder_element, duplicate_element.
     Give elements explicit "id"s so later operations (clip, update, reorder) can refer to them.
     The batch is atomic: if any operation fails nothing is changed, and the error names the failing op.
     """
@@ -781,6 +913,29 @@ def batch(canvas: str, operations: list[dict]):
                     results.append(_summary(st, c, el, warnings))
                 elif op == "add_ticks":
                     results.append(_ticks(c, op_args))
+                elif op == "create_layer":
+                    layer = st.create_layer(c, op_args["name"], _layer_settings(
+                        op_args.get("opacity"), op_args.get("blend"), op_args.get("clip"), op_args.get("visible"),
+                        op_args.get("style")), op_args.get("position"), checkpoint=False)
+                    results.append({"layer": layer["name"], "active": True})
+                elif op == "update_layer":
+                    target = st.get_layer(c, op_args["layer"])
+                    changes = _layer_settings(op_args.get("opacity"), op_args.get("blend"), op_args.get("clip"),
+                                              op_args.get("visible"), op_args.get("style"))
+                    if op_args.get("name"):
+                        changes["name"] = op_args["name"]
+                    updated = st.update_layer(c, target, changes, op_args.get("position"), op_args.get("activate"),
+                                              checkpoint=False)
+                    results.append({"layer": updated["name"]})
+                elif op == "set_layer":
+                    targets = st.select(c, op_args.get("ids"), op_args.get("group"))
+                    name = None if str(op_args["layer"]).strip().lower() == "base" else st.get_layer(c, op_args["layer"])["name"]
+                    for el in targets:
+                        if name:
+                            el["layer"] = name
+                        else:
+                            el.pop("layer", None)
+                    results.append({"layer": name or "base", "moved": [e["id"] for e in targets]})
                 elif op == "create_animation":
                     key, anim, _ = st.create_animation(c, op_args["name"], op_args["duration"],
                                                        op_args.get("loop", False), op_args.get("fps", 30))
@@ -1222,7 +1377,7 @@ def _label_font(size: int = 12):
 @tool
 def preview(canvas: str, background: str = "checker", max_size: int = 1024, show_ids: bool = False,
             region: list[float] | None = None, zoom: float | None = None,
-            animation: str | None = None, time: float = 0):
+            animation: str | None = None, time: float = 0, layers: list[str] | None = None):
     """Render a canvas and return the picture so you can check your work. Look at it critically:
     alignment, spacing, contrast, clipped shadows, text overflow.
 
@@ -1232,6 +1387,8 @@ def preview(canvas: str, background: str = "checker", max_size: int = 1024, show
     region [x, y, width, height] zooms into part of the canvas for detail checks.
     zoom: render scale; by default the view is scaled to fit max_size (small assets are enlarged up to 4x).
     animation + time: show the canvas posed at `time` seconds of that animation (one frame, full detail).
+    layers: show only these layers (e.g. ["shade"] to inspect a shading pass alone; "base" = the
+    implicit bottom layer). Clipped layers stay clipped to their base.
     """
     st = store()
     c = st.get(canvas)
@@ -1253,7 +1410,10 @@ def preview(canvas: str, background: str = "checker", max_size: int = 1024, show
     else:
         scale = min(4.0, max_size / max(rw, rh))
     r = st.renderer(c, scale)
-    img = r.render()
+    solo = None
+    if layers:
+        solo = {"base" if str(n).strip().lower() == "base" else st.get_layer(c, n)["name"] for n in layers}
+    img = r.render(only_layers=solo)
     if region:
         crop = (int(round(rx * scale)), int(round(ry * scale)), int(round((rx + rw) * scale)), int(round((ry + rh) * scale)))
         img = img.crop(crop)
@@ -1410,73 +1570,215 @@ def export_png(canvas: str, path: str | None = None, scales: list[float] | None 
     return result
 
 
-@tool
-def export_layers(canvas: str, out_dir: str | None = None, name: str | None = None,
-                  groups: list[str] | None = None, scales: list[float] | None = None,
-                  trim: bool = True, padding: int = 2):
-    """Split one canvas into separate PNGs, one per element group, plus a layout JSON that says where
-    each piece sits. Use it when the engine must animate parts independently: a gauge (dial / needle /
-    value arc), a HUD mockup (each widget), a button (background / icon).
+def _layer_units(r, merge_clipped: bool) -> list[dict]:
+    """Group the layer stack into export units: a base layer plus (optionally) the layers clipped to it."""
+    items = r.stack()
+    units = []
+    i = 0
+    while i < len(items):
+        layer, elements = items[i]
+        j = i + 1
+        children = []
+        while j < len(items) and items[j][0] is not None and items[j][0].get("clip"):
+            children.append(items[j])
+            j += 1
+        units.append({"layer": layer, "elements": elements, "children": children if merge_clipped else []})
+        if not merge_clipped:
+            for child in children:
+                units.append({"layer": child[0], "elements": child[1], "children": [], "clip_base": (layer, elements)})
+        i = j
+    return units
 
-    Give elements a `group` while drawing. Elements without a group go to a layer called "base".
-    groups: export only these (default: all, in draw order). trim crops each layer to its pixels and
-    records its x, y in the layout, so the engine can place it exactly.
-    Writes "<name>_<group>.png" and "<name>.layout.json":
-      {"canvas": {"width", "height"}, "layers": [{"name", "file", "x", "y", "width", "height", "order"}]}
-    (x, y, width, height in canvas units at 1x; rotating parts list their "origin" pivot too).
+
+@tool
+def export_layers(canvas: str, out_dir: str | None = None, name: str | None = None, by: str = "auto",
+                  layers: list[str] | None = None, groups: list[str] | None = None,
+                  scales: list[float] | None = None, trim: bool = True, padding: int = 2,
+                  merge_clipped: bool = True):
+    """Export a canvas in pieces: one PNG per layer (or per element group) plus a layout JSON that says
+    where each piece sits, so an engine can rebuild the picture and move the parts independently -
+    a gauge (dial / needle / value arc), a HUD (each widget), a button (background / shine / label).
+
+    by: "layer" = one image per canvas layer, with its layer style, opacity and clipping applied;
+        "group" = one image per element `group` (elements without one go to "base");
+        "auto" (default) = "layer" if the canvas has layers, else "group".
+    layers / groups: export only these names (default: all, bottom to top).
+    merge_clipped (by layer): layers clipped onto a base (shading, highlights) are baked into that base's
+      image, since an engine cannot clip or blend them itself. false exports each one separately.
+    trim crops every piece to its pixels and records its x, y so it can be placed exactly.
+    Writes "<name>_<piece>.png" and "<name>.layout.json":
+      {"canvas": {"width", "height"}, "layers": [{"name", "file", "x", "y", "width", "height", "order",
+        "blend", "merged", "origin"}]}   (canvas units at 1x; "origin" = rotation pivot of the part).
+    For a fully editable stack in an image editor use export_psd.
     """
     st = store()
     c = st.get(canvas)
+    mode = by.lower()
+    if mode not in ("auto", "layer", "group"):
+        raise ValueError("by must be 'auto', 'layer' or 'group'")
+    if mode == "auto":
+        mode = "layer" if c.get("layers") else "group"
     folder = _out_dir(out_dir, "layers")
     base = slugify(name or c["id"], "layers")
-    order: list[str] = []
-    members: dict[str, list[dict]] = {}
-    for el in c["elements"]:
-        if not el.get("visible", True):
-            continue
-        key = el.get("group") or "base"
-        if key not in members:
-            members[key] = []
-            order.append(key)
-        members[key].append(el)
-    wanted = groups or order
-    for g in wanted:
-        if g not in members:
-            raise ValueError(f"No visible elements in group '{g}'. Groups: {', '.join(order) or '(none)'}")
-    layers = []
-    warnings: list[str] = []
     scale_list = [float(v) for v in (scales or [1])]
-    for g in wanted:
-        ids = {e["id"] for e in members[g]}
-        entry: dict = {"name": g, "order": order.index(g), "elements": sorted(ids)}
-        pivots = [e["origin"] for e in members[g] if e.get("origin")]
-        if pivots:
-            entry["origin"] = pivots[0]
+    for scale in scale_list:
+        if not 0.1 <= scale <= 8:
+            raise ValueError("scale must be between 0.1 and 8")
+    warnings: list[str] = []
+    notes: list[str] = []
+    pieces: list[dict] = []          # {"name", "render": scale -> RGBA, "meta": {...}}
+
+    if mode == "group":
+        order: list[str] = []
+        members: dict[str, list[dict]] = {}
+        for el in c["elements"]:
+            if not el.get("visible", True):
+                continue
+            key = el.get("group") or "base"
+            if key not in members:
+                members[key] = []
+                order.append(key)
+            members[key].append(el)
+        wanted = groups or order
+        for g in wanted:
+            if g not in members:
+                raise ValueError(f"No visible elements in group '{g}'. Groups: {', '.join(order) or '(none)'}")
+        for g in wanted:
+            ids = {e["id"] for e in members[g]}
+
+            def render_group(scale: float, ids=ids):
+                r = st.renderer(c, scale)
+                img = r.render(include_background=False, only=ids)
+                warnings.extend(r.warnings)
+                return img
+
+            pivots = [e["origin"] for e in members[g] if e.get("origin")]
+            pieces.append({"name": g, "render": render_group,
+                           "meta": {"order": order.index(g), "elements": sorted(ids),
+                                    **({"origin": pivots[0]} if pivots else {})}})
+    else:
+        probe = st.renderer(c, 1.0)
+        units = _layer_units(probe, merge_clipped)
+        names = [(u["layer"]["name"] if u["layer"] else "base") for u in units]
+        wanted_layers = None
+        if layers:
+            wanted_layers = {"base" if str(n).strip().lower() == "base" else st.get_layer(c, n)["name"] for n in layers}
+        for index, unit in enumerate(units):
+            layer = unit["layer"]
+            lname = layer["name"] if layer else "base"
+            if wanted_layers is not None and lname not in wanted_layers:
+                continue
+            props = probe.layer_props(layer) if layer else {"blend": "normal", "visible": True, "clip": False}
+            if not props["visible"]:
+                notes.append(f"layer '{lname}' is hidden and was skipped")
+                continue
+            if not unit["elements"] and not unit["children"]:
+                continue
+
+            def render_unit(scale: float, unit=unit):
+                r = st.renderer(c, scale)
+                clip_alpha = None
+                if unit.get("clip_base"):
+                    _, clip_alpha = r.layer_image(*unit["clip_base"])
+                final, alpha = r.layer_image(unit["layer"], unit["elements"], clip_alpha)
+                for child_layer, child_elements in unit["children"]:
+                    child_props = r.layer_props(child_layer)
+                    if not child_props["visible"]:
+                        continue
+                    piece, _ = r.layer_image(child_layer, child_elements, alpha)
+                    _composite(final, piece, 0, 0, child_props["blend"])
+                warnings.extend(r.warnings)
+                return final
+
+            meta: dict = {"order": index, "elements": sorted(e["id"] for e in unit["elements"])}
+            if props["blend"] != "normal":
+                meta["blend"] = props["blend"]
+                notes.append(f"layer '{lname}' uses blend '{props['blend']}': a plain image in an engine draws as "
+                             "normal. Bake it (clip it onto its base, or merge the layers) or use a material.")
+            if unit["children"]:
+                meta["merged"] = [child[0]["name"] for child in unit["children"]]
+            pivots = [e["origin"] for e in unit["elements"] if e.get("origin")]
+            if pivots:
+                meta["origin"] = pivots[0]
+            pieces.append({"name": lname, "render": render_unit, "meta": meta})
+        if not pieces:
+            raise ValueError(f"Nothing to export. Layers: {', '.join(names) or '(none)'}")
+
+    out_layers = []
+    for piece in pieces:
+        entry: dict = {"name": piece["name"], **piece["meta"]}
         files = []
         for scale in scale_list:
-            if not 0.1 <= scale <= 8:
-                raise ValueError("scale must be between 0.1 and 8")
-            r = st.renderer(c, scale)
-            img = r.render(include_background=False, only=ids)
-            warnings += r.warnings
+            img = piece["render"](scale)
             offset = (0, 0)
             if trim:
                 img, offset = ex.trim(img, int(round(padding * scale)))
-            filename = f"{base}_{slugify(g, 'layer')}{_scale_suffix(scale)}.png"
+            filename = f"{base}_{slugify(piece['name'], 'layer')}{_scale_suffix(scale)}.png"
             img.save(folder / filename)
             files.append({"file": filename, "scale": scale, "pixel_width": img.width, "pixel_height": img.height})
             if scale == scale_list[0]:
                 entry.update(file=filename, x=_round(offset[0] / scale), y=_round(offset[1] / scale),
                              width=_round(img.width / scale), height=_round(img.height / scale))
         entry["files"] = files
-        layers.append(entry)
-    layout = {"canvas": {"name": c["id"], "width": c["width"], "height": c["height"]}, "layers": layers}
+        out_layers.append(entry)
+    layout = {"canvas": {"name": c["id"], "width": c["width"], "height": c["height"]}, "split_by": mode,
+              "layers": out_layers}
     layout_path = folder / f"{base}.layout.json"
     ex.write_json(layout_path, layout)
-    result: dict = {"folder": str(folder), "layout": str(layout_path),
-                    "layers": [{k: v for k, v in layer.items() if k != "elements"} for layer in layers]}
+    result: dict = {"folder": str(folder), "layout": str(layout_path), "split_by": mode,
+                    "layers": [{k: v for k, v in layer.items() if k != "elements"} for layer in out_layers]}
+    if notes:
+        result["notes"] = sorted(set(notes))
     if warnings:
         result["warnings"] = sorted(set(warnings))
+    return result
+
+
+@tool
+def export_psd(canvas: str, path: str | None = None, scale: float = 1, include_background: bool = True):
+    """Save the canvas as a layered Photoshop file (.psd): every canvas layer becomes a PSD layer with its
+    name, opacity, blend mode, visibility and clipping kept, so the stack stays editable in Photoshop,
+    Photopea, Krita, GIMP or Affinity. Elements on a layer are flattened into that layer's pixels and
+    layer styles (shadow, stroke, light...) are baked in. Elements outside any layer go to a "base" layer;
+    the canvas background becomes a "background" layer.
+
+    scale: resolution multiplier (2 = double size). path: relative paths go to the workspace exports folder.
+    """
+    st = store()
+    c = st.get(canvas)
+    scale = float(scale)
+    if not 0.1 <= scale <= 8:
+        raise ValueError("scale must be between 0.1 and 8")
+    out = Path(path).expanduser() if path else st.exports_dir / f"{c['id']}.psd"
+    if not out.is_absolute():
+        out = st.exports_dir / out
+    if out.suffix.lower() != ".psd":
+        raise ValueError("Output file must end with .psd")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    r = st.renderer(c, scale)
+    stack_layers: list[dict] = []
+    if include_background and c.get("background"):
+        bg_only = dict(c, elements=[], layers=[])
+        stack_layers.append({"name": "background", "image": st.renderer(bg_only, scale).render(), "opacity": 1,
+                             "blend": "normal", "clip": False, "visible": True})
+    has_base = False
+    for layer, elements in r.stack():
+        props = r.layer_props(layer) if layer else {"name": "base", "opacity": 1.0, "blend": "normal", "clip": False,
+                                                     "visible": True}
+        image, _ = r.layer_image(layer, elements, None, bake_opacity=False)
+        stack_layers.append({"name": props["name"], "image": image, "opacity": props["opacity"], "blend": props["blend"],
+                             "clip": props["clip"] and has_base, "visible": props["visible"]})
+        has_base = True
+    if not stack_layers:
+        raise ValueError("The canvas is empty")
+    merged = r.render(include_background=include_background)
+    psd_mod.write_psd(out, r.width, r.height, stack_layers, merged)
+    result: dict = {"file": str(out), "size": [r.width, r.height],
+                    "layers_bottom_to_top": [{"name": l["name"], "blend": l["blend"], "opacity": l["opacity"],
+                                              **({"clip": True} if l["clip"] else {}),
+                                              **({} if l["visible"] else {"visible": False})} for l in stack_layers]}
+    if r.warnings:
+        result["warnings"] = sorted(set(r.warnings))
     return result
 
 

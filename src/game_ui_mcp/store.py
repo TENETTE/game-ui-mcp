@@ -23,7 +23,8 @@ def default_workspace() -> Path:
 
 
 def slugify(name: str, fallback: str = "canvas") -> str:
-    slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(name).strip()).strip("_").lower()
+    # keep letters of any alphabet (ğ, ş, é ...); only spaces and punctuation become underscores
+    slug = re.sub(r"[^\w-]+", "_", str(name).strip().replace("İ", "i")).strip("_").lower()
     return slug or fallback
 
 
@@ -215,6 +216,10 @@ class Store:
         el.update(props)
         if el.get("clip"):
             self.find(canvas, el["clip"])
+        if el.get("layer"):
+            el["layer"] = self.get_layer(canvas, el["layer"])["name"]
+        elif canvas.get("active_layer") and any(l["name"] == canvas["active_layer"] for l in canvas.get("layers", [])):
+            el["layer"] = canvas["active_layer"]
         if checkpoint:
             self.checkpoint(canvas)
         canvas["elements"].append(el)
@@ -250,6 +255,11 @@ class Store:
         try:
             if el.get("clip"):
                 self.find(canvas, el["clip"])
+            if el.get("layer"):
+                if str(el["layer"]).lower() == "base":
+                    el.pop("layer")
+                else:
+                    el["layer"] = self.get_layer(canvas, el["layer"])["name"]
             warnings = self._validate(canvas, el)
         except Exception:
             el.clear()
@@ -327,6 +337,141 @@ class Store:
         if props:
             warnings = self.update_element(canvas, new_el, props, checkpoint=False)
         return new_el, warnings
+
+    # ---- layers
+
+    def get_layer(self, canvas: dict, name: str) -> dict:
+        layers = canvas.get("layers") or []
+        key = slugify(name, "layer")
+        for layer in layers:
+            if layer["name"] in (name, key):
+                return layer
+        known = ", ".join(l["name"] for l in layers) or "(none yet - call create_layer)"
+        raise ValueError(f"Layer '{name}' not found on canvas '{canvas['id']}'. Layers (bottom to top): {known}. "
+                         "Elements without a layer sit in the implicit bottom layer 'base'.")
+
+    def _layer_index(self, canvas: dict, position: Any, moving: dict | None = None) -> int:
+        others = [l for l in canvas.get("layers", []) if l is not moving]
+        if position is None:
+            return len(others)
+        pos = str(position).lower().strip()
+        if pos in ("top", "front"):
+            return len(others)
+        if pos in ("bottom", "back"):
+            return 0
+        if pos.startswith(("above:", "below:")):
+            target = self.get_layer(canvas, str(position).split(":", 1)[1].strip())
+            if target is moving:
+                raise ValueError("cannot place a layer relative to itself")
+            return others.index(target) + (1 if pos.startswith("above:") else 0)
+        try:
+            return max(0, min(len(others), int(position)))
+        except (TypeError, ValueError):
+            raise ValueError("layer position must be 'top', 'bottom', 'above:<layer>', 'below:<layer>' or an index "
+                             "(0 = lowest)") from None
+
+    def _check_layer(self, canvas: dict, layer: dict) -> None:
+        """Render a tiny probe through the layer so a bad style / blend fails immediately."""
+        probe = {"id": "layer_probe", "width": 24, "height": 24, "background": None,
+                 "layers": [dict(layer, clip=False, visible=True)],
+                 "elements": [{"id": "p", "type": "rect", "x": 6, "y": 6, "width": 12, "height": 12,
+                               "layer": layer["name"]}]}
+        Renderer(probe, self.theme, self.fonts).render()
+
+    def create_layer(self, canvas: dict, name: str, settings: dict, position: Any, checkpoint: bool = True) -> dict:
+        key = slugify(name, "layer")
+        if key == "base":
+            raise ValueError("'base' is the name of the implicit bottom layer; pick another name")
+        layers = canvas.setdefault("layers", [])
+        if any(l["name"] == key for l in layers):
+            raise ValueError(f"Layer '{key}' already exists; use update_layer to change it")
+        layer = {"name": key}
+        layer.update({k: v for k, v in settings.items() if v is not None})
+        self._check_layer(canvas, layer)
+        index = self._layer_index(canvas, position)
+        if checkpoint:
+            self.checkpoint(canvas)
+        layers.insert(index, layer)
+        canvas["active_layer"] = key
+        self.save_canvas(canvas)
+        return layer
+
+    def update_layer(self, canvas: dict, layer: dict, changes: dict, position: Any = None,
+                     activate: bool | None = None, checkpoint: bool = True) -> dict:
+        updated = dict(layer)
+        for key, value in changes.items():
+            if key == "style" and isinstance(value, dict) and isinstance(updated.get("style"), (dict, str)):
+                merged = dict(updated["style"]) if isinstance(updated["style"], dict) else {"use": updated["style"]}
+                for sk, sv in value.items():
+                    if sv is None:
+                        merged.pop(sk, None)
+                    else:
+                        merged[sk] = sv
+                updated["style"] = merged
+            elif value is None:
+                continue
+            else:
+                updated[key] = value
+        if "name" in changes and changes["name"]:
+            new_name = slugify(changes["name"], "layer")
+            if new_name == "base" or any(l is not layer and l["name"] == new_name for l in canvas["layers"]):
+                raise ValueError(f"Layer name '{new_name}' is already taken")
+            updated["name"] = new_name
+        self._check_layer(canvas, updated)
+        index = self._layer_index(canvas, position, layer) if position is not None else None
+        if checkpoint:
+            self.checkpoint(canvas)
+            layer = self.get_layer(canvas, layer["name"])          # the checkpoint copied nothing, same object
+        old_name = layer["name"]
+        layer.clear()
+        layer.update(updated)
+        if layer["name"] != old_name:
+            for el in canvas["elements"]:
+                if el.get("layer") == old_name:
+                    el["layer"] = layer["name"]
+            if canvas.get("active_layer") == old_name:
+                canvas["active_layer"] = layer["name"]
+        if index is not None:
+            canvas["layers"] = [l for l in canvas["layers"] if l is not layer]
+            canvas["layers"].insert(index, layer)
+        if activate:
+            canvas["active_layer"] = layer["name"]
+        self.save_canvas(canvas)
+        return layer
+
+    def delete_layer(self, canvas: dict, layer: dict, keep_elements: bool) -> list[str]:
+        self.checkpoint(canvas)
+        layer = self.get_layer(canvas, layer["name"])
+        name = layer["name"]
+        affected = [e["id"] for e in canvas["elements"] if e.get("layer") == name]
+        if keep_elements:
+            for el in canvas["elements"]:
+                if el.get("layer") == name:
+                    el.pop("layer")
+        else:
+            ids = set(affected)
+            canvas["elements"] = [e for e in canvas["elements"] if e["id"] not in ids]
+            for e in canvas["elements"]:
+                if e.get("clip") in ids:
+                    e.pop("clip", None)
+            for anim in canvas.get("animations", {}).values():
+                anim["tracks"] = [t for t in anim["tracks"] if t["target"] not in ids]
+        canvas["layers"] = [l for l in canvas["layers"] if l is not layer]
+        if canvas.get("active_layer") == name:
+            canvas["active_layer"] = canvas["layers"][-1]["name"] if canvas["layers"] else None
+        self.save_canvas(canvas)
+        return affected
+
+    def assign_layer(self, canvas: dict, elements: list[dict], layer_name: str | None) -> None:
+        self.checkpoint(canvas)
+        ids = {e["id"] for e in elements}
+        for el in canvas["elements"]:
+            if el["id"] in ids:
+                if layer_name:
+                    el["layer"] = layer_name
+                else:
+                    el.pop("layer", None)
+        self.save_canvas(canvas)
 
     # ---- animations
 

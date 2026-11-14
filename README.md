@@ -14,25 +14,35 @@ Gerçekçi tarz (yarış, simülasyon, AAA) da çizebiliyor: kadran, ibre, karbo
 
 ![Gerçekçi parçalar](examples/realistic_kit.png)
 
+Kat kat çalışıyor: taban, gölge, ışık ve detay ayrı katmanlarda kurulur. Solda tek dolguyla çizilmiş hali, sağında aynı şeklin katmanlar ve ışıkla işlenmiş hali:
+
+![Düz ve gölgelendirilmiş](examples/shading_kit.png)
+
+Kürenin katmanları tek tek (örnek çıktı: [`examples/orb.psd`](examples/orb.psd)):
+
+![Kürenin katmanları](examples/orb_layers.png)
+
 Animasyon da aynı mantıkla çalışıyor: hazır efekt yok, keyframe ve ease var.
 
 | Buton girişi + parlama | Devir saati | Menü girişi ve seçim |
 | --- | --- | --- |
 | ![Buton animasyonu](examples/anim_button.gif) | ![Gösterge animasyonu](examples/anim_gauge.gif) | ![Menü animasyonu](examples/anim_menu.gif) |
 
-Görsellerin tamamı [`examples/demo.py`](examples/demo.py), [`examples/demo_racing.py`](examples/demo_racing.py) ve [`examples/demo_animation.py`](examples/demo_animation.py) içindeki tool çağrılarıyla çizildi. (GIF'ler 256 renkle sınırlı olduğu için gerçek çıktıdan biraz daha kaba görünür.)
+Görsellerin tamamı [`examples/demo.py`](examples/demo.py), [`examples/demo_racing.py`](examples/demo_racing.py), [`examples/demo_shading.py`](examples/demo_shading.py) ve [`examples/demo_animation.py`](examples/demo_animation.py) içindeki tool çağrılarıyla çizildi. (GIF'ler 256 renkle sınırlı olduğu için gerçek çıktıdan biraz daha kaba görünür.)
 
 ## Ne yapabiliyor
 
 - **Şekiller:** dikdörtgen (yuvarlak ya da kesik köşe, eğik), elips, çokgen, yıldız, çizgi (kesikli olabilir), yay, kadran çizgileri, SVG path
-- **Stil:** düz renk, linear / radial / conic gradient, çizgili / noktalı / ızgara / karbon / fırçalı metal doku, kenar çizgisi (iç, orta, dış), gölge, glow, iç gölge, bevel, bulanıklık, opaklık, karışım modları, bir pivot etrafında döndürme, başka bir şekle kırpma (`clip`)
+- **Katmanlar:** her katmanın kendi opaklığı, karışım modu (multiply, screen, overlay, soft-light... 12 mod) ve stili var; `clip` ile alttaki katmana kırpılır (taşmadan serbest gölge ve ışık boyama); katman stili içindeki her şeyi tek şekil sayar (ortak kontur, ortak gölge)
+- **Işık ve gölgeleme:** yönlü ışıkla kabartma (`light`: açı, pah, profil, parlaklık), çoklu ve aralıklı kontur, kademeli gölge, gradient maskeyle söndürme (`mask`), renk düzeltme (`adjust`: parlaklık, kontrast, doygunluk, ton)
+- **Stil:** düz renk, linear / radial / conic gradient (isteğe bağlı OKLab geçişi), çizgili / noktalı / ızgara / petek / karbon / fırçalı metal / bulut dokusu, kendi görselinle dolgu, kenar çizgisi (iç, orta, dış), gölge, glow, iç gölge, bevel, bulanıklık, opaklık, bir pivot etrafında döndürme, başka bir şekle kırpma (`clip`)
 - **Gösterge:** `add_arc` + `add_ticks` ile devir saati, hız göstergesi, turbo, segmentli LED sıraları; ibre için pivot'lu döndürme
 - **Yazı:** 10 gömülü font (Inter, Barlow Condensed, Bebas Neue, Michroma, JetBrains Mono, Rajdhani, Orbitron, Cinzel, Fredoka, Bangers) + bilgisayardaki fontlar, italik, satır kaydırma, genişliğe sığdırma, kontur, Türkçe büyük harf (`uppercase: "tr"`)
 - **İkon:** 72 hazır oyun ikonu, çizgi ve dolu hali ([hepsi](examples/icons.png))
 - **Animasyon:** keyframe + ease ile her özellik canlandırılır (konum, ölçek, dönme, opaklık, renk, efekt, yay açısı, yazı); film şeridi önizlemesi; sprite sheet, kare dizisi, GIF / APNG / WebP ya da motorun kendi tween'i için keyframe JSON çıktısı
 - **Tema:** renk token'ları (`$primary`) ve isimli stiller; bütün kit tutarlı kalır
 - **Önizleme:** AI çizdiğini resim olarak geri görür (yakınlaştırma, eleman kutuları, oyun sahnesi arka planı)
-- **Dışa aktarma:** PNG (1x, 2x), otomatik 9-slice, atlas, parça parça katman çıktısı (ibre, kadran, yay ayrı), motor başına hazır değerler ve yardımcı scriptler
+- **Dışa aktarma:** PNG (1x, 2x), otomatik 9-slice, atlas, katman katman PNG + yerleşim JSON'u, düzenlenebilir katmanlı PSD, motor başına hazır değerler ve yardımcı scriptler
 
 ## Kurulum (Windows)
 
@@ -50,6 +60,7 @@ Deneme (örnek görselleri yeniden üretir):
 ```powershell
 .venv\Scripts\python examples\demo.py
 .venv\Scripts\python examples\demo_racing.py
+.venv\Scripts\python examples\demo_shading.py
 .venv\Scripts\python examples\demo_animation.py
 ```
 
@@ -98,12 +109,13 @@ Başka bir klasör için `GAME_UI_MCP_DIR` ortam değişkenini ayarla (config'te
 | Grup | Tool'lar |
 | --- | --- |
 | Canvas | `create_canvas`, `list_canvases`, `get_canvas`, `update_canvas`, `duplicate_canvas`, `delete_canvas` |
+| Katman | `create_layer`, `update_layer`, `delete_layer`, `set_layer` |
 | Çizim | `add_rect`, `add_ellipse`, `add_line`, `add_polygon`, `add_path`, `add_arc`, `add_ticks`, `add_text`, `add_icon`, `add_image` |
 | Düzenleme | `update_element`, `delete_elements`, `duplicate_element`, `move_elements`, `reorder_element`, `align_elements`, `batch`, `undo` |
 | Animasyon | `create_animation`, `set_keyframes`, `delete_keyframes`, `get_animations`, `delete_animation`, `preview_animation`, `export_animation` |
 | Tema ve bilgi | `set_theme`, `get_theme`, `list_fonts`, `list_icons`, `measure_text` |
 | Önizleme | `preview`, `contact_sheet` |
-| Dışa aktarma | `export_png`, `export_asset`, `export_layers`, `export_atlas`, `write_engine_helpers` |
+| Dışa aktarma | `export_png`, `export_asset`, `export_layers`, `export_psd`, `export_atlas`, `write_engine_helpers` |
 
 Stil nesnesi kısaca:
 
@@ -122,6 +134,22 @@ Stil nesnesi kısaca:
 Renkler: `#rrggbb`, `#rrggbbaa`, `rgba(...)`, `$token`; sonuna `@0.5` eklenince alfa olur.
 
 Açılar (yay, kadran çizgisi, conic gradient): derece, 0 = saat 3 yönü, saat yönünde artar. Klasik bir gösterge 135'ten 405'e süpürür.
+
+## Katmanlar
+
+Canvas, alttan üste dizilen katmanlardan oluşur. `create_layer` yeni katmanı aktif yapar; sonraki elemanlar ona gider. Katman oluşturulmadan çizilenler en alttaki örtük `base` katmanında kalır.
+
+```json
+[{"op": "create_layer", "name": "body"},
+ {"op": "add_ellipse", "cx": 120, "cy": 116, "rx": 80, "fill": "#c81e3a"},
+ {"op": "create_layer", "name": "shade", "clip": true, "blend": "multiply"},
+ {"op": "add_ellipse", "cx": 120, "cy": 196, "rx": 70, "ry": 26, "fill": "#2a0410@0.7", "style": {"blur": 22}},
+ {"op": "create_layer", "name": "ring", "style": {"light": {"angle": 225, "size": 5, "gloss": 0.8}}}]
+```
+
+- `clip: true`: katman yalnızca altındaki katmanın pikselleri üstünde görünür. Gölge ve ışık şekilleri tabandan taşmaz.
+- `style`: katmanın birleşik görüntüsüne uygulanır (kontur, gölge, glow, `light`, bulanıklık, `adjust`, `mask`).
+- `export_layers` her katmanı ayrı PNG olarak verir (clip'li katmanlar varsayılan olarak tabanına gömülür); `export_psd` yığını Photoshop, Photopea, Krita ve GIMP'te açılan katmanlı dosya olarak kaydeder.
 
 ## Animasyon
 
@@ -156,6 +184,8 @@ Roblox'ta görselleri Studio'ya kendin yüklemen gerekir (server internete çık
 - Karakter portresi, illüstrasyon, fotoğraf gibi şeyleri üretmez. Bunlar için hazır bir görseli `add_image` ile yerleştirebilirsin.
 - Stroke birleşimleri çokgen ve path'lerde yuvarlaktır (dikdörtgenlerde keskin).
 - Arka planı bulanıklaştıran gerçek "buzlu cam" PNG'ye gömülemez; o efekt motor tarafında yapılır (Unreal'da `BackgroundBlur`). Burada camın koyu, yarı saydam hali çizilir.
+- PSD'de katman adı, opaklık, karışım modu, görünürlük ve clip korunur; katman stilleri ve katmandaki elemanlar piksele gömülür (vektör ya da canlı efekt olarak kalmaz). Dosya sıkıştırılmadan yazılır, büyük canvas'larda boyut büyür.
+- Motorlar multiply / screen gibi karışım modlarını düz görselle uygulayamaz; bu yüzden clip'li gölge ve ışık katmanları dışa aktarılırken tabana gömülür.
 - Animasyon çıktısı veri ve görseldir; motor içinde oynatan kodu (TweenService, DOTween, UMG) model yazar. Büyük canvas'larda kare kare çıktı yavaştır (1920×1080 ve 80 eleman için kare başına yaklaşık 1 sn).
 - Çok büyük blur'lu gölgelerde 8 bit bantlanma görülebilir (gradient'ler dither'lanır, gölgeler dither'lanmaz).
 - Yazıda harf aralığı verilince kerning uygulanmaz.

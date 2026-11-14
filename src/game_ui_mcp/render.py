@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
+from . import effects as fxlib
 from . import geometry as geo
 from . import raster
 from .colors import parse_color
@@ -26,7 +27,8 @@ MAX_MASK_PIXELS = 40_000_000
 TEXT_STYLE_KEYS = ("font", "weight", "size", "letter_spacing", "line_height", "uppercase", "italic")
 VECTOR_TYPES = {"rect", "ellipse", "polygon", "line", "path", "icon", "arc", "ticks"}
 LINE_TYPES = {"line", "icon", "arc", "ticks"}
-BLENDS = ("normal", "add", "screen", "multiply", "overlay")
+BLENDS = ("normal", "add", "screen", "multiply", "overlay", "soft-light", "hard-light", "color-dodge",
+          "color-burn", "darken", "lighten", "difference")
 CUT_K = math.tan(math.pi / 8)
 
 Box = tuple[float, float, float, float]
@@ -134,27 +136,43 @@ class Effects:
         return pad
 
 
-def _stroke_spec(st: dict, colors: dict) -> dict | None:
+def _stroke_specs(st: dict, colors: dict) -> list[dict]:
+    """Normalise style.stroke to a list. Each stroke covers the band between distances d0 and d1 from
+    the shape edge (positive = outside), so several strokes with offsets stack into double outlines."""
     spec = st.get("stroke")
     if _is_none(spec):
-        return None
-    if isinstance(spec, (str, list, tuple)):
-        spec = {"color": spec}
-    if not isinstance(spec, dict):
-        raise ValueError("stroke must be a color or an object like {color, width, align}")
-    width = float(spec.get("width", 2))
-    if width <= 0:
-        return None
-    align = str(spec.get("align", "inside")).lower()
-    if align not in ("inside", "center", "outside"):
-        raise ValueError("stroke.align must be 'inside', 'center' or 'outside'")
-    paint = spec.get("fill", spec.get("color", "#ffffff"))
-    return {"paint": paint, "width": width, "align": align}
+        return []
+    many = (isinstance(spec, (list, tuple)) and len(spec) > 0
+            and not all(isinstance(i, (int, float)) for i in spec))
+    out = []
+    for item in (spec if many else [spec]):
+        if _is_none(item):
+            continue
+        if isinstance(item, (str, list, tuple)):
+            item = {"color": item}
+        if not isinstance(item, dict):
+            raise ValueError("stroke must be a color, an object like {color, width, align, offset}, or a list of those")
+        width = float(item.get("width", 2))
+        if width <= 0:
+            continue
+        align = str(item.get("align", "inside")).lower()
+        if align not in ("inside", "center", "outside"):
+            raise ValueError("stroke.align must be 'inside', 'center' or 'outside'")
+        offset = float(item.get("offset", 0) or 0)
+        if align == "inside":
+            d0, d1 = -(offset + width), -offset
+        elif align == "outside":
+            d0, d1 = offset, offset + width
+        else:
+            d0, d1 = offset - width / 2, offset + width / 2
+        out.append({"paint": item.get("fill", item.get("color", "#ffffff")), "width": width, "align": align,
+                    "offset": offset, "d0": d0, "d1": d1})
+    return out
 
 
 # --------------------------------------------------------------------------- painting
 
-def _stops(spec: dict, colors: dict) -> tuple[np.ndarray, np.ndarray]:
+def _stops(spec: dict, colors: dict, space: str = "srgb") -> tuple[np.ndarray, np.ndarray]:
     raw = spec.get("stops") or spec.get("colors")
     if raw is None and "from" in spec and "to" in spec:
         raw = [spec["from"], spec["to"]]
@@ -173,7 +191,8 @@ def _stops(spec: dict, colors: dict) -> tuple[np.ndarray, np.ndarray]:
         offs.append(float(off))
         r, g, b, a = parse_color(col, colors)
         af = a / 255.0
-        cols.append((r * af, g * af, b * af, a))  # premultiplied
+        c0, c1, c2 = fxlib.encode_space(np.array([r, g, b], dtype=np.float64), space)
+        cols.append((c0 * af, c1 * af, c2 * af, a))  # premultiplied, in the interpolation space
     order = np.argsort(np.array(offs), kind="stable")
     return np.array(offs)[order], np.array(cols, dtype=np.float64)[order]
 
@@ -193,7 +212,7 @@ def _pattern_cov(spec: dict, kind: str, size: tuple[int, int], origin: tuple[flo
     ys, xs = np.mgrid[0:h, 0:w].astype(np.float64)
     ux = (xs + 0.5) / k - origin[0]
     uy = (ys + 0.5) / k - origin[1]
-    cell = max(0.5, float(spec.get("size", 8)))
+    cell = max(0.5, float(spec.get("size", 48 if kind == "clouds" else 16 if kind == "hex" else 8)))
     ang = math.radians(float(spec.get("angle", 45 if kind == "stripes" else 0)))
     ca, sa = math.cos(ang), math.sin(ang)
     rx, ry = ux * ca + uy * sa, -ux * sa + uy * ca
@@ -231,7 +250,25 @@ def _pattern_cov(spec: dict, kind: str, size: tuple[int, int], origin: tuple[flo
         idx = np.clip((ry * k + span).astype(np.int64), 0, span * 2 - 1)
         grain = rng.normal(0, 0.25, (h, w))
         return np.clip(0.5 + (streak[idx] + grain) * 0.22 * amount, 0, 1)
-    raise ValueError(f"Unknown fill type '{kind}'. Use linear, radial, conic, stripes, dots, grid, carbon or brushed.")
+    if kind == "hex":
+        # honeycomb outlines; ``size`` is the distance between opposite sides of a cell
+        lw = float(spec.get("line_width", 1))
+        px_, py_ = rx / cell, ry / cell
+        r3 = 1.7320508075688772
+        ax, ay = np.mod(px_, 1.0) - 0.5, np.mod(py_, r3) - r3 / 2
+        bx, by = np.mod(px_ - 0.5, 1.0) - 0.5, np.mod(py_ - r3 / 2, r3) - r3 / 2
+        near_a = ax * ax + ay * ay < bx * bx + by * by
+        gx, gy = np.abs(np.where(near_a, ax, bx)), np.abs(np.where(near_a, ay, by))
+        edge = 0.5 - np.maximum(gx, gx * 0.5 + gy * (r3 / 2))            # 0 on the cell border
+        return np.clip((lw / 2 - edge * cell) * k + 0.5, 0, 1)
+    if kind == "clouds":
+        # soft fractal noise: smoke, energy, marble, worn metal
+        seed = float(spec.get("seed", 1))
+        n = fxlib.fractal_noise(rx, ry, cell, int(spec.get("octaves", 4)), seed)
+        contrast = float(spec.get("contrast", 1))
+        return np.clip((n - 0.5) * contrast + 0.5, 0, 1)
+    raise ValueError(f"Unknown fill type '{kind}'. Use linear, radial, conic, stripes, dots, grid, hex, carbon, "
+                     "brushed, clouds or image.")
 
 
 def paint(mask: Image.Image, spec: Any, box_px: Box, colors: dict, k: float) -> Image.Image | None:
@@ -247,8 +284,11 @@ def paint(mask: Image.Image, spec: Any, box_px: Box, colors: dict, k: float) -> 
     kind = str(spec.get("type", "linear")).lower()
     x0, y0, x1, y1 = box_px
     bw, bh = max(1e-6, x1 - x0), max(1e-6, y1 - y0)
+    if kind == "image":
+        return _image_fill(mask, spec, box_px, k)
     if kind in ("linear", "radial", "conic"):
-        offs, cols = _stops(spec, colors)
+        space = str(spec.get("space", "srgb")).lower()
+        offs, cols = _stops(spec, colors, space)
         ys, xs = np.mgrid[0:h, 0:w].astype(np.float64)
         xs += 0.5
         ys += 0.5
@@ -281,6 +321,8 @@ def paint(mask: Image.Image, spec: Any, box_px: Box, colors: dict, k: float) -> 
             else:
                 t = np.hypot((xs - cx) / max(1e-6, bw * rad), (ys - cy) / max(1e-6, bh * rad))
         rgba = _ramp(np.clip(t, 0, 1), offs, cols)
+        if space != "srgb":
+            rgba[..., :3] = fxlib.decode_space(rgba[..., :3], space)
         if spec.get("dither", True):
             # half-a-level noise before rounding hides 8-bit banding in soft gradients
             rng = np.random.default_rng(zlib.crc32(repr(spec.get("stops") or spec.get("colors") or "").encode()))
@@ -299,6 +341,85 @@ def paint(mask: Image.Image, spec: Any, box_px: Box, colors: dict, k: float) -> 
     m = np.asarray(mask, dtype=np.float64) / 255.0
     rgba[..., 3] *= m
     return Image.fromarray(np.clip(rgba + 0.5, 0, 255).astype(np.uint8), "RGBA")
+
+
+_IMAGE_CACHE: dict[tuple[str, float], Image.Image] = {}
+
+
+def _image_fill(mask: Image.Image, spec: dict, box_px: Box, k: float) -> Image.Image:
+    """Use a picture as paint: {"type": "image", "path": ..., "fit": "cover" | "stretch" | "tile", "scale": 1}."""
+    path = Path(str(spec.get("path", ""))).expanduser()
+    if not path.is_file():
+        raise ValueError(f"image fill: file not found: {path}")
+    key = (str(path), path.stat().st_mtime)
+    if key not in _IMAGE_CACHE:
+        if len(_IMAGE_CACHE) > 16:
+            _IMAGE_CACHE.clear()
+        _IMAGE_CACHE[key] = Image.open(path).convert("RGBA")
+    src = _IMAGE_CACHE[key]
+    w, h = mask.size
+    x0, y0, x1, y1 = box_px
+    bw, bh = max(1, int(round(x1 - x0))), max(1, int(round(y1 - y0)))
+    fit = str(spec.get("fit", "cover")).lower()
+    out = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    if fit == "tile":
+        scale = max(0.01, float(spec.get("scale", 1))) * k
+        tile = src.resize((max(1, int(round(src.width * scale))), max(1, int(round(src.height * scale)))), Image.LANCZOS)
+        ox, oy = int(round(x0)) % tile.width - tile.width, int(round(y0)) % tile.height - tile.height
+        for ty in range(oy, h, tile.height):
+            for tx in range(ox, w, tile.width):
+                out.paste(tile, (tx, ty))
+    elif fit in ("cover", "stretch"):
+        if fit == "stretch":
+            img = src.resize((bw, bh), Image.LANCZOS)
+        else:
+            ratio = max(bw / src.width, bh / src.height)
+            img = src.resize((max(1, int(round(src.width * ratio))), max(1, int(round(src.height * ratio)))), Image.LANCZOS)
+            left, top = (img.width - bw) // 2, (img.height - bh) // 2
+            img = img.crop((left, top, left + bw, top + bh))
+        out.paste(img, (int(round(x0)), int(round(y0))))
+    else:
+        raise ValueError("image fill: fit must be 'cover', 'stretch' or 'tile'")
+    opacity = max(0.0, min(1.0, float(spec.get("opacity", 1))))
+    alpha = ImageChops.multiply(out.getchannel("A"), mask)
+    out.putalpha(alpha if opacity >= 1 else alpha.point(lambda v: int(v * opacity + 0.5)))
+    return out
+
+
+def _outer_effects(layer: Image.Image, sil: Image.Image, fx: "Effects", k: float) -> Image.Image:
+    """Shadows and glows cast by the silhouette, composited onto ``layer`` (which is still empty)."""
+    for e in fx.outer:
+        m = sil
+        spread = e["spread"] * k
+        if spread > 0:
+            m = Image.fromarray(fxlib.dilate(np.asarray(m), spread), "L")
+        m = _shift(m, int(round(e["dx"] * k)), int(round(e["dy"] * k)))
+        if e["blur"] > 0:
+            m = m.filter(ImageFilter.GaussianBlur(e["blur"] * k / 2))
+        if e["knockout"]:
+            m = ImageChops.multiply(m, ImageChops.invert(sil))
+        layer = Image.alpha_composite(layer, _tint(m, e["color"], e["strength"]))
+    return layer
+
+
+def _inner_effects(layer: Image.Image, shape: Image.Image, fx: "Effects", k: float) -> Image.Image:
+    """Inner shadows / glows / simple bevel, limited to the shape."""
+    for e in fx.inner:
+        m = ImageChops.invert(shape)
+        m = _shift(m, int(round(e["dx"] * k)), int(round(e["dy"] * k)), fill=255)
+        if e["blur"] > 0:
+            m = m.filter(ImageFilter.GaussianBlur(e["blur"] * k / 2))
+        m = ImageChops.multiply(m, shape)
+        layer = Image.alpha_composite(layer, _tint(m, e["color"], e.get("strength", 1.0)))
+    return layer
+
+
+def _soft_mask(size: tuple[int, int], spec: Any, box_px: Box, colors: dict, k: float) -> Image.Image:
+    """Alpha of a paint spec over the whole region: the fade mask for style.mask."""
+    painted = paint(Image.new("L", size, 255), spec, box_px, colors, k)
+    if painted is None:
+        return Image.new("L", size, 255)
+    return painted.getchannel("A")
 
 
 def _tint(mask: Image.Image, color: tuple[int, int, int, int], strength: float = 1.0) -> Image.Image:
@@ -339,7 +460,7 @@ def composite(dst: Image.Image, src: Image.Image, ox: int, oy: int, blend: str =
         safe = np.where(alpha > 0, alpha / 255.0, 1.0)
         out = np.concatenate([np.clip(rgb / safe, 0, 255), alpha], axis=-1)
         merged = Image.fromarray((out + 0.5).astype(np.uint8), "RGBA")
-    elif blend in ("screen", "multiply", "overlay"):
+    elif blend != "normal":
         b = np.asarray(base, dtype=np.float64) / 255.0
         s = np.asarray(part, dtype=np.float64) / 255.0
         bc, sc, ba, sa = b[..., :3], s[..., :3], b[..., 3:4], s[..., 3:4]
@@ -347,8 +468,25 @@ def composite(dst: Image.Image, src: Image.Image, ox: int, oy: int, blend: str =
             mixed = bc * sc
         elif blend == "screen":
             mixed = 1 - (1 - bc) * (1 - sc)
-        else:
+        elif blend == "overlay":
             mixed = np.where(bc <= 0.5, 2 * bc * sc, 1 - 2 * (1 - bc) * (1 - sc))
+        elif blend == "hard-light":
+            mixed = np.where(sc <= 0.5, 2 * bc * sc, 1 - 2 * (1 - bc) * (1 - sc))
+        elif blend == "soft-light":
+            d = np.where(bc <= 0.25, ((16 * bc - 12) * bc + 4) * bc, np.sqrt(bc))
+            mixed = np.where(sc <= 0.5, bc - (1 - 2 * sc) * bc * (1 - bc), bc + (2 * sc - 1) * (d - bc))
+        elif blend == "color-dodge":
+            mixed = np.where(sc >= 1, 1.0, np.minimum(1.0, bc / np.maximum(1e-6, 1 - sc)))
+        elif blend == "color-burn":
+            mixed = np.where(sc <= 0, 0.0, 1 - np.minimum(1.0, (1 - bc) / np.maximum(1e-6, sc)))
+        elif blend == "darken":
+            mixed = np.minimum(bc, sc)
+        elif blend == "lighten":
+            mixed = np.maximum(bc, sc)
+        elif blend == "difference":
+            mixed = np.abs(bc - sc)
+        else:
+            raise ValueError(f"blend must be one of {', '.join(BLENDS)}")
         pre = (1 - sa) * bc * ba + (1 - ba) * sc * sa + ba * sa * mixed
         alpha = ba + sa - ba * sa
         safe = np.where(alpha > 0, alpha, 1.0)
@@ -692,7 +830,8 @@ class Renderer:
 
     # ---- public
 
-    def render(self, include_background: bool = True, only: set[str] | None = None) -> Image.Image:
+    def render(self, include_background: bool = True, only: set[str] | None = None,
+               only_layers: set[str] | None = None) -> Image.Image:
         img = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
         bg = self.canvas.get("background")
         if include_background and not _is_none(bg):
@@ -700,20 +839,7 @@ class Renderer:
             layer = paint(full, bg, (0, 0, self.width, self.height), self.colors, self.k)
             if layer is not None:
                 img = Image.alpha_composite(img, layer)
-        for el in self.canvas["elements"]:
-            if not el.get("visible", True):
-                continue
-            if only is not None and el["id"] not in only:
-                continue
-            try:
-                result = self.render_element(el)
-            except ValueError as exc:
-                raise ValueError(f"Element '{el['id']}' ({el['type']}): {exc}") from exc
-            if result is None:
-                continue
-            layer, ox, oy, blend = result
-            composite(img, layer, ox, oy, blend)
-        return img
+        return self.render_stack(img, only, only_layers)
 
     def element_box(self, el: dict) -> Box:
         """Bounds of the element geometry in canvas units (no effects), after rotation."""
@@ -795,8 +921,8 @@ class Renderer:
             ss -= 1
         return ss
 
-    def _vector_masks(self, el: dict, st: dict, region, ss: int, stroke: dict | None):
-        """Return (shape_mask, stroke_mask|None) at region size."""
+    def _vector_masks(self, el: dict, st: dict, region, ss: int, strokes: list[dict]):
+        """Return (shape_mask, [stroke_mask per stroke]) at region size."""
         px0, py0, w, h = region
         k = self.k
         f = k * ss
@@ -832,50 +958,54 @@ class Renderer:
             if interior is not None:
                 shape = shape & ~(lines(g.knock) & interior)
 
-        smask = None
-        if stroke and el["type"] not in LINE_TYPES:
-            sw, align = stroke["width"], stroke["align"]
-            if g.kind in ("rect", "ellipse"):
-                grow = {"inside": 0.0, "center": sw / 2, "outside": sw}[align]
-                shrink = {"inside": sw, "center": sw / 2, "outside": 0.0}[align]
+        bands: list[np.ndarray] = []
+        if strokes and el["type"] not in LINE_TYPES:
+            closed_paths = [pts for pts, c in g.outline if c]
+            open_paths = [pts for pts, c in g.outline if not c]
+            inside = fill(closed_paths) if closed_paths else None
+
+            def grown(d: float) -> np.ndarray:
+                """The shape grown (d > 0) or shrunk (d < 0) by distance d."""
                 if g.kind == "rect":
-                    outer = _inset_rect(g.rect, grow, f) if grow else g.fills[0]
-                    inner = _inset_rect(g.rect, -shrink, f) if shrink else g.fills[0]
-                else:
+                    poly = _inset_rect(g.rect, d, f) if d else g.fills[0]
+                    return fill([poly]) if poly else np.zeros((bh, bw), dtype=np.uint8)
+                if g.kind == "ellipse":
                     cx, cy, rx, ry = g.ellipse
-                    outer = geo.ellipse_path(cx, cy, rx + grow, ry + grow, f)
-                    inner = geo.ellipse_path(cx, cy, rx - shrink, ry - shrink, f) if min(rx, ry) > shrink else None
-                smask = fill([outer, inner] if inner else [outer])
-            elif align == "center":
-                smask = lines([(pts, c, sw, "round") for pts, c in g.outline])
-            else:
-                smask = np.zeros((bh, bw), dtype=np.uint8)
-                closed_paths = [pts for pts, c in g.outline if c]
-                if closed_paths:
-                    band = lines([(pts, True, sw * 2, "round") for pts in closed_paths])
-                    inside = fill(closed_paths)
-                    smask = (band & inside) if align == "inside" else (band & ~inside)
-                open_items = [(pts, False, sw, "round") for pts, c in g.outline if not c]
-                if open_items:
-                    smask = smask | lines(open_items)
+                    if rx + d <= 0 or ry + d <= 0:
+                        return np.zeros((bh, bw), dtype=np.uint8)
+                    return fill([geo.ellipse_path(cx, cy, rx + d, ry + d, f)])
+                if inside is None:
+                    return np.zeros((bh, bw), dtype=np.uint8)
+                if d == 0:
+                    return inside
+                rim = lines([(pts, True, abs(d) * 2, "round") for pts in closed_paths])
+                return (inside | rim) if d > 0 else (inside & ~rim)
+
+            for spec in strokes:
+                if g.kind == "poly" and not g.fills and not g.outline:
+                    bands.append(np.zeros((bh, bw), dtype=np.uint8))       # collapsed shape
+                    continue
+                band = grown(spec["d1"]) & ~grown(spec["d0"])
+                if open_paths:
+                    band = band | lines([(pts, False, spec["width"], "round") for pts in open_paths])
+                bands.append(band)
 
         shape_img = Image.fromarray(shape, "L")
-        stroke_img = Image.fromarray(smask, "L") if smask is not None else None
+        stroke_imgs = [Image.fromarray(b, "L") for b in bands]
         rot = float(el.get("rotation", 0) or 0)
         if rot:
             pvx, pvy = self._pivot(el, g.box)
             cx = (pvx * k - px0) * ss
             cy = (pvy * k - py0) * ss
             shape_img = shape_img.rotate(-rot, resample=Image.BICUBIC, center=(cx, cy))
-            if stroke_img is not None:
-                stroke_img = stroke_img.rotate(-rot, resample=Image.BICUBIC, center=(cx, cy))
+            stroke_imgs = [m.rotate(-rot, resample=Image.BICUBIC, center=(cx, cy)) for m in stroke_imgs]
         if ss > 1:
             shape_img = shape_img.reduce(ss)
-            if stroke_img is not None:
-                stroke_img = stroke_img.reduce(ss)
+            stroke_imgs = [m.reduce(ss) for m in stroke_imgs]
+        return shape_img, stroke_imgs
         return shape_img, stroke_img
 
-    def _text_masks(self, el: dict, st: dict, region, ss: int, stroke: dict | None):
+    def _text_masks(self, el: dict, st: dict, region, ss: int, strokes: list[dict]):
         px0, py0, w, h = region
         k = self.k
         layout = TextLayout(el, st, self.fonts, k * ss)
@@ -884,20 +1014,29 @@ class Renderer:
             self.warnings.append(
                 f"{el['id']}: font '{layout.family or 'Inter'}' has no glyph for {''.join(miss)!r}; pick another font.")
         big = (w * ss, h * ss)
-        shape = Image.new("L", big, 0)
-        layout.draw(ImageDraw.Draw(shape), px0 * ss, py0 * ss)
-        smask = None
-        if stroke:
-            smask = Image.new("L", big, 0)
-            layout.draw(ImageDraw.Draw(smask), px0 * ss, py0 * ss, max(1, int(round(stroke["width"] * k * ss))))
+
+        def glyphs(grow_units: float) -> Image.Image:
+            img = Image.new("L", big, 0)
+            grow_px = int(round(grow_units * k * ss)) if grow_units > 0 else 0
+            layout.draw(ImageDraw.Draw(img), px0 * ss, py0 * ss, grow_px)
+            return img
+
+        shape = glyphs(0)
+        masks = []
+        for spec in strokes:
+            # text outlines always sit outside the glyphs; an offset leaves a gap before the outline starts
+            inner = max(0.0, spec["offset"])
+            band = glyphs(inner + spec["width"])
+            if inner > 0:
+                band = ImageChops.subtract(band, glyphs(inner))
+            masks.append(band)
         bx0, by0, bx1, by1 = layout.box_px
         if layout.skew:
             lean = math.tan(math.radians(layout.skew))
             mid = (by0 + by1) / 2 - py0 * ss
             matrix = (1, lean, -lean * mid, 0, 1, 0)       # output (x, y) samples input (x + lean * (y - mid), y)
             shape = shape.transform(big, Image.AFFINE, matrix, resample=Image.BICUBIC)
-            if smask is not None:
-                smask = smask.transform(big, Image.AFFINE, matrix, resample=Image.BICUBIC)
+            masks = [m.transform(big, Image.AFFINE, matrix, resample=Image.BICUBIC) for m in masks]
         rot = float(el.get("rotation", 0) or 0)
         if rot:
             if el.get("origin"):
@@ -906,13 +1045,11 @@ class Renderer:
             else:
                 cx, cy = (bx0 + bx1) / 2 - px0 * ss, (by0 + by1) / 2 - py0 * ss
             shape = shape.rotate(-rot, resample=Image.BICUBIC, center=(cx, cy))
-            if smask is not None:
-                smask = smask.rotate(-rot, resample=Image.BICUBIC, center=(cx, cy))
+            masks = [m.rotate(-rot, resample=Image.BICUBIC, center=(cx, cy)) for m in masks]
         if ss > 1:
             shape = shape.reduce(ss)
-            if smask is not None:
-                smask = smask.reduce(ss)
-        return shape, smask
+            masks = [m.reduce(ss) for m in masks]
+        return shape, masks
 
     def _image_layer(self, el: dict, region):
         """Return (alpha_mask, rgba_layer) for an image element at region size."""
@@ -960,9 +1097,9 @@ class Renderer:
         t = el["type"]
         ss = min(2, self._pick_ss(region[2], region[3]))
         if t in VECTOR_TYPES:
-            return self._vector_masks(el, st, region, ss, None)[0]
+            return self._vector_masks(el, st, region, ss, [])[0]
         if t == "text":
-            return self._text_masks(el, st, region, ss, None)[0]
+            return self._text_masks(el, st, region, ss, [])[0]
         return self._image_layer(el, region)[0]
 
     def render_element(self, el: dict):
@@ -1009,12 +1146,12 @@ class Renderer:
         if opacity <= 0:
             return None
         fx = Effects(st, self.colors)
-        stroke = _stroke_spec(st, self.colors)
+        strokes = _stroke_specs(st, self.colors)
         box = self._geom_box(el, st)
-        grow = 0.0
-        if stroke:
-            grow = stroke["width"] if (t == "text" or stroke["align"] == "outside") else (
-                stroke["width"] / 2 if stroke["align"] == "center" else 0.0)
+        if t == "text":
+            grow = max((sp["offset"] + sp["width"] for sp in strokes), default=0.0)
+        else:
+            grow = max(0.0, max((sp["d1"] for sp in strokes), default=0.0))
         gbox = (box[0] - grow, box[1] - grow, box[2] + grow, box[3] + grow)
         rot = float(el.get("rotation", 0) or 0)
         soften = max(0.0, float(st.get("blur", 0) or 0))
@@ -1035,47 +1172,39 @@ class Renderer:
 
         color_layer = None
         if t in VECTOR_TYPES:
-            shape, smask = self._vector_masks(el, st, region, ss, stroke)
+            shape, smasks = self._vector_masks(el, st, region, ss, strokes)
         elif t == "text":
-            shape, smask = self._text_masks(el, st, region, ss, stroke)
+            shape, smasks = self._text_masks(el, st, region, ss, strokes)
         elif t == "image":
             shape, color_layer = self._image_layer(el, region)
-            smask = None
+            smasks = []
         else:
             raise ValueError(f"Unknown element type '{t}'")
+        drawn = list(zip(strokes, smasks))        # line-like elements ignore style.stroke, so this may be empty
 
-        fill_spec = st.get("fill", "#ffffff" if (stroke is None or t in LINE_TYPES or t == "text") else None)
+        fill_spec = st.get("fill", "#ffffff" if (not strokes or t in LINE_TYPES or t == "text") else None)
         has_fill = color_layer is not None or not _is_none(fill_spec)
-        if has_fill and smask is not None:
-            sil = ImageChops.lighter(shape, smask)
-        elif has_fill:
-            sil = shape
-        elif smask is not None:
-            sil = smask
-        else:
+        if not has_fill and not drawn:
             return None
+        sil = shape if has_fill else Image.new("L", (w, h), 0)
+        for _, m in drawn:
+            sil = ImageChops.lighter(sil, m)
 
         paint_ref = vector_geometry(el, 1.0).paint_box if t in ("arc", "ticks") else None
         rbox_plain = geo.rotated_bbox(paint_ref or box, rot, pivot)
         box_px = (rbox_plain[0] * k - px0, rbox_plain[1] * k - py0, rbox_plain[2] * k - px0, rbox_plain[3] * k - py0)
-        layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        layer = _outer_effects(Image.new("RGBA", (w, h), (0, 0, 0, 0)), sil, fx, k)
 
-        for e in fx.outer:
-            m = sil
-            spread = int(round(e["spread"] * k))
-            if spread > 0:
-                m = m.filter(ImageFilter.MaxFilter(spread * 2 + 1))
-            m = _shift(m, int(round(e["dx"] * k)), int(round(e["dy"] * k)))
-            if e["blur"] > 0:
-                m = m.filter(ImageFilter.GaussianBlur(e["blur"] * k / 2))
-            if e["knockout"]:
-                m = ImageChops.multiply(m, ImageChops.invert(sil))
-            layer = Image.alpha_composite(layer, _tint(m, e["color"], e["strength"]))
+        def draw_strokes(target: Image.Image, items) -> Image.Image:
+            for spec, m in items:
+                img = paint(m, spec["paint"], box_px, self.colors, k)
+                if img is not None:
+                    target = Image.alpha_composite(target, img)
+            return target
 
-        stroke_img = paint(smask, stroke["paint"], box_px, self.colors, k) if (smask is not None and stroke) else None
-        if t == "text" and stroke_img is not None:
-            layer = Image.alpha_composite(layer, stroke_img)
-            stroke_img = None
+        if t == "text":
+            layer = draw_strokes(layer, reversed(drawn))      # outlines sit behind the glyphs, widest at the back
+            drawn = []
 
         if has_fill:
             if color_layer is not None:
@@ -1090,20 +1219,19 @@ class Renderer:
                 fill_img = Image.fromarray(arr.astype(np.uint8), "RGBA")
             if fill_img is not None:
                 layer = Image.alpha_composite(layer, fill_img)
-            for e in fx.inner:
-                m = ImageChops.invert(shape)
-                m = _shift(m, int(round(e["dx"] * k)), int(round(e["dy"] * k)), fill=255)
-                if e["blur"] > 0:
-                    m = m.filter(ImageFilter.GaussianBlur(e["blur"] * k / 2))
-                m = ImageChops.multiply(m, shape)
-                layer = Image.alpha_composite(layer, _tint(m, e["color"], e.get("strength", 1.0)))
+            if st.get("light"):
+                layer = Image.alpha_composite(layer, fxlib.emboss(shape, st["light"], self.colors, k))
+            layer = _inner_effects(layer, shape, fx, k)
 
-        if stroke_img is not None:
-            layer = Image.alpha_composite(layer, stroke_img)
+        layer = draw_strokes(layer, drawn)
 
+        if st.get("adjust"):
+            layer = fxlib.adjust(layer, st["adjust"], self.colors)
         if soften > 0:
             # blur in premultiplied space so transparent pixels do not bleed dark fringes
             layer = layer.convert("RGBa").filter(ImageFilter.GaussianBlur(soften * k / 2)).convert("RGBA")
+        if not _is_none(st.get("mask")):
+            layer.putalpha(ImageChops.multiply(layer.getchannel("A"), _soft_mask((w, h), st["mask"], box_px, self.colors, k)))
 
         clip_id = el.get("clip")
         if clip_id:
@@ -1118,6 +1246,139 @@ class Renderer:
         if blend not in BLENDS:
             raise ValueError(f"style.blend must be one of {', '.join(BLENDS)}")
         return layer, px0, py0, blend
+
+    # ---- layers
+
+    def layer_props(self, layer: dict) -> dict:
+        """Validated compositing settings of a layer."""
+        blend = str(layer.get("blend", "normal")).lower()
+        if blend not in BLENDS:
+            raise ValueError(f"layer blend must be one of {', '.join(BLENDS)}")
+        return {"name": layer["name"], "opacity": max(0.0, min(1.0, float(layer.get("opacity", 1)))), "blend": blend,
+                "clip": bool(layer.get("clip", False)), "visible": bool(layer.get("visible", True)),
+                "style": resolve_style(layer.get("style"), self.theme)}
+
+    def stack(self, only: set[str] | None = None) -> list[tuple[dict | None, list[dict]]]:
+        """Layers bottom to top as (layer | None, elements). None is the implicit base layer that holds
+        every element not assigned to a layer."""
+        layers = self.canvas.get("layers") or []
+        names = {layer["name"] for layer in layers}
+
+        def keep(el: dict) -> bool:
+            return el.get("visible", True) and (only is None or el["id"] in only)
+
+        out: list[tuple[dict | None, list[dict]]] = []
+        base = [e for e in self.canvas["elements"] if e.get("layer") not in names and keep(e)]
+        if base:
+            out.append((None, base))
+        for layer in layers:
+            out.append((layer, [e for e in self.canvas["elements"] if e.get("layer") == layer["name"] and keep(e)]))
+        return out
+
+    def _draw_elements(self, img: Image.Image, elements: list[dict], margin: int = 0) -> None:
+        for el in elements:
+            try:
+                result = self.render_element(el)
+            except ValueError as exc:
+                raise ValueError(f"Element '{el['id']}' ({el['type']}): {exc}") from exc
+            if result is None:
+                continue
+            layer, ox, oy, blend = result
+            composite(img, layer, ox + margin, oy + margin, blend)
+
+    def _style_layer(self, content: Image.Image, st: dict, box_px: Box) -> Image.Image:
+        """Apply layer-level effects to the merged content of a layer, using its alpha as the silhouette."""
+        k = self.k
+        alpha = content.getchannel("A")
+        fx = Effects(st, self.colors)
+        strokes = _stroke_specs(st, self.colors)
+        a_np = np.asarray(alpha)
+        bands = []
+        for spec in strokes:
+            outer = fxlib.grow(a_np, spec["d1"] * k)
+            inner = fxlib.grow(a_np, spec["d0"] * k)
+            bands.append(Image.fromarray(np.clip(outer.astype(np.int16) - inner, 0, 255).astype(np.uint8), "L"))
+        sil = alpha
+        for m in bands:
+            sil = ImageChops.lighter(sil, m)
+        out = _outer_effects(Image.new("RGBA", content.size, (0, 0, 0, 0)), sil, fx, k)
+        body = fxlib.adjust(content, st["adjust"], self.colors) if st.get("adjust") else content
+        out = Image.alpha_composite(out, body)
+        if st.get("light"):
+            out = Image.alpha_composite(out, fxlib.emboss(alpha, st["light"], self.colors, k))
+        out = _inner_effects(out, alpha, fx, k)
+        for spec, m in zip(strokes, bands):
+            img = paint(m, spec["paint"], box_px, self.colors, k)
+            if img is not None:
+                out = Image.alpha_composite(out, img)
+        soften = max(0.0, float(st.get("blur", 0) or 0))
+        if soften > 0:
+            out = out.convert("RGBa").filter(ImageFilter.GaussianBlur(soften * k / 2)).convert("RGBA")
+        if not _is_none(st.get("mask")):
+            out.putalpha(ImageChops.multiply(out.getchannel("A"), _soft_mask(out.size, st["mask"], box_px, self.colors, k)))
+        return out
+
+    def layer_image(self, layer: dict | None, elements: list[dict], clip_alpha: Image.Image | None = None,
+                    bake_opacity: bool = True) -> tuple[Image.Image, Image.Image]:
+        """Render one layer on its own. Returns (finished layer, alpha of its raw content); the second
+        is what a layer above clips to."""
+        props = self.layer_props(layer) if layer else {"opacity": 1.0, "style": {}}
+        st = props["style"]
+        margin = 0
+        if st:
+            fx = Effects(st, self.colors)
+            reach = max(0.0, max((sp["d1"] for sp in _stroke_specs(st, self.colors)), default=0.0))
+            margin = int(math.ceil((fx.pad() + float(st.get("blur", 0) or 0) * 1.5 + reach + 2) * self.k))
+        size = (self.width + 2 * margin, self.height + 2 * margin)
+        content = Image.new("RGBA", size, (0, 0, 0, 0))
+        self._draw_elements(content, elements, margin)
+        frame = (margin, margin, margin + self.width, margin + self.height)
+        content_alpha = content.getchannel("A").crop(frame)
+        final = self._style_layer(content, st, tuple(float(v) for v in frame)) if st else content
+        final = final.crop(frame)
+        if clip_alpha is not None:
+            final.putalpha(ImageChops.multiply(final.getchannel("A"), clip_alpha))
+        if bake_opacity and props["opacity"] < 1:
+            opacity = props["opacity"]
+            final.putalpha(final.getchannel("A").point(lambda v: int(v * opacity + 0.5)))
+        return final, content_alpha
+
+    def render_stack(self, img: Image.Image, only: set[str] | None = None,
+                     only_layers: set[str] | None = None) -> Image.Image:
+        """Composite every layer onto ``img`` (bottom to top)."""
+        items = self.stack(only)
+        base_alpha: Image.Image | None = None
+        base_visible = True
+        for index, (layer, elements) in enumerate(items):
+            name = layer["name"] if layer else "base"
+            props = self.layer_props(layer) if layer else {"opacity": 1.0, "blend": "normal", "clip": False,
+                                                            "visible": True, "style": {}}
+            shown = only_layers is None or name in only_layers
+            nxt = items[index + 1][0] if index + 1 < len(items) else None
+            clipped_onto = bool(nxt and nxt.get("clip"))
+            if not props["visible"]:
+                if not props["clip"]:
+                    base_alpha, base_visible = None, False
+                continue
+            plain = not props["style"] and props["opacity"] >= 1 and props["blend"] == "normal" and not props["clip"]
+            if plain and not clipped_onto:
+                # nothing special about this layer: draw straight onto the picture, so element blend
+                # modes see everything beneath them
+                if shown:
+                    self._draw_elements(img, elements)
+                base_alpha, base_visible = None, True
+                continue
+            clip_alpha = base_alpha if props["clip"] else None
+            if props["clip"] and (base_alpha is None or not base_visible):
+                if not base_visible:
+                    continue                       # its base is hidden, so the clipped layer is hidden too
+                clip_alpha = None                  # nothing below to clip to: behaves like a normal layer
+            final, content_alpha = self.layer_image(layer, elements, clip_alpha)
+            if not props["clip"]:
+                base_alpha, base_visible = content_alpha, True
+            if shown:
+                composite(img, final, 0, 0, props["blend"])
+        return img
 
 
 def shift_element(el: dict, dx: float, dy: float) -> None:

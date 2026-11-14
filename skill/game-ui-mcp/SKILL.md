@@ -1,11 +1,11 @@
 ---
 name: game-ui-mcp
-description: Oyun UI'ı (menü, HUD, buton, panel, bar, gösterge, ikon) çizerken ve canlandırırken game-ui-mcp server'ının temel gereçlerini kullanır: stilize ve gerçekçi (yarış, simülasyon, AAA) tarz, keyframe animasyon; Unity, Unreal, Roblox ve Assetto Corsa için PNG, 9-slice, katman ve animasyon çıktısı.
+description: Oyun UI'ı (menü, HUD, buton, panel, bar, gösterge, ikon) çizerken ve canlandırırken game-ui-mcp server'ının temel gereçlerini kullanır: katmanlar, ışık ve gölgeleme, stilize ve gerçekçi tarz, keyframe animasyon; Unity, Unreal, Roblox ve Assetto Corsa için PNG, 9-slice, katman, PSD ve animasyon çıktısı.
 ---
 
 # game-ui-mcp ile oyun UI'ı çizmek
 
-Bu skill, `game-ui-mcp` MCP server'ının çizim tool'larını (create_canvas, add_rect, add_arc, add_ticks, add_text, preview, export_asset...) iyi kullanmanın yolunu anlatır. Server'da AI görsel üretimi yok: her piksel senin çağırdığın şekil, yazı, ikon ve efektlerden gelir. Hazır bileşen de yok: "buton", "panel", "gösterge" ya da "pop animasyonu" diye bir tool bulunmaz, yalnızca temel gereçler (şekil, yazı, stil, keyframe) vardır. Ürünü sen tasarlarsın; aşağıdaki tarifler kopyalanacak şablon değil, başlangıç noktasıdır. Kalite tamamen senin tasarım kararlarına ve kendi çıktına bakıp düzeltmene bağlı.
+Bu skill, `game-ui-mcp` MCP server'ının çizim tool'larını (create_canvas, create_layer, add_rect, add_arc, add_ticks, add_text, preview, export_asset...) iyi kullanmanın yolunu anlatır. Server'da AI görsel üretimi yok: her piksel senin çağırdığın şekil, yazı, ikon ve efektlerden gelir. Hazır bileşen de yok: "buton", "panel", "gösterge" ya da "pop animasyonu" diye bir tool bulunmaz, yalnızca temel gereçler (şekil, yazı, stil, keyframe) vardır. Ürünü sen tasarlarsın; aşağıdaki tarifler kopyalanacak şablon değil, başlangıç noktasıdır. Kalite tamamen senin tasarım kararlarına ve kendi çıktına bakıp düzeltmene bağlı.
 
 Tool'lar listede yoksa (`create_canvas`, `preview` görünmüyorsa) server bağlı değildir. Kullanıcıya server'ı Claude'a bağlaması gerektiğini söyle (repo README'sinde kurulum var) ve çizmiş gibi davranma.
 
@@ -14,12 +14,12 @@ Tool'lar listede yoksa (`create_canvas`, `preview` görünmüyorsa) server bağl
 1. **Brief.** Motor (Unity / Unreal / Roblox / Assetto Corsa app'i), platform, tür, hangi parçalar lazım ve **stil ailesi**: gerçekçi mi (yarış, simülasyon, AAA) yoksa stilize mi (cartoon, arcade, sci-fi, fantastik). İkisinin kuralları farklı; "Stil ailesi" bölümüne göre ilerle. Eksikse en fazla 2-3 soru sor; kullanıcı "sen karar ver" dediyse karar ver ve ne seçtiğini yaz.
 2. **Tema.** İlk iş `set_theme`. Renkleri ve tekrar eden stilleri orada tanımla, sonra her yerde `$token` ve stil adı kullan. Tek tek hex yazma: kit tutarsızlaşır.
 3. **Canvas.** Her asset ayrı canvas, asset'in gerçek boyutunda. Ekran tasarımı ise 1920x1080 tek canvas (mockup).
-4. **Çiz.** `batch` ile, elemanlara açık `id` vererek. Tek tek `add_*` çağrısı yavaş.
+4. **Çiz.** Kat kat: taban → gölge → ışık → detay → yazı, her geçiş ayrı katmanda (`create_layer`; "Katmanlar" ve "Işık ve gölgeleme" bölümleri). `batch` ile, elemanlara açık `id` vererek; tek tek `add_*` çağrısı yavaş.
 5. **Bak.** `preview` çağır ve resme gerçekten bak. Sorun bul, `update_element` ile düzelt, tekrar bak. En az bir tur düzeltme yapmadan export etme.
 6. **Durumlar.** Buton gibi parçalarda `duplicate_canvas` ile hover / pressed / disabled üret.
 7. **Hareket.** Gerekiyorsa `create_animation` + `set_keyframes` ile canlandır, `preview_animation` film şeridine bak ("Animasyon" bölümü).
 8. **Tutarlılık.** `contact_sheet` ile bütün kiti yan yana gör.
-9. **Export.** `export_asset` (motor + 9-slice), ikon setleri için `export_atlas`, hareketli parçalar için `export_layers`, animasyon için `export_animation`. Sonra motor tarafındaki kodu yaz.
+9. **Export.** `export_asset` (motor + 9-slice), ikon setleri için `export_atlas`, katman katman ya da parça parça çıktı için `export_layers`, düzenlenebilir katmanlı dosya için `export_psd`, animasyon için `export_animation`. Sonra motor tarafındaki kodu yaz.
 
 ## Tema: önce bunu kur
 
@@ -104,6 +104,64 @@ Canvas 440×460. İbre sağa bakan ince bir çokgen olarak çizilir, `origin` g�
 **Eğik sıra sekmesi:** kırmızı gradient'li `skew: 14` rect + `bevel` 1.5 + italik "P3"; yanına aynı eğimde cam rect içinde etiket ve değer.
 
 **Karbon buton:** `skew: 12` rect, karbon dolgu, 1.5 px gradient stroke, üst yarıda `#ffffff@0.14 → 0` parlama (clip), altta 6 px vurgu şeridi (clip + glow), italik büyük harf yazı ve yumuşak gölge.
+
+## Katmanlar: kat kat çalış
+
+Bitmiş görüntüyü tek hamlede çizmeye çalışma; ressam gibi geçişlerle kur. Her geçiş bir katmandır (`create_layer`): sonradan opaklığı ayarlanır, gizlenip karşılaştırılır, ayrı dışa aktarılır.
+
+Tipik yığın (alttan üste):
+1. `ground`: zemin gölgesi (bulanık koyu elips).
+2. `body`: ana şekil; yalnızca temel renk ya da sade gradient.
+3. `shade` (`clip: true`, `blend: "multiply"`): gölgeleme. Koyu ve yumuşak (`blur`) şekiller, ışığın gelmediği tarafa.
+4. `light` (`clip: true`, `blend: "screen"` ya da `"overlay"`): ışık. Büyük yumuşak parlaklık, küçük keskin yansıma, karşı kenarda ince sekme ışığı.
+5. `detail`: çerçeve, süs, ikon. Katman stiliyle (`light`, `stroke`, `shadow`) tek parça gibi işlenir.
+6. `label`: yazı.
+
+Kurallar:
+- `clip: true` olan katman yalnızca hemen altındaki katmanın pikselleri üstünde görünür; art arda gelen clip katmanlarının hepsi aynı tabana kırpılır. Bu yüzden serbest çiz: şekli tabanın dışına taşır, kırpma halleder.
+- Katman stili, katmandaki her şeyi tek şekil sayar: üst üste binen iki daire ve bir yazıya tek ortak kontur, tek ortak gölge. Aynı efekti eleman eleman tekrarlama.
+- Katman opaklığı da birleşik görüntüye uygulanır; üst üste binen yerler koyulaşmaz.
+- Yeni eleman aktif katmana gider (en son oluşturulan). Başka katmana çizmek için `layer: "ad"`, sonradan taşımak için `set_layer`, sırayı değiştirmek için `update_layer(position=...)`.
+- Bir geçişin işe yarayıp yaramadığını görmek için `update_layer(visible=false)` ile kapat ve `preview`'ları karşılaştır. Tek başına görmek için `preview(layers=["shade"])`.
+- `base` adı ayrılmıştır: katmansız elemanların durduğu, en alttaki örtük katmandır.
+
+## Işık ve gölgeleme
+
+Önce ışık yönünü seç ve bütün kitte aynı tut (alışılmış olan sol üst: `angle: 225`). Açı ışığın geldiği yöndür: 0 = sağ, 90 = alt, 180 = sol, 270 = üst.
+
+- **`light`** (eleman ya da katman stili): şekli kabartma gibi aydınlatır; ışığa bakan kenar parlar, karşı kenar kararır. `size` pah genişliği, `depth` kuvvet; `profile: "chisel"` keskin metal ya da oyma, `"round"` yumuşak plastik ya da cam; `gloss` parlak yansıma ekler. Metal yazı, düğme, çerçeve, madalya, ikon için. `bevel` yalnızca üst-alt ince çizgidir; yönlü ve hacimli sonuç için `light`.
+- **Clip katmanlarıyla boyama:** biçim gölgesi ve ışık için en serbest yol. Küre örneği: gövdede ışık merkezi kaydırılmış radial gradient (`cx: 0.3, cy: 0.28`); multiply katmanında kenara doğru koyulaşan radial ve altta bulanık koyu elips; screen katmanında büyük yumuşak leke, küçük keskin nokta ve karşı kenarda sekme ışığı yayı.
+- **İki kademeli gölge:** `shadow` listesi ver. Yakın ve keskin (blur 3-5, dy 2-3, alfa 0.5) + uzak ve yumuşak (blur 18-30, dy 8-14, alfa 0.3-0.5). Yerde duran nesneye ayrıca bulanık elips zemin gölgesi.
+- **Çoklu kontur:** `stroke` liste olabilir; `offset` araya boşluk koyar. İçte açık ince çizgi + dışta koyu çizgi her yüzeyi keskinleştirir. Yazıda örnek: koyu 2.5 px, sonra açık 1.5 px (`offset: 2.5`), sonra çok koyu 3 px (`offset: 4`).
+- **`mask`:** elemanı gradient ile söndürür (parlama şeridinin ucu, yansıma, liste sonu). Yalnızca alfa önemlidir: `{"type":"linear","angle":90,"stops":["#000","#000@0"]}`.
+- **`adjust`:** yeniden çizmeden renk düzeltir. Durum üretimi: hover `brightness: 0.08`, disabled `saturation: -0.8`. Katman stilinde bütün geçişi tek hamlede ısıtır ya da soğutur (`hue`, `tint`).
+- **Gradient `"space": "oklab"`:** uzak renkler arasında (mavi → sarı, altın tonları, alev) gri-çamur geçişi önler.
+- **Doku:** `clouds` (duman, sıvı, mermer, yıpranmış metal), `hex`, `carbon`, `brushed`; kendi görselin için `{"type":"image","path":...,"fit":"tile"}`. Dokuyu multiply ya da overlay clip katmanına, düşük alfayla koy.
+- **Karışım modu:** gölge `multiply`. Işık `screen` (yumuşak) ya da `add` (neon, enerji). Işığı ve gölgeyi tek katmanda verip rengi canlandırmak için `overlay` ya da `soft-light`. Metal parlaması `color-dodge` (az).
+
+**Örnek: cam küre** (canvas 240×240):
+```json
+[{"op":"create_layer","name":"ground"},
+ {"op":"add_ellipse","cx":120,"cy":214,"rx":74,"ry":12,"fill":"#000000@0.55","style":{"blur":14}},
+ {"op":"create_layer","name":"body"},
+ {"op":"add_ellipse","cx":120,"cy":116,"rx":80,
+  "fill":{"type":"radial","cx":0.42,"cy":0.38,"r":0.7,"space":"oklab","stops":[[0,"#ff5b6e"],[0.55,"#c81e3a"],[1,"#5c0a1c"]]}},
+ {"op":"create_layer","name":"shade","clip":true,"blend":"multiply"},
+ {"op":"add_ellipse","cx":120,"cy":116,"rx":82,
+  "fill":{"type":"radial","cx":0.3,"cy":0.28,"r":0.98,"stops":[[0,"#3b0613@0"],[0.42,"#3b0613@0"],[1,"#22030b@0.92"]]}},
+ {"op":"add_ellipse","cx":120,"cy":196,"rx":70,"ry":26,"fill":"#2a0410@0.7","style":{"blur":22}},
+ {"op":"create_layer","name":"light","clip":true,"blend":"screen"},
+ {"op":"add_ellipse","cx":92,"cy":84,"rx":52,"ry":40,"rotation":-28,"fill":"#ffd9de@0.55","style":{"blur":26}},
+ {"op":"add_ellipse","cx":88,"cy":76,"rx":22,"ry":11,"rotation":-32,"fill":"#ffffff@0.95","style":{"blur":3}},
+ {"op":"add_arc","cx":120,"cy":116,"radius":72,"start_angle":20,"end_angle":110,"thickness":7,"cap":"round",
+  "color":"#ff9aa6@0.75","style":{"blur":7}},
+ {"op":"create_layer","name":"ring","style":{"light":{"angle":225,"size":5,"depth":1.4,"gloss":0.8},
+  "stroke":{"color":"#2b1c05","width":1.5,"align":"outside"},"shadow":{"color":"#000000@0.6","blur":10,"dy":5}}},
+ {"op":"add_arc","cx":120,"cy":116,"radius":86,"start_angle":0,"end_angle":360,"thickness":13,
+  "color":{"type":"conic","from":200,"space":"oklab","stops":["#f6d98a","#a9781c","#ffe9a8","#8a5e12","#e9c463","#9a6c18","#f6d98a"]}}]
+```
+
+Kontrol: `shade` ve `light` gizliyken ve açıkken iki `preview` al. Biçim okunmuyorsa (küre küre gibi, pah pah gibi durmuyorsa) kontrastı artır; her yer parlıyorsa ışık lekelerini küçült ve alfayı düşür.
 
 ## Derinlik veren katman sırası
 
@@ -233,7 +291,9 @@ Bir şey beklediğin gibi çıkmadıysa `get_canvas(details=true)` ile gerçek d
 
 **Unreal:** `export_asset(engine="unreal", out_dir=<klasör>)` → `write_engine_helpers("unreal", <klasör>)` → editörde Python ile `import_game_ui.py` çalıştırılır. Texture'lar UI ayarlarıyla gelir; her brush için `Draw As: Box` ve `Margin` (L, T, R, B, 0-1 arası) log'a yazılır. Widget tarafında `UImage` / `UButton` brush'larına bu değerleri gir.
 
-**Hareketli parçalar (gösterge, ibre, dolan yay):** tek PNG yetmez. Elemanlara `group` ver ve `export_layers` kullan: her grup ayrı PNG olur, `<ad>.layout.json` her parçanın x, y, boyut ve `origin` (pivot) değerini verir. İbreyi export etmeden önce `rotation: 0` yap (sağa bakar halde), motor döndürsün.
+**Katmanlı çıktı:** `export_layers` canvas'ı katman katman verir (her katman kendi stili, opaklığı ve kırpmasıyla ayrı PNG + konumları içeren `<ad>.layout.json`). Tabana clip'li gölge ve ışık katmanları varsayılan olarak tabanın görseline gömülür, çünkü motor multiply / screen ya da kırpma uygulayamaz; ayrı ayrı istenirse `merge_clipped: false`. Görsel düzenleyicide devam edilecekse `export_psd`: ad, opaklık, karışım modu ve clip korunur (Photoshop, Photopea, Krita, GIMP), katman stilleri piksele gömülür.
+
+**Hareketli parçalar (gösterge, ibre, dolan yay):** tek PNG yetmez. Hareket edecek her parçayı kendi katmanına koy (ya da elemanlara `group` ver, `by: "group"`) ve `export_layers` kullan: her parça ayrı PNG olur, `<ad>.layout.json` her parçanın x, y, boyut ve `origin` (pivot) değerini verir. İbreyi export etmeden önce `rotation: 0` yap (sağa bakar halde), motor döndürsün.
 - Unreal: ibre `UImage`, `RenderTransformPivot` = pivot / boyut (0-1), `SetRenderTransformAngle(açı)`. Dolan yay için UI material'da radial maske + skaler parametre. Cam panel arkası için `BackgroundBlur` widget'ı.
 - Unity: ibre `RectTransform.pivot` + `localEulerAngles.z = -açı` (Unity saat yönünün tersini pozitif sayar). Dolan yay: `Image.type = Filled`, `fillMethod = Radial360`, `fillAmount`.
 - Roblox: ibre `AnchorPoint` + `Rotation`. Dolan yay için segmentli (dash'li) tasarım seç ve segmentleri ayrı görsel olarak aç/kapat; arka plan bulanıklığı yoktur, camı daha opak yap.
@@ -252,6 +312,9 @@ Motor helper dosyaları bu server'da derlenip denenmedi; kullanıcı ilk kullan�
 - Gerçekçi tarzda stilize alışkanlıkları sürdürmek: kalın kontur, her yerde glow, büyük radius, 4-5 renk. Sonuç oyuncak gibi durur.
 - Gösterge ibresini kadranla aynı gruba koymak (motor döndüremez) ya da `origin` vermeden döndürmek (kendi ortasından döner).
 - Eğik parçalarda farklı `skew` açıları kullanmak.
+- Hacmi tek gradient'le geçiştirmek; ışık yönünü parçadan parçaya değiştirmek.
+- Gölge şekillerini elle tabana sığdırmaya uğraşmak (clip katmanı kullan) ya da aynı konturu ve gölgeyi her elemana ayrı ayrı vermek (katman stili kullan).
+- Her şeyi tek katmana çizip sonra parça parça çıktı istemek.
 - Animasyonu film şeridine bakmadan export etmek; her şeye bounce / elastic vermek; motorun tween'leyebileceği basit hareketi sprite sheet'e gömmek (gereksiz doku).
 - Aynı şeyi 6 kere elle çizmek: `duplicate_element` ve `align_elements(distribute=...)` kullan.
 - Karakter portresi, illüstrasyon gibi şeyleri şekillerle çizmeye çalışmak. Onlar bu aracın işi değil: yer tutucu bir çerçeve çiz, kullanıcı görseli verirse `add_image` ile yerleştir.
