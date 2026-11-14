@@ -20,6 +20,7 @@ from . import effects as fxlib
 from . import geometry as geo
 from . import raster
 from .colors import parse_color
+from . import shaping
 from .fonts import FontLibrary, load_font, missing_glyphs, parse_weight
 
 SS = 4
@@ -582,7 +583,8 @@ def _tr_upper(text: str) -> str:
 class TextLayout:
     """Lays out a text element at a given pixel density (px per canvas unit)."""
 
-    def __init__(self, el: dict, st: dict, fonts: FontLibrary, ppu: float, text: str | None = None):
+    def __init__(self, el: dict, st: dict, fonts: FontLibrary, ppu: float, text: str | None = None,
+                 lang: str | None = None):
         text = str(el.get("text", "")) if text is None else text
         upper = el.get("uppercase", st.get("uppercase"))
         if upper:
@@ -600,6 +602,10 @@ class TextLayout:
         italic = bool(el.get("italic", st.get("italic")))
         self.path, self.var_weight, faux = fonts.resolve(self.family, self.weight, italic)
         self.skew = float(el.get("skew", 0) or 0) + (12.0 if faux else 0.0)
+        self.lang, lang_warn = shaping.guess_lang(text, lang or el.get("lang"))
+        self.warnings = [f"{el.get('id')}: {lang_warn}"] if lang_warn else []
+        self._fonts = fonts
+        self._shaped = bool(self.path) and shaping.needs_shaping(text, shaping._face(self.path)[1].__contains__)
 
         self._load()
         if fit_width:
@@ -642,9 +648,17 @@ class TextLayout:
             else:
                 self.line_x.append(bx)
         # visual box in px at this density
-        self.box_px = (bx, self.baselines[0] - self.cap, bx + self.block_w, self.baselines[-1] + self.descent)
+        top, bottom = self.cap, self.descent
+        if self.shaper:          # fallback fonts (Thai, Devanagari...) reach higher and lower than the primary
+            used = [self.shaper.chain[i] for i in self.shaper.used]
+            top = max([top] + [f.ascent for f in used])
+            bottom = max([bottom] + [f.descent for f in used])
+        self.box_px = (bx, self.baselines[0] - top, bx + self.block_w, self.baselines[-1] + bottom)
         self.arc = None
         if el.get("arc"):
+            if self.shaper:
+                raise ValueError("text on an arc supports Latin, Greek and Cyrillic only; this text needs "
+                                 "shaping or fallback fonts (draw it straight, or bake it as an image)")
             self._layout_arc(el["arc"])
 
     def _layout_arc(self, spec: Any) -> None:
@@ -746,10 +760,34 @@ class TextLayout:
             self.cap = self.ascent * 0.72
         if self.cap <= 0:
             self.cap = self.ascent * 0.72
+        self.shaper = None
+        if self._shaped:
+            chain = shaping.fallback_chain(self._fonts, self.path, self.var_weight, self.weight,
+                                           self.size * self.ppu, self.lang)
+            self.shaper = shaping.ShapedText(chain, self.lang, self.spacing * self.ppu)
+
+    def fallback_note(self) -> str | None:
+        """Which characters the chosen font lacked and which fallback font drew them."""
+        if not self.shaper or not self.shaper.fallback:
+            return None
+        parts = [f"{''.join(sorted(chars))!r} with {Path(self.shaper.chain[i].path).stem}"
+                 for i, chars in sorted(self.shaper.fallback.items())]
+        return (f"font '{self.family or 'Inter'}' lacks some characters, drawn with fallback fonts: "
+                f"{'; '.join(parts)}. The engine font needs these glyphs too.")
+
+    def missing(self) -> list[str]:
+        """Characters no font in the fallback chain can draw."""
+        if self.shaper:
+            for line, _ in self.lines:
+                self.shaper.shape(line)
+            return sorted(self.shaper.missing)
+        return missing_glyphs(self.font, self.text)
 
     def _width(self, s: str) -> float:
         if not s:
             return 0.0
+        if self.shaper:
+            return self.shaper.width(s)
         return float(self.font.getlength(s)) + self.spacing * self.ppu * max(0, len(s) - 1)
 
     def _wrap(self, text: str, max_px: float | None) -> list[tuple[str, float]]:
@@ -757,6 +795,9 @@ class TextLayout:
         for para in text.split("\n"):
             if max_px is None:
                 lines.append((para, self._width(para)))
+                continue
+            if self.shaper:
+                lines += [(ln, self._width(ln)) for ln in self.shaper.wrap(para, max_px)]
                 continue
             cur = ""
             for word in para.split(" "):
@@ -773,8 +814,14 @@ class TextLayout:
         x0, y0, x1, y1 = self.box_px
         return (x0 / self.ppu, y0 / self.ppu, x1 / self.ppu, y1 / self.ppu)
 
-    def draw(self, draw: ImageDraw.ImageDraw, ox: float, oy: float, stroke_px: int = 0) -> None:
-        """Draw glyph coverage (optionally dilated by stroke_px) at offset (-ox, -oy)."""
+    def draw(self, img: Image.Image, ox: float, oy: float, stroke_px: int = 0) -> None:
+        """Draw glyph coverage (optionally dilated by stroke_px) onto ``img`` (L mode) at offset (-ox, -oy)."""
+        if self.shaper:
+            for (line, _), lx, by in zip(self.lines, self.line_x, self.baselines):
+                if line:
+                    self.shaper.draw(img, line, lx - ox, by - oy, stroke_px)
+            return
+        draw = ImageDraw.Draw(img)
         kwargs: dict = {"font": self.font, "fill": 255, "anchor": "ls"}
         if stroke_px > 0:
             kwargs.update(stroke_width=stroke_px, stroke_fill=255)
@@ -1031,9 +1078,26 @@ class Renderer:
                 f" in language '{self.language}'" if self.language else "")
             if msg not in self.warnings:
                 self.warnings.append(msg)
-        if self.language == "pseudo":
-            text = pseudo_localize(text)
+        if self.language in PSEUDO_LANGS:
+            text = pseudo_localize(text, self.language)
         return text
+
+    def text_lang(self, el: dict) -> str | None:
+        """Language tag for shaping: the element's own, else the render language, else the canvas'."""
+        lang = self.language if self.language and not str(self.language).startswith("pseudo") else None
+        return el.get("lang") or lang or self.canvas.get("language")
+
+    def glyph_problems(self) -> dict[str, str]:
+        """{element id: characters no font can draw} for every text element (exports refuse these)."""
+        out = {}
+        for el in self.canvas.get("elements", []):
+            if el.get("type") != "text" or el.get("visible") is False:
+                continue
+            st = resolve_style(el.get("style"), self.theme)
+            miss = TextLayout(el, st, self.fonts, 1.0, self.text_of(el), self.text_lang(el)).missing()
+            if miss:
+                out[el["id"]] = "".join(miss)
+        return out
 
     @staticmethod
     def _pivot(el: dict, box: Box) -> tuple[float, float]:
@@ -1055,7 +1119,7 @@ class Renderer:
             lean = abs(_skew_tan(el)) * (box[3] - box[1]) / 2
             return (box[0] - lean, box[1], box[2] + lean, box[3])
         if t == "text":
-            layout = TextLayout(el, st, self.fonts, 4.0, self.text_of(el))
+            layout = TextLayout(el, st, self.fonts, 4.0, self.text_of(el), self.text_lang(el))
             box = layout.box_units()
             lean = abs(math.tan(math.radians(layout.skew))) * (box[3] - box[1]) / 2
             return (box[0] - lean, box[1], box[2] + lean, box[3])
@@ -1238,11 +1302,15 @@ class Renderer:
     def _text_masks(self, el: dict, st: dict, region, ss: int, strokes: list[dict]):
         px0, py0, w, h = region
         k = self.k
-        layout = TextLayout(el, st, self.fonts, k * ss, self.text_of(el))
-        miss = missing_glyphs(layout.font, layout.text)
+        layout = TextLayout(el, st, self.fonts, k * ss, self.text_of(el), self.text_lang(el))
+        self.warnings += [w for w in layout.warnings if w not in self.warnings]
+        miss = layout.missing()
         if miss:
             self.warnings.append(
                 f"{el['id']}: font '{layout.family or 'Inter'}' has no glyph for {''.join(miss)!r}; pick another font.")
+        note = layout.fallback_note()
+        if note and f"{el['id']}: {note}" not in self.warnings:
+            self.warnings.append(f"{el['id']}: {note}")
         big = (w * ss, h * ss)
 
         def glyphs(grow_units: float) -> Image.Image:
@@ -1251,7 +1319,7 @@ class Renderer:
             if layout.arc is not None:
                 layout.draw_arc(img, px0 * ss, py0 * ss, grow_px)
             else:
-                layout.draw(ImageDraw.Draw(img), px0 * ss, py0 * ss, grow_px)
+                layout.draw(img, px0 * ss, py0 * ss, grow_px)
             return img
 
         shape = glyphs(0)
@@ -1661,15 +1729,22 @@ _PLACEHOLDER = re.compile(r"\{([A-Za-z_][\w.\-]*)\}")
 _PSEUDO = str.maketrans("aeiouycnsAEIOUYCNS", "áéîöüýçñšÅÉÎÖÛÝÇÑŠ")
 
 
-def pseudo_localize(text: str) -> str:
-    """Accented and ~35% longer, the classic pseudo-localisation test for clipping and missing glyphs."""
+PSEUDO_LANGS = ("pseudo", "pseudo-long", "pseudo-rtl")
+
+
+def pseudo_localize(text: str, mode: str = "pseudo") -> str:
+    """Pseudo-localisation for clipping and missing glyphs: "pseudo" is accented and ~35% longer
+    (typical translation growth), "pseudo-long" ~100% longer (short labels in German / Finnish /
+    Russian), "pseudo-rtl" is "pseudo" forced right-to-left, like Godot's fake BiDi."""
     if not text.strip():
         return text
+    grow = 1.0 if mode == "pseudo-long" else 0.35
     out = []
     for line in text.split("\n"):
         body = line.translate(_PSEUDO)
-        pad = "·" * max(1, int(round(len(line) * 0.35)))
-        out.append(f"[{body} {pad}]")
+        pad = "·" * max(1, int(round(len(line) * grow)))
+        item = f"[{body} {pad}]"
+        out.append(f"‮{item}‬" if mode == "pseudo-rtl" else item)
     return "\n".join(out)
 
 

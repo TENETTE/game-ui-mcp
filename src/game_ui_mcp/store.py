@@ -196,12 +196,21 @@ class Store:
         return Renderer(canvas, self.theme, self.fonts, scale, lookup=self.get, state=state, language=language,
                         strings=self.strings)
 
+    def require_glyphs(self, canvas: dict, language: str | None = None) -> None:
+        """Exports refuse text that would ship with missing glyphs (tofu boxes)."""
+        problems = self.renderer(canvas, language=language).glyph_problems()
+        if problems:
+            where = "; ".join(f"{eid}: {chars!r}" for eid, chars in problems.items())
+            raise ValueError(f"export refused - no font can draw these characters ({where}). Set a font that "
+                             "has them on those elements, or drop a .ttf/.otf covering them into the workspace "
+                             "'fonts' folder.")
+
     # ---- string tables (localisation)
 
     def set_strings(self, language: str, strings: dict, default: bool, replace: bool) -> dict:
         lang = str(language).strip()
-        if not lang or lang == "pseudo":
-            raise ValueError("language must be a code like 'en', 'tr', 'de' ('pseudo' is built in)")
+        if not lang or lang.startswith("pseudo"):
+            raise ValueError("language must be a code like 'en', 'tr', 'de' ('pseudo', 'pseudo-long', 'pseudo-rtl' are built in)")
         table = {} if replace else dict(self.strings["tables"].get(lang, {}))
         for key, value in (strings or {}).items():
             if value is None:

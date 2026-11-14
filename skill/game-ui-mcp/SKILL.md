@@ -274,6 +274,17 @@ Motorun köşeleri bozmadan esnetebilmesi için merkezin tek düze olması gerek
 - `export_asset(nine_slice="auto")` kenarları kendisi bulur ve merkezi birkaç piksele indirir. Sonuçtaki `notes` alanını oku: "only stretches horizontally" ya da "no stretchable area" diyorsa tasarımı düzelt ya da kenarları elle ver (`{"left":..,"top":..,"right":..,"bottom":..}`).
 - Büyük yumuşak gölge kenar payını büyütür (gölge köşede kıvrıldığı için). Bu normal.
 
+## Çok dilli yazı
+
+- Her yazıya dil ver: `add_text(..., lang="ar")` ya da canvas / render dili. Han karakterleri için şart: aynı karakter Japonca, Basitleştirilmiş Çince, Geleneksel Çince ve Korecede farklı çizilir.
+- Arapça, Farsça, İbranice, Hint yazıları, Tayca ve CJK HarfBuzz ile şekillenir (bitişik harf, sağdan sola, birleşik harfler). Fontta olmayan harfler gömülü Noto ya da sistem fontundan gelir; uyarı hangi fontun çizdiğini söyler. O fontun motor tarafında da olması gerekir.
+- Hiçbir fontun çizemediği harf varsa export reddedilir; hata hangi elemanda hangi harf olduğunu söyler. Fontu değiştir ya da `fonts` klasörüne kapsayan bir font koy.
+- Yazının sığmayacağını varsay: kutuyu %30 fazlasına göre çiz, kısa etiketlere daha çok pay bırak. Sığmazsa önce iki satıra böl (`max_width`), fontu küçültmek son çare.
+- Bir ekrana "bitti" demeden önce `review_canvas` ve `preview`'ü üç dille çalıştır: `language="pseudo"` (%35 uzun), `"pseudo-long"` (%100 uzun), `"pseudo-rtl"` (sağdan sola).
+- RTL ekranda yerleşimi ayrıca aynala (ilerleme çubuğu yönü, geri oku, ikon tarafı); yazıyı ters çevirmek yetmez.
+- Yay üstü yazı (`arc`) yalnızca Latin, Yunan ve Kiril alfabesiyle çalışır.
+- Canlı yazıyı motora verirken (`export_screen`, `export_spec`) dönen `notes` / `engine_text_notes` maddelerini kullanıcıya aktar: TextMeshPro Arapçayı şekillendirmez, Unreal'da Full Shaping gerekir, Godot'ta metin sunucusu verisi export'a eklenmeli.
+
 ## Kontrol turu (her asset için)
 
 Önce `review_canvas` çalıştır ve her `warn` maddesini düzelt (bilerek yaptıysan nedenini kullanıcıya söyle). Sonra `preview` resmine bakarken sırayla:
@@ -284,7 +295,8 @@ Motorun köşeleri bozmadan esnetebilmesi için merkezin tek düze olması gerek
 4. Hizalama: aynı sıradaki parçalar aynı çizgide mi, boşluklar eşit mi? `align_elements` ile düzelt, elle tahmin etme.
 5. Detay: `preview(region=[x,y,w,h], zoom=4)` ile köşelere ve ince çizgilere yakından bak.
 6. Nerede ne olduğu karıştıysa `preview(show_ids=true)`.
-7. Kit bitince `contact_sheet`: köşe yarıçapları, stroke kalınlıkları, ışık yönü (hep üstten) ve renkler tutarlı mı?
+7. Yazı varsa `language="pseudo-long"` ve `"pseudo-rtl"` ile tekrar bak: taşan ya da kesilen yazı var mı?
+8. Kit bitince `contact_sheet`: köşe yarıçapları, stroke kalınlıkları, ışık yönü (hep üstten) ve renkler tutarlı mı?
 
 Bir şey beklediğin gibi çıkmadıysa `get_canvas(details=true)` ile gerçek değerlere bak, `undo` ile geri al.
 

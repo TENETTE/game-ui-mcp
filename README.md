@@ -53,12 +53,13 @@ Görsellerin tamamı [`examples/demo.py`](examples/demo.py), [`examples/demo_rac
 - **Stil:** düz renk, linear / radial / conic gradient (isteğe bağlı OKLab geçişi), çizgili / noktalı / ızgara / petek / karbon / fırçalı metal / bulut dokusu, kendi görselinle dolgu, kenar çizgisi (iç, orta, dış), gölge, glow, iç gölge, bevel, bulanıklık, opaklık, bir pivot etrafında döndürme, başka bir şekle kırpma (`clip`)
 - **Gösterge:** `add_arc` + `add_ticks` ile devir saati, hız göstergesi, turbo, segmentli LED sıraları; ibre için pivot'lu döndürme
 - **Yazı:** 10 gömülü font (Inter, Barlow Condensed, Bebas Neue, Michroma, JetBrains Mono, Rajdhani, Orbitron, Cinzel, Fredoka, Bangers) + bilgisayardaki fontlar, italik, satır kaydırma, genişliğe sığdırma, kontur, daire üstüne dizme (`arc`), Türkçe büyük harf (`uppercase: "tr"`)
+- **Çok dilli yazı:** Arapça, Farsça, İbranice, Hint yazıları (Devanagari, Bengalce, Tamilce), Tayca ve CJK HarfBuzz + python-bidi ile şekillenir (bitişik harf, sağdan sola, rakamlar soldan sağa, birleşik harfler); fontta olmayan harfler gömülü Noto ya da sistem fontundan gelir; `lang` ile Japonca / Çince / Korece Han biçimleri doğru seçilir; CJK satır kırma yasaklı karakter kurallarıyla (kinsoku); hiçbir fontun çizemediği harf varsa export reddedilir
 - **İkon:** hazır set yok; model 24'lük ızgarada `add_path` ile çizer ya da bir SVG'yi `add_svg` ile alır
 - **Ekran ve cihaz:** hazır boyutlar (`preset`: 1080p, 4K, 21:9, Steam Deck, Switch, iPhone, iPad, Android, mobil oyun, TV) ve güvenli alanları; önizlemede güvenli alan, TV kenar payı, ızgara, sütun, üçte bir, baş parmak erişimi kılavuzları; renk körlüğü (protanopi, döteranopi, tritanopi), gri ton ve güneş altında düşük kontrast simülasyonu; HUD'u gerçek bir oyun ekran görüntüsünün üstünde görme
 - **Çok çözünürlük:** elemanları kenara sabitleme (`set_pin`: sol / orta / sağ / esnet / oranla), `resize_canvas` ile başka boyuta uyarlama, `preview_resolutions` ile hepsini yan yana görme
 - **Etkileşim durumları:** `set_state` ile hover, pressed, disabled, selected, focused (gamepad); önizleme, denetim ve dışa aktarma duruma göre; motor slotları otomatik (Unity SpriteState, Godot TextureButton, Roblox HoverImage / PressedImage)
 - **Veri ve şablon:** yazıda `{yer_tutucu}`, canvas'a özel renk token'ları, `generate_from_template` ile tek şablondan onlarca kart / rozet / seviye ikonu; bileşen kopyalarına ayrı yazı, renk ve durum
-- **Yerelleştirme:** `set_strings` ile dil tabloları, her yerde `language`, 35% uzatıp aksanlayan `pseudo` dili ve taşan yazıyı bulan denetim
+- **Yerelleştirme:** `set_strings` ile dil tabloları, her yerde `language`, 35% uzatıp aksanlayan `pseudo`, 100% uzatan `pseudo-long` ve sağdan sola zorlayan `pseudo-rtl` dilleri, taşan yazıyı bulan denetim; `export_screen` / `export_spec` motor uyarıları verir (TextMeshPro + RTL, Unreal Full Shaping, Godot metin sunucusu verisi, Roblox font kapsamı)
 - **Yerleşim ve üretim:** satır / sütun / ızgara yerleşimi ve içeriğe göre büyüyen kutu (`arrange_elements`), tohumlu rastgele dağıtma (`scatter`: kıvılcım, konfeti, yıldız; istenirse senkronsuz parıldama animasyonu), animasyonda sırayla gecikme (`stagger`), canvas'lar arası kopyalama, redo
 - **Pixel art:** kenar yumuşatmasız çizim, palet ya da renk sayısı sınırı, büyütmede tam piksel
 - **Teslim:** 9-slice germe testi, geliştirici spec'i (ölçülü görsel + JSON), tema token'ları (CSS, Unity USS, C#, GDScript, Luau, JSON), tıklanabilir HTML prototip (ekranlar arası geçiş, hover / basılı hal), ekranı motor sahnesine çevirme (Godot `.tscn`, Roblox LocalScript, Unity UXML + USS; yazılar gerçek yazı olarak kalır), bitmap font (BMFont `.fnt`), uygulama ikonu (ICO, boyut seti), PNG / WebP / JPG
@@ -237,8 +238,10 @@ Roblox'ta görselleri Studio'ya kendin yüklemen gerekir (server internete çık
 .venv\Scripts\python -m pytest
 ```
 
-Çizim motoru Pillow + numpy üzerine kurulu: şekiller 4 kat çözünürlükte piksel merkezine göre taranır, sonra küçültülür; efektler çıkış çözünürlüğünde uygulanır. MCP Python SDK'nın 1.x ve 2.x sürümleriyle çalışır.
+Çizim motoru Pillow + numpy üzerine kurulu: şekiller 4 kat çözünürlükte piksel merkezine göre taranır, sonra küçültülür; efektler çıkış çözünürlüğünde uygulanır. Latin / Yunan / Kiril yazı Pillow ile çizilir; şekillendirme ya da yedek font gereken yazı `shaping.py` içinde HarfBuzz (uharfbuzz) ve python-bidi ile dizilir, glif konturları aynı tarayıcıyla çizilir (Pillow'un Windows tekerleklerinde Raqm olmadığı için). Sınırlar: Tay / Lao / Khmer için sözlüklü kelime bölme yok (taşan kelime harf kümesi sınırından bölünür), renkli emoji tek renk çizilir, yay üstü yazı yalnızca Latin / Yunan / Kiril.
+
+`tests/test_stress.py`: 4K canvas, 500 eleman, 50 dil satırı, 3 kez render + export (çıktılar birebir aynı olmalı). Not: `review_canvas` kontrast için her yazı elemanında canvas'ı yeniden çizer; 50 yazılı 4K ekranda ~25 sn sürer. MCP Python SDK'nın 1.x ve 2.x sürümleriyle çalışır.
 
 ## Fontlar
 
-`src/game_ui_mcp/assets/fonts/` altındaki fontlar SIL Open Font License ile dağıtılır; her klasörde `OFL.txt` bulunur.
+`src/game_ui_mcp/assets/fonts/` altındaki fontlar SIL Open Font License ile dağıtılır; her klasörde `OFL.txt` bulunur. `noto/` klasöründe Noto Sans Arabic, Hebrew, Devanagari, Bengali, Tamil ve Thai (Regular + Bold, hintsiz, ~1,1 MB) var; CJK fontları büyük olduğu için gömülmez, sistemdekiler kullanılır (Windows: Yu Gothic, Microsoft YaHei / JhengHei, Malgun Gothic).

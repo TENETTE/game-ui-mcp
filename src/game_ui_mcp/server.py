@@ -777,7 +777,8 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
              uppercase: bool | str | None = None, italic: bool | None = None, skew: float = 0,
              stroke: str | dict | None = None, style: str | dict | None = None, rotation: float = 0,
              origin: list[float] | None = None, arc: dict | None = None, id: str | None = None,
-             group: str | None = None, clip: str | None = None, layer: str | None = None):
+             group: str | None = None, clip: str | None = None, layer: str | None = None,
+             lang: str | None = None):
     """Add text.
 
     (x, y) is where `anchor` sits: "top-left", "center" (centre of a button), "middle-left",
@@ -797,6 +798,11 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
       side "outer" reads clockwise over the top, "inner" reads left-to-right along the bottom.
       Each letter is placed upright on the curve, not warped. x / y are ignored with arc.
     style may carry shadow / glow / opacity and text defaults (font, weight, size, letter_spacing).
+    lang: language of this text ("ar", "he", "hi", "th", "ja", "zh-Hans", "zh-Hant", "ko", "tr"...);
+      defaults to the render language, then the canvas language. Arabic, Hebrew, Indic, Thai and CJK
+      are shaped with HarfBuzz (joined letters, right-to-left, conjuncts) and characters the font lacks
+      come from bundled Noto / system fallback fonts. Always set it for Han text: the same character
+      looks different in Japanese, Simplified and Traditional Chinese and Korean.
     The result's bbox_xywh tells you how much room the text really takes.
     """
     return _add(canvas, "text", dict(text=text, x=x, y=y, size=size, font=font, weight=weight, color=color,
@@ -805,7 +811,7 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
                                      letter_spacing=letter_spacing, uppercase=uppercase or None,
                                      italic=italic or None, skew=skew or None, stroke=stroke, style=style,
                                      rotation=rotation or None, origin=origin, arc=arc, id=id, group=group,
-                                     clip=clip, layer=layer))
+                                     clip=clip, layer=layer, lang=lang))
 
 
 @tool
@@ -1433,6 +1439,7 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
     """
     st = store()
     c = st.get(canvas)
+    st.require_glyphs(c, None)
     key, anim = st.get_animation(c, animation)
     fmt = format.lower()
     if fmt not in ("json", "spritesheet", "frames", "gif", "apng", "webp"):
@@ -1627,7 +1634,8 @@ def preview(canvas: str, background: str = "checker", max_size: int = 1024, show
     implicit bottom layer). Clipped layers stay clipped to their base.
     background may also be an image file path: your HUD over a real gameplay screenshot.
     state: show an interaction state (set_state), e.g. "hover". language: fill {placeholders} from that
-      string table; "pseudo" = accented, 35% longer text to catch clipping before translation.
+      string table; "pseudo" = accented, 35% longer text to catch clipping before translation,
+      "pseudo-long" = 100% longer (short labels), "pseudo-rtl" = pseudo forced right-to-left.
     guides (drawn on the preview only): "safe" (device safe area), "tv" (title / action safe),
       "grid:8", "columns:12", "thirds", "center", "thumb" (thumb reach on a landscape phone).
     simulate: "protanopia", "deuteranopia", "tritanopia" (colour blindness), "grayscale", "low-contrast"
@@ -1794,7 +1802,8 @@ def review_canvas(canvas: str, min_contrast: float = 4.5, min_text_size: float =
     Also: text that overflows the shape it sits in (the smallest shape drawn under it that holds its
     anchor point, or the element named in the text's "container" prop) and important UI inside the
     canvas safe_area margins (notch, home bar, TV overscan).
-    language: check a translation - "pseudo" (35% longer, accented) finds clipping before translators do.
+    language: check a translation - "pseudo" (35% longer, accented), "pseudo-long" (100% longer) and
+      "pseudo-rtl" (forced right-to-left) find clipping before translators do.
     state: check an interaction state (hover, disabled...).
     """
     import numpy as np
@@ -2131,6 +2140,7 @@ def export_png(canvas: str, path: str | None = None, scales: list[float] | None 
     """
     st = store()
     c = st.get(canvas)
+    st.require_glyphs(c, language)
     fmt = str(format).lower().lstrip(".")
     if fmt == "png" and path and Path(path).suffix.lower() in (".webp", ".jpg", ".jpeg", ".ico"):
         fmt = Path(path).suffix.lower().lstrip(".")          # the file name says which format
@@ -2234,6 +2244,7 @@ def export_layers(canvas: str, out_dir: str | None = None, name: str | None = No
     """
     st = store()
     c = st.get(canvas)
+    st.require_glyphs(c, None)
     mode = by.lower()
     if mode not in ("auto", "layer", "group"):
         raise ValueError("by must be 'auto', 'layer' or 'group'")
@@ -2367,6 +2378,7 @@ def export_psd(canvas: str, path: str | None = None, scale: float = 1, include_b
     """
     st = store()
     c = st.get(canvas)
+    st.require_glyphs(c, None)
     scale = float(scale)
     if not 0.1 <= scale <= 8:
         raise ValueError("scale must be between 0.1 and 8")
@@ -2437,6 +2449,7 @@ def export_asset(canvas: str, engine: str = "generic", out_dir: str | None = Non
     """
     st = store()
     c = st.get(canvas)
+    st.require_glyphs(c, language)
     wanted_states = _maybe_json(states)
     if wanted_states == "all":
         wanted_states = sorted(c.get("states") or {})
@@ -2575,6 +2588,7 @@ def export_atlas(canvases: list[str], path: str | None = None, scale: float = 1,
     warnings: list[str] = []
     for cid in canvases:
         c = st.get(cid)
+        st.require_glyphs(c, None)
         img, warn = _render_export(c, float(scale), False, None, None)
         warnings += warn
         if trim:

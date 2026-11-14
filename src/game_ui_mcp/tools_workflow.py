@@ -214,7 +214,8 @@ def set_strings(language: str, strings: dict, default: bool = False, replace: bo
 
     preview / export / review take `language`; the first table you add is the default (fallback for
     missing keys), or pass default=true. The built-in language "pseudo" lengthens every text by ~35% and
-    accents it - use it to find buttons that will clip in German or Russian. Values set to null are
+    accents it, "pseudo-long" doubles it (short labels grow most), "pseudo-rtl" forces right-to-left -
+    use them to find buttons that will clip in German or Russian. Values set to null are
     removed; replace=true starts the table over. Canvas vars (update_canvas(vars=...)) override strings.
     """
     st = store()

@@ -18,6 +18,7 @@ from PIL import Image as PILImage
 from PIL import ImageDraw
 
 from . import export as ex
+from . import shaping
 from .colors import parse_color, to_hex
 from .render import TextLayout, _stroke_specs, parse_anchor, resolve_style
 from .server import (Image, _gradient_blocks, _label_font, _maybe_json, _out_dir, _out_path, _png_bytes,
@@ -152,6 +153,7 @@ def export_spec(canvas: str, out_dir: str | None = None, name: str | None = None
     styles, states, animations, theme tokens - so whoever builds the screen in the engine does not guess."""
     st = store()
     c = st.get(canvas)
+    st.require_glyphs(c, language)
     r = st.renderer(c, language=language)
     folder = _out_dir(out_dir, "spec")
     base = slugify(name or c["id"], "spec")
@@ -194,6 +196,9 @@ def export_spec(canvas: str, out_dir: str | None = None, name: str | None = None
             "animations": {k: {"duration": a["duration"], "loop": a.get("loop", False),
                                "tracks": len(a.get("tracks", []))} for k, a in (c.get("animations") or {}).items()},
             "links": c.get("links") or {}}
+    engine_text = shaping.engine_notes("all", [i["text"]["text"] for i in items if i["type"] == "text"])
+    if engine_text:
+        spec["engine_text_notes"] = engine_text
     (folder / f"{base}.spec.json").write_text(json.dumps(spec, ensure_ascii=False, indent=1), encoding="utf-8")
 
     scale = min(2.0, 1600 / max(c["width"], c["height"]))
@@ -219,6 +224,8 @@ def export_spec(canvas: str, out_dir: str | None = None, name: str | None = None
     out_png = folder / f"{base}.spec.png"
     view.convert("RGB").save(out_png)
     info = {"spec_json": str(folder / f"{base}.spec.json"), "spec_png": str(out_png), "elements": len(items)}
+    if engine_text:
+        info["engine_text_notes"] = engine_text
     shown = view.copy()
     shown.thumbnail((1200, 1200))
     return [Image(data=_png_bytes(shown.convert("RGB")), format="png"), json.dumps(info)]
@@ -781,6 +788,7 @@ def export_screen(canvas: str, engine: str, out_dir: str | None = None, name: st
     """
     st = store()
     c = st.get(canvas)
+    st.require_glyphs(c, language)
     engine = engine.lower()
     if engine not in ("godot", "roblox", "unity", "json"):
         raise ValueError("engine must be 'godot', 'roblox', 'unity' or 'json'")
@@ -849,6 +857,7 @@ def export_screen(canvas: str, engine: str, out_dir: str | None = None, name: st
     if any(n["kind"] == "text" and n["info"].get("weight") and str(n["info"].get("font", "")).lower() in ("inter",)
            for n in nodes):
         notes.append("Inter is a variable font: set the weight in the engine's font settings if it shows regular")
+    notes = shaping.engine_notes(engine, [n["info"]["text"] for n in nodes if n["kind"] == "text"]) + notes
     if notes:
         result["notes"] = notes[:10]
     if warnings:
