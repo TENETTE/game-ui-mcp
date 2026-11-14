@@ -153,6 +153,8 @@ Roblox'ta görselleri Studio'ya kendin yüklemen gerekir (server internete çık
 .venv\Scripts\python -m pytest
 ```
 
+GPU: `[gpu]` kurulumu `gpu.py` üzerinden CuPy kullanır; shader dolgusu ve 250 bin pikselden büyük bulanıklıklar (gölge, glow, iç gölge, `light`) ekran kartında hesaplanır, geri kalan her şey (şekil tarama, yazı, birleştirme) CPU'da kalır. Ekran kartında shader iş sınırı 20 kat yüksektir. CuPy yoksa ya da CUDA açılamazsa her şey numpy ile aynı sonucu verir; `GAME_UI_MCP_GPU=0` GPU'yu kapatır. Ölçüm (RTX 4060 Ti): 1080p, 8 katmanlı fbm + voronoi shader CPU'da 4,0 sn, GPU'da 0,44 sn; 4K bulanıklık 1,8 sn yerine 0,16 sn. İlk kullanımda CuPy kernel'leri derler (bir kerelik ~15-20 sn, sonra diskte önbellekte kalır); küçük işler zaten CPU'da kalır.
+
 Çizim motoru Pillow + numpy üzerine kurulu: şekiller 4 kat çözünürlükte piksel merkezine göre taranır, sonra küçültülür; efektler çıkış çözünürlüğünde uygulanır. Latin / Yunan / Kiril yazı Pillow ile çizilir; şekillendirme ya da yedek font gereken yazı `shaping.py` içinde HarfBuzz (uharfbuzz) ve python-bidi ile dizilir, glif konturları aynı tarayıcıyla çizilir (Pillow'un Windows tekerleklerinde Raqm olmadığı için). Sınırlar: Tay / Lao / Khmer için sözlüklü kelime bölme yok (taşan kelime harf kümesi sınırından bölünür), renkli emoji tek renk çizilir, yay üstü yazı yalnızca Latin / Yunan / Kiril.
 
 `tests/test_stress.py`: 4K canvas, 500 eleman, 50 dil satırı, 3 kez render + export (çıktılar birebir aynı olmalı). `review_canvas` kontrast için her yazının arkasını yalnızca çevresindeki elemanlarla yeniden çizer (64 birimden uzağa uzanan dev glow'lar hesaba girmez); bu ekranda ~3 sn. MCP Python SDK'nın 1.x ve 2.x sürümleriyle çalışır.

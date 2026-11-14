@@ -13,26 +13,39 @@ from functools import lru_cache
 
 import numpy as np
 
+from . import gpu
 from .colors import parse_color
 
 MAX_CODE = 6000
 MAX_STATEMENTS = 80
-MAX_WORK = 85e6          # noise-call units x pixels, ~10 s: an 8-octave fbm still fits a full 4K fill
+MAX_WORK = 85e6          # noise-call units x pixels, ~10 s on the CPU: an 8-octave fbm still fits a full 4K fill
+GPU_WORK_FACTOR = 20     # the same 10 s buys about this much more work on a CUDA GPU
+
+
+def _m(*values):
+    """numpy, or cupy when any value lives on the GPU: every helper below runs on either."""
+    for v in values:
+        xp = gpu.array_module(v)
+        if xp is not np:
+            return xp
+    return np
 
 
 def _fract(a):
-    return a - np.floor(a)
+    return a - _m(a).floor(a)
 
 
 def _hash(ix, iy, seed=0.0):
     """Deterministic pseudo-random 0..1 per integer lattice point."""
-    return _fract(np.sin(ix * 127.1 + iy * 311.7 + seed * 74.7) * 43758.5453123)
+    xp = _m(ix, iy, seed)
+    return _fract(xp.sin(ix * 127.1 + iy * 311.7 + seed * 74.7) * 43758.5453123)
 
 
 def _noise(x, y, seed=0.0):
     """Smooth value noise, 0..1, one feature per unit."""
-    x, y = np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64)
-    ix, iy = np.floor(x), np.floor(y)
+    xp = _m(x, y, seed)
+    x, y = xp.asarray(x, dtype=xp.float64), xp.asarray(y, dtype=xp.float64)
+    ix, iy = xp.floor(x), xp.floor(y)
     fx, fy = x - ix, y - iy
     ux, uy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
     a, b = _hash(ix, iy, seed), _hash(ix + 1, iy, seed)
@@ -42,7 +55,7 @@ def _noise(x, y, seed=0.0):
 
 def _fbm(x, y, octaves=5, seed=0.0):
     """Fractal noise (sum of noise octaves), 0..1. Clouds, smoke, marble, terrain, grunge."""
-    n = int(max(1, min(8, float(np.max(octaves)))))
+    n = int(max(1, min(8, float(_m(octaves).max(_m(octaves).asarray(octaves))))))
     total, amp, norm, f = 0.0, 0.5, 0.0, 1.0
     for i in range(n):
         total = total + amp * _noise(x * f, y * f, seed + i * 17.0)
@@ -54,33 +67,42 @@ def _fbm(x, y, octaves=5, seed=0.0):
 
 def _voronoi(x, y, seed=0.0):
     """Distance to the nearest random cell point (0 at a point, ~0.7 max). Cells, scales, cracks, crystals."""
-    x, y = np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64)
-    ix, iy = np.floor(x), np.floor(y)
-    best = np.full(np.broadcast(x, y).shape, 9.0)
+    xp = _m(x, y, seed)
+    x, y = xp.asarray(x, dtype=xp.float64), xp.asarray(y, dtype=xp.float64)
+    ix, iy = xp.floor(x), xp.floor(y)
+    best = xp.full(xp.broadcast_arrays(x, y)[0].shape, 9.0)
     for dy in (-1, 0, 1):
         for dx in (-1, 0, 1):
             cx, cy = ix + dx, iy + dy
             px = cx + _hash(cx, cy, seed + 1.3)
             py = cy + _hash(cx, cy, seed + 7.9)
-            best = np.minimum(best, np.hypot(px - x, py - y))
+            best = xp.minimum(best, xp.hypot(px - x, py - y))
     return best
 
 
 def _smoothstep(e0, e1, v):
-    t = np.clip((v - e0) / np.where(e1 - e0 == 0, 1e-9, e1 - e0), 0, 1)
+    xp = _m(e0, e1, v)
+    t = xp.clip((v - e0) / xp.where(xp.asarray(e1 - e0) == 0, 1e-9, e1 - e0), 0, 1)
     return t * t * (3 - 2 * t)
 
 
-FUNCS = {
-    "sin": np.sin, "cos": np.cos, "tan": np.tan, "asin": np.arcsin, "acos": np.arccos, "atan": np.arctan,
-    "atan2": np.arctan2, "sqrt": lambda a: np.sqrt(np.maximum(a, 0)), "abs": np.abs, "exp": np.exp,
-    "log": lambda a: np.log(np.maximum(a, 1e-12)), "pow": np.power, "floor": np.floor, "ceil": np.ceil,
-    "round": np.round, "fract": _fract, "mod": np.mod, "min": np.minimum, "max": np.maximum, "sign": np.sign,
-    "clamp": lambda a, lo=0.0, hi=1.0: np.clip(a, lo, hi), "mix": lambda a, b, t: a + (b - a) * t,
-    "step": lambda edge, a: (a >= edge).astype(np.float64), "smoothstep": _smoothstep,
-    "length": lambda a, b: np.hypot(a, b), "hypot": np.hypot, "where": np.where,
-    "noise": _noise, "fbm": _fbm, "voronoi": _voronoi, "rand": lambda a, b, seed=0.0: _hash(np.floor(a), np.floor(b), seed),
-}
+def _funcs(xp) -> dict:
+    """The shader function table built on numpy or cupy (same names, same maths)."""
+    return {
+        "sin": xp.sin, "cos": xp.cos, "tan": xp.tan, "asin": xp.arcsin, "acos": xp.arccos, "atan": xp.arctan,
+        "atan2": xp.arctan2, "sqrt": lambda a: xp.sqrt(xp.maximum(a, 0)), "abs": xp.abs, "exp": xp.exp,
+        "log": lambda a: xp.log(xp.maximum(a, 1e-12)), "pow": xp.power, "floor": xp.floor, "ceil": xp.ceil,
+        "round": xp.round, "fract": _fract, "mod": xp.mod, "min": xp.minimum, "max": xp.maximum, "sign": xp.sign,
+        "clamp": lambda a, lo=0.0, hi=1.0: xp.clip(a, lo, hi), "mix": lambda a, b, t: a + (b - a) * t,
+        "step": lambda edge, a: (xp.asarray(a) >= edge).astype(xp.float64), "smoothstep": _smoothstep,
+        "length": lambda a, b: xp.hypot(a, b), "hypot": xp.hypot,
+        "where": lambda c, a, b: xp.where(xp.asarray(c), a, b),     # cupy needs an array condition
+        "noise": _noise, "fbm": _fbm, "voronoi": _voronoi,
+        "rand": lambda a, b, seed=0.0: _hash(xp.floor(a), xp.floor(b), seed),
+    }
+
+
+FUNCS = _funcs(np)
 _NODES = (ast.Module, ast.Assign, ast.Expr, ast.Name, ast.Load, ast.Store, ast.Constant, ast.BinOp, ast.UnaryOp,
           ast.Compare, ast.Call, ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow, ast.USub,
           ast.UAdd, ast.BitAnd, ast.BitOr, ast.Invert, ast.Lt, ast.Gt, ast.LtE, ast.GtE, ast.Eq, ast.NotEq)
@@ -156,30 +178,32 @@ def evaluate(spec: dict, size: tuple[int, int], box_px, k: float, colors: dict) 
     """RGBA float array 0..255 of shape (h, w, 4) for the shader fill."""
     code, units = compile_code(str(spec.get("code", "")))
     w_px, h_px = size
-    if units * w_px * h_px > MAX_WORK:
+    xp = gpu.module_for(w_px * h_px)
+    budget = MAX_WORK * (GPU_WORK_FACTOR if xp is not np else 1)
+    if units * w_px * h_px > budget:
         raise ValueError(f"shader code is too heavy for a {w_px}x{h_px} px fill (~{units:.0f} noise calls per "
-                         f"pixel, limit ~{MAX_WORK / (w_px * h_px):.0f}): use fewer fbm octaves or "
+                         f"pixel, limit ~{budget / (w_px * h_px):.0f}): use fewer fbm octaves or "
                          "voronoi/noise calls, or compute a value once and reuse it")
     x0, y0, x1, y1 = box_px
-    ys, xs = np.mgrid[0:h_px, 0:w_px].astype(np.float64)
+    ys, xs = xp.mgrid[0:h_px, 0:w_px].astype(xp.float64)
     xs += 0.5
     ys += 0.5
     ns = {"__builtins__": {}}
-    ns.update(FUNCS)
+    ns.update(_funcs(xp))
     ns.update(_env(spec.get("params") or {}, colors))
     ns.update({"x": (xs - x0) / k, "y": (ys - y0) / k, "u": (xs - x0) / max(1e-6, x1 - x0),
-               "v": (ys - y0) / max(1e-6, y1 - y0), "w": (x1 - x0) / k, "h": (y1 - y0) / k, "px": k, "pi": np.pi})
+               "v": (ys - y0) / max(1e-6, y1 - y0), "w": (x1 - x0) / k, "h": (y1 - y0) / k, "px": k, "pi": float(np.pi)})
     with np.errstate(all="ignore"):
         try:
             exec(code, ns)        # noqa: S102 - whitelisted AST: arithmetic and FUNCS only
         except (TypeError, ValueError, ZeroDivisionError, OverflowError, NameError) as exc:
             raise ValueError(f"shader code failed: {exc}") from exc
-    out = np.empty((h_px, w_px, 4))
+    out = xp.empty((h_px, w_px, 4))
     for i, name in enumerate(OUTPUTS):
         try:
-            val = np.broadcast_to(np.asarray(ns.get(name, 1.0), dtype=np.float64), (h_px, w_px))
+            val = xp.broadcast_to(xp.asarray(ns.get(name, 1.0), dtype=xp.float64), (h_px, w_px))
         except (TypeError, ValueError) as exc:
             raise ValueError(f"shader output '{name}' must be one number per pixel (where() needs 3 arguments: "
                              "condition, value_if_true, value_if_false)") from exc
-        out[..., i] = np.nan_to_num(np.clip(val, 0, 1))
-    return out * 255.0
+        out[..., i] = xp.nan_to_num(xp.clip(val, 0, 1))
+    return gpu.to_numpy(out * 255.0)

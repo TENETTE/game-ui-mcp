@@ -61,8 +61,9 @@ def test_shader_rejects_anything_but_math(ws, code):
         s.add_rect("c", 0, 0, 10, 10, style={"fill": {"type": "shader", "code": code}})
 
 
-def test_shader_too_heavy_is_refused_before_running(ws):
-    from game_ui_mcp import shader
+def test_shader_too_heavy_is_refused_before_running(ws, monkeypatch):
+    from game_ui_mcp import gpu, shader
+    monkeypatch.setattr(gpu, "module_for", lambda pixels: np)          # the CPU limit (a GPU allows 20x more)
     heavy = ";".join(f"q{i} = voronoi(x/9 + {i}, y/9)" for i in range(70)) + "; r = q1; g = 0; b = 0"
     with pytest.raises(ValueError, match="too heavy"):
         shader.evaluate({"code": heavy}, (1024, 1024), (0, 0, 1024, 1024), 1.0, {})

@@ -43,6 +43,14 @@ claude mcp add game-ui -s user -- uvx --from git+https://github.com/TENETTE/game
 
 Claude Desktop'ta dosya: Ayarlar → Developer → Edit Config. Kaydettikten sonra uygulamayı tamamen kapatıp aç.
 
+**CPU ya da GPU sürümü:** varsayılan kurulum (`[cpu]`) her bilgisayarda çalışır. NVIDIA ekran kartın varsa `[gpu]` sürümü shader dolgularını ve büyük gölge / glow bulanıklıklarını ekran kartında hesaplar (CuPy + CUDA 12, ilk kurulumda ~1 GB indirir). Komuttaki paket adının sonuna hangisini yazdığın belirler:
+
+```bash
+claude mcp add game-ui -s user -- uvx --from "game-ui-mcp[gpu] @ git+https://github.com/TENETTE/game-ui-mcp" game-ui-mcp
+```
+
+JSON config'te: `"args": ["--from", "game-ui-mcp[gpu] @ git+https://github.com/TENETTE/game-ui-mcp", "game-ui-mcp"]`. pip ile: `pip install "game-ui-mcp[gpu] @ git+https://github.com/TENETTE/game-ui-mcp"` (CPU için `[cpu]` ya da hiçbir şey). GPU yoksa, sürücü eskiyse ya da CUDA açılamazsa `[gpu]` sürümü de sessizce CPU'ya döner; sonuç aynıdır. GPU'yu kapatmak için config'e `"env": {"GAME_UI_MCP_GPU": "0"}`.
+
 **İsteğe bağlı skill:** [`skill/game-ui-mcp/SKILL.md`](skill/game-ui-mcp/SKILL.md) AI'a bu tool'ları iyi kullanmayı öğretir (tema, katman sırası, 9-slice, kontrol turu). Claude Code'da `~/.claude/skills/` altına kopyala.
 
 ## Şunu iste

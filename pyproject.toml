@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "game-ui-mcp"
-version = "0.4.0"
+version = "0.5.0"
 description = "Local MCP server that lets an AI draw, animate and hand off game and app UI (panels, buttons, HUDs, menus) for Unity, Unreal, Godot and Roblox - no image generation model involved."
 readme = "README.md"
 license = "MIT"
@@ -32,6 +32,9 @@ Homepage = "https://github.com/TENETTE/game-ui-mcp"
 Issues = "https://github.com/TENETTE/game-ui-mcp/issues"
 
 [project.optional-dependencies]
+# pip install "game-ui-mcp[gpu]": shader fills and big blurs on an NVIDIA GPU (CUDA 12); falls back to the CPU
+gpu = ["cupy-cuda12x[ctk]>=13.4"]
+cpu = []
 dev = ["pytest>=7"]
 
 [project.scripts]

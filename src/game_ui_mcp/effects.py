@@ -8,21 +8,23 @@ import math
 import numpy as np
 from PIL import Image
 
+from . import gpu
 from .colors import parse_color
 
 
 # --------------------------------------------------------------------------- blur / morphology
 
-def _box(a: np.ndarray, r: int, axis: int) -> np.ndarray:
-    """Box blur of half-width r along one axis; outside the array counts as zero."""
+def _box(a, r: int, axis: int):
+    """Box blur of half-width r along one axis; outside the array counts as zero (numpy or cupy)."""
     if r <= 0:
         return a
+    xp = gpu.array_module(a)
     pad = [(0, 0)] * a.ndim
     pad[axis] = (r + 1, r)
-    c = np.cumsum(np.pad(a, pad), axis=axis, dtype=np.float64)
+    c = xp.cumsum(xp.pad(a, pad), axis=axis, dtype=xp.float64)
     n = a.shape[axis]
-    hi = np.take(c, np.arange(2 * r + 1, 2 * r + 1 + n), axis=axis)
-    lo = np.take(c, np.arange(0, n), axis=axis)
+    hi = xp.take(c, xp.arange(2 * r + 1, 2 * r + 1 + n), axis=axis)
+    lo = xp.take(c, xp.arange(0, n), axis=axis)
     return (hi - lo) / (2 * r + 1)
 
 
@@ -36,10 +38,11 @@ def blur_float(a: np.ndarray, radius: float, passes: int = 3) -> np.ndarray:
     else:
         sigma = radius / 2.0
         r = max(1, int(round((math.sqrt(12 * sigma * sigma / passes + 1) - 1) / 2)))
-    out = a.astype(np.float64)
+    xp = gpu.module_for(a.size)                    # big shadows / glows blur on the GPU when there is one
+    out = xp.asarray(a, dtype=xp.float64)
     for _ in range(passes):
         out = _box(_box(out, r, 0), r, 1)
-    return out
+    return gpu.to_numpy(out)
 
 
 def dilate(alpha: np.ndarray, radius: float) -> np.ndarray:
