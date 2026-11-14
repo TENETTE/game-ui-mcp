@@ -236,3 +236,25 @@ def nine_slice_stretch(img: Image.Image, borders: dict, width: int, height: int)
             part = img.crop((sx0, sy0, sx1, sy1)).resize((dx1 - dx0, dy1 - dy0), Image.BILINEAR)
             out.paste(part, (dx0, dy0))
     return out
+
+
+def svg_layer(lid: str, label: str, img, x: float, y: float, w: float, h: float) -> str:
+    """One Inkscape/Illustrator/Figma layer holding a piece as an embedded PNG."""
+    import base64
+    import html
+    import io
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    data = base64.b64encode(buf.getvalue()).decode("ascii")
+    return (f'  <g id="{html.escape(lid, quote=True)}" inkscape:groupmode="layer" '
+            f'inkscape:label="{html.escape(label, quote=True)}">\n'
+            f'    <image x="{x:g}" y="{y:g}" width="{w:g}" height="{h:g}" preserveAspectRatio="none" '
+            f'href="data:image/png;base64,{data}"/>\n  </g>')
+
+
+def svg_document(width: float, height: float, layers: list[str]) -> str:
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<svg xmlns="http://www.w3.org/2000/svg" '
+            'xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" '
+            f'width="{width:g}" height="{height:g}" viewBox="0 0 {width:g} {height:g}">\n'
+            + "\n".join(layers) + "\n</svg>\n")

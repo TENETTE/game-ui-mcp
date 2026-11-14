@@ -9,6 +9,7 @@ from __future__ import annotations
 import functools
 import io
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -2223,20 +2224,24 @@ def export_png(canvas: str, path: str | None = None, scales: list[float] | None 
         if trim:
             img, offset = ex.trim(img, int(round(padding * scale)))
         out = base.with_name(base.stem + (suffix if suffix is not None else _scale_suffix(scale)) + "." + fmt)
-        if fmt == "jpg":
-            flat = PILImage.new("RGB", img.size, (0, 0, 0))
-            flat.paste(img, mask=img.getchannel("A"))
-            flat.save(out, quality=92)
-        elif fmt == "webp":
-            img.save(out, lossless=True)
-        else:
-            img.save(out)
+        _save_image(img, out, fmt)
         files.append({"file": str(out), "scale": round(scale, 4), "width": img.width, "height": img.height,
                       "trim_offset": list(offset)})
     result: dict = {"files": files}
     if warnings:
         result["warnings"] = sorted(set(warnings))
     return result
+
+
+def _save_image(img, out: Path, fmt: str) -> None:
+    if fmt == "jpg":
+        flat = PILImage.new("RGB", img.size, (0, 0, 0))
+        flat.paste(img, mask=img.getchannel("A"))
+        flat.save(out, quality=92)
+    elif fmt == "webp":
+        img.save(out, lossless=True)
+    else:
+        img.save(out)
 
 
 def _layer_units(r, merge_clipped: bool) -> list[dict]:
@@ -2263,8 +2268,8 @@ def _layer_units(r, merge_clipped: bool) -> list[dict]:
 def export_layers(canvas: str, out_dir: str | None = None, name: str | None = None, by: str = "auto",
                   layers: list[str] | None = None, groups: list[str] | None = None,
                   scales: list[float] | None = None, trim: bool = True, padding: int = 2,
-                  merge_clipped: bool = True):
-    """Export a canvas in pieces: one PNG per layer (or per element group) plus a layout JSON that says
+                  merge_clipped: bool = True, format: str = "png"):
+    """Export a canvas in pieces: one image per layer (or per element group) plus a layout JSON that says
     where each piece sits, so an engine can rebuild the picture and move the parts independently -
     a gauge (dial / needle / value arc), a HUD (each widget), a button (background / shine / label).
 
@@ -2275,7 +2280,12 @@ def export_layers(canvas: str, out_dir: str | None = None, name: str | None = No
     merge_clipped (by layer): layers clipped onto a base (shading, highlights) are baked into that base's
       image, since an engine cannot clip or blend them itself. false exports each one separately.
     trim crops every piece to its pixels and records its x, y so it can be placed exactly.
-    Writes "<name>_<piece>.png" and "<name>.layout.json":
+    format: "png" (default), "webp" (lossless), "jpg" (no transparency: each piece gets a black matte -
+      only for opaque layers) or "svg" (ONE layered <name>.svg: every piece is a named layer group that
+      Figma, Illustrator and Inkscape open as separate layers; pixels are embedded PNG at the largest
+      scale, not editable vector paths).
+    out_dir: any folder (absolute, or relative to the workspace exports folder); created if missing.
+    Writes "<name>_<piece>.<format>" (or "<name>.svg") and "<name>.layout.json":
       {"canvas": {"width", "height"}, "layers": [{"name", "file", "x", "y", "width", "height", "order",
         "blend", "merged", "origin"}]}   (canvas units at 1x; "origin" = rotation pivot of the part).
     For a fully editable stack in an image editor use export_psd.
@@ -2288,6 +2298,9 @@ def export_layers(canvas: str, out_dir: str | None = None, name: str | None = No
         raise ValueError("by must be 'auto', 'layer' or 'group'")
     if mode == "auto":
         mode = "layer" if c.get("layers") else "group"
+    fmt = format.lower().lstrip(".").replace("jpeg", "jpg")
+    if fmt not in ("png", "webp", "jpg", "svg"):
+        raise ValueError("format must be png, webp, jpg or svg")
     folder = _out_dir(out_dir, "layers")
     base = slugify(name or c["id"], "layers")
     scale_list = [float(v) for v in (scales or [1])]
@@ -2374,6 +2387,9 @@ def export_layers(canvas: str, out_dir: str | None = None, name: str | None = No
         if not pieces:
             raise ValueError(f"Nothing to export. Layers: {', '.join(names) or '(none)'}")
 
+    if fmt == "svg":
+        scale_list = [max(scale_list)]           # one file: embed at the sharpest requested scale
+    svg_parts: list[str] = []
     out_layers = []
     for piece in pieces:
         entry: dict = {"name": piece["name"], **piece["meta"]}
@@ -2383,14 +2399,24 @@ def export_layers(canvas: str, out_dir: str | None = None, name: str | None = No
             offset = (0, 0)
             if trim:
                 img, offset = ex.trim(img, int(round(padding * scale)))
-            filename = f"{base}_{slugify(piece['name'], 'layer')}{_scale_suffix(scale)}.png"
-            img.save(folder / filename)
+            if fmt == "svg":
+                lid = slugify(piece["name"], "layer")
+                svg_parts.append(ex.svg_layer(lid, piece["name"], img, offset[0] / scale, offset[1] / scale,
+                                              img.width / scale, img.height / scale))
+                filename = f"{base}.svg"
+            else:
+                filename = f"{base}_{slugify(piece['name'], 'layer')}{_scale_suffix(scale)}.{fmt}"
+                _save_image(img, folder / filename, fmt)
             files.append({"file": filename, "scale": scale, "pixel_width": img.width, "pixel_height": img.height})
             if scale == scale_list[0]:
                 entry.update(file=filename, x=_round(offset[0] / scale), y=_round(offset[1] / scale),
                              width=_round(img.width / scale), height=_round(img.height / scale))
         entry["files"] = files
         out_layers.append(entry)
+    if fmt == "svg":
+        (folder / f"{base}.svg").write_text(ex.svg_document(c["width"], c["height"], svg_parts), encoding="utf-8")
+    if fmt == "jpg":
+        notes.append("jpg has no transparency: every piece was flattened on black. Use png/webp for overlay layers.")
     layout = {"canvas": {"name": c["id"], "width": c["width"], "height": c["height"]}, "split_by": mode,
               "layers": out_layers}
     layout_path = folder / f"{base}.layout.json"
@@ -2662,6 +2688,13 @@ def write_engine_helpers(engine: str, out_dir: str, roblox_ids: dict | None = No
             godot_res_path is where that folder lives inside the Godot project.
     """
     engine = engine.lower()
+    # these values are written into scripts the user runs in the editor, so only plain path characters
+    if not re.fullmatch(r"/[A-Za-z0-9_/]+", unreal_content_path or ""):
+        raise ValueError("unreal_content_path must be a content path like /Game/UI/Generated "
+                         "(letters, digits, _ and / only)")
+    if not re.fullmatch(r"res://[A-Za-z0-9_\-/.]*", godot_res_path or "") or ".." in godot_res_path:
+        raise ValueError("godot_res_path must be a resource path like res://ui/generated "
+                         "(letters, digits, _ - . / only, no '..')")
     folder = Path(out_dir).expanduser()
     if not folder.is_absolute():
         folder = store().exports_dir / folder
@@ -2687,7 +2720,10 @@ def write_engine_helpers(engine: str, out_dir: str, roblox_ids: dict | None = No
             key = slugify(asset, "asset")
             if key not in manifest.get("assets", {}):
                 raise ValueError(f"roblox_ids: asset '{asset}' is not in the manifest ({', '.join(sorted(manifest['assets']))})")
-            manifest["assets"][key]["roblox_id"] = str(asset_id)
+            rid = str(asset_id).strip().removeprefix("rbxassetid://")
+            if not rid.isdigit() or not rid.isascii():
+                raise ValueError(f"roblox_ids: '{asset}' must be a numeric asset id like 1234567890, got {asset_id!r}")
+            manifest["assets"][key]["roblox_id"] = rid
         ex.write_json(manifest_path, manifest)
         target = folder / "GameUiAssets.luau"
         target.write_text(engines.roblox_module(manifest), encoding="utf-8")

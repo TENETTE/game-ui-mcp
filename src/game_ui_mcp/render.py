@@ -25,6 +25,7 @@ from .fonts import FontLibrary, load_font, missing_glyphs, parse_weight
 
 SS = 4
 MAX_MASK_PIXELS = 40_000_000
+MAX_OUTPUT_PIXELS = 140_000_000      # 16K x 8K; larger renders exhaust RAM before Python can raise MemoryError
 TEXT_STYLE_KEYS = ("font", "weight", "size", "letter_spacing", "line_height", "uppercase", "italic")
 VECTOR_TYPES = {"rect", "ellipse", "polygon", "line", "path", "arc", "ticks"}
 BITMAP_TYPES = {"image", "instance"}
@@ -1008,6 +1009,9 @@ class Renderer:
         self.k = float(scale)
         self.width = max(1, int(round(canvas["width"] * self.k)))
         self.height = max(1, int(round(canvas["height"] * self.k)))
+        if self.width * self.height > MAX_OUTPUT_PIXELS:
+            raise ValueError(f"render would be {self.width}x{self.height} px, over the {MAX_OUTPUT_PIXELS // 1_000_000}M "
+                             "pixel limit - lower scale or export a region")
         self.warnings: list[str] = []
         self._by_id = {e["id"]: e for e in canvas["elements"]}
 
