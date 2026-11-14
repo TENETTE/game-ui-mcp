@@ -25,6 +25,10 @@ except ImportError:  # MCP Python SDK 1.x
         from mcp.server.fastmcp.exceptions import ToolError
     except ImportError:  # very old 1.x
         ToolError = RuntimeError
+try:
+    from mcp.types import ToolAnnotations
+except ImportError:  # SDK before tool annotations
+    ToolAnnotations = None
 
 from . import animation as anim_mod
 from . import export as ex
@@ -151,7 +155,14 @@ def tool(fn):
             return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
         return result
 
-    mcp.tool()(wrapper)
+    name = fn.__name__
+    read_only = name.startswith(("get_", "list_", "preview", "view_", "inspect_", "measure_")) or name == "review_canvas"
+    # clients use these hints to skip approval for look-only tools and to warn before deletes
+    if ToolAnnotations is None:
+        mcp.tool()(wrapper)
+    else:
+        mcp.tool(annotations=ToolAnnotations(readOnlyHint=read_only, destructiveHint=name.startswith("delete_"),
+                                             idempotentHint=read_only, openWorldHint=False))(wrapper)
     return fn
 
 _store: Store | None = None

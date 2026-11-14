@@ -34,3 +34,15 @@ def test_errors_carry_tool_name_and_a_recovery_hint():
 def test_missing_image_tells_to_use_absolute_path(tmp_path):
     with pytest.raises(ValueError, match="absolute path"):
         s.view_image(str(tmp_path / "nope.png"))
+
+
+def test_look_only_tools_are_marked_read_only_and_deletes_destructive():
+    import asyncio
+    tools = {t.name: t for t in asyncio.run(s.mcp.list_tools())}
+    if tools["preview"].annotations is None:
+        pytest.skip("this MCP SDK has no tool annotations")
+    hint = {n: tools[n].annotations.model_dump(by_alias=True) for n in ("preview", "review_canvas", "add_rect",
+                                                                        "delete_canvas", "undo")}
+    assert hint["preview"]["readOnlyHint"] and hint["review_canvas"]["readOnlyHint"]
+    assert not hint["add_rect"]["readOnlyHint"]
+    assert hint["delete_canvas"]["destructiveHint"] and not hint["undo"]["destructiveHint"]
