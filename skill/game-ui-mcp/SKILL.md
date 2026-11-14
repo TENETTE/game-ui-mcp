@@ -274,6 +274,16 @@ Motorun köşeleri bozmadan esnetebilmesi için merkezin tek düze olması gerek
 - `export_asset(nine_slice="auto")` kenarları kendisi bulur ve merkezi birkaç piksele indirir. Sonuçtaki `notes` alanını oku: "only stretches horizontally" ya da "no stretchable area" diyorsa tasarımı düzelt ya da kenarları elle ver (`{"left":..,"top":..,"right":..,"bottom":..}`).
 - Büyük yumuşak gölge kenar payını büyütür (gölge köşede kıvrıldığı için). Bu normal.
 
+## Shader dolgusu: hazır doku yetmediğinde
+
+Hazır dolgular (gradient, stripes, carbon, brushed, clouds...) istediğin görünümü vermiyorsa formülü kendin yaz: `{"type":"shader","code":"...","params":{...}}`. Elinde `x, y` (birim), `u, v` (kutu içinde 0..1), `w, h`, `noise`, `fbm`, `voronoi`, `smoothstep`, `mix`, `where` var; sonunda `r, g, b` (ve istersen `a`) ata.
+
+- Renkleri koda gömme, `params` içine koy: `"params":{"c":"$primary"}` → kodda `c_r, c_g, c_b`. Tema değişince shader da değişir.
+- Hareket için bir `t` parametresi koy ve `set_keyframes(..., property="style.fill.params.t")` ile canlandır (akan enerji, kayan tarama çizgisi).
+- Kenar yumuşatmayı `smoothstep` ile yap; `step` sert ve tırtıklı kenar verir.
+- Önce küçük bir canvas'ta dene, `preview(zoom=...)` ile bak, sonra büyüt. fbm'de 4-5 oktav çoğu zaman yeter.
+- Shader, katman stilleri ve `blend` ile birleşir: shader'ı bir `clip` katmanında `overlay` ile kullanmak (çizik, kir, parlama) çoğu zaman tek başına kullanmaktan iyi sonuç verir.
+
 ## Çok dilli yazı
 
 - Her yazıya dil ver: `add_text(..., lang="ar")` ya da canvas / render dili. Han karakterleri için şart: aynı karakter Japonca, Basitleştirilmiş Çince, Geleneksel Çince ve Korecede farklı çizilir.

@@ -20,7 +20,7 @@ from . import effects as fxlib
 from . import geometry as geo
 from . import raster
 from .colors import parse_color
-from . import shaping
+from . import shader, shaping
 from .fonts import FontLibrary, load_font, missing_glyphs, parse_weight
 
 SS = 4
@@ -285,7 +285,7 @@ def _pattern_cov(spec: dict, kind: str, size: tuple[int, int], origin: tuple[flo
         n = fxlib.fractal_noise(rx, ry, cell, int(spec.get("octaves", 4)), seed)
         contrast = float(spec.get("contrast", 1))
         return np.clip((n - 0.5) * contrast + 0.5, 0, 1)
-    raise ValueError(f"Unknown fill type '{kind}'. Use linear, radial, conic, stripes, dots, grid, hex, carbon, "
+    raise ValueError(f"Unknown fill type '{kind}'. Use linear, radial, conic, shader, stripes, dots, grid, hex, carbon, "
                      "brushed, clouds or image.")
 
 
@@ -304,7 +304,9 @@ def paint(mask: Image.Image, spec: Any, box_px: Box, colors: dict, k: float) -> 
     bw, bh = max(1e-6, x1 - x0), max(1e-6, y1 - y0)
     if kind == "image":
         return _image_fill(mask, spec, box_px, k)
-    if kind in ("linear", "radial", "conic"):
+    if kind == "shader":
+        rgba = shader.evaluate(spec, (w, h), box_px, k, colors)
+    elif kind in ("linear", "radial", "conic"):
         space = str(spec.get("space", "srgb")).lower()
         offs, cols = _stops(spec, colors, space)
         ys, xs = np.mgrid[0:h, 0:w].astype(np.float64)

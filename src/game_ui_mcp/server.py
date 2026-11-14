@@ -57,6 +57,17 @@ Fill: a color, or a gradient/pattern object:
   {"type":"clouds","color":"#fff@0.3","color2":"transparent","size":48,"octaves":4,"seed":1,"contrast":1.5}
   {"type":"image","path":"C:/textures/metal.png","fit":"cover"|"stretch"|"tile","scale":1}   (your own texture)
   Gradients take "space":"oklab" for vivid, even blends between distant hues (default "srgb").
+  {"type":"shader","code":"...","params":{...}} - your own per-pixel formula when no preset fits (plasma,
+    energy, hologram scanlines, marble, wood, rust, ripples, scales, cracks, warped patterns...). Write plain
+    statements that end by assigning r, g, b (0..1) and optionally a. Inputs: x, y (units from the box's
+    top-left), u, v (0..1 across the box), w, h (box size), px (pixels per unit), pi. Functions: sin cos tan
+    asin acos atan atan2 sqrt abs exp log pow floor ceil round fract mod min max sign clamp mix step
+    smoothstep length hypot where, noise(x,y[,seed]) (0..1 smooth), fbm(x,y,octaves[,seed]) (fractal),
+    voronoi(x,y[,seed]) (distance to nearest cell point), rand(x,y[,seed]). No if/loops: use where().
+    params: numbers become names; colour strings ("$primary", "#ff8800") become name_r name_g name_b name_a.
+    Animate any param with set_keyframes, property "style.fill.params.<name>" (e.g. a time param t).
+    Example (energy core): {"type":"shader","params":{"c":"#38bdf8","t":0},"code":
+      "d = length(u-0.5, v-0.5)*2; n = fbm(x/30+t, y/30, 4); k = clamp(1-d+n*0.4); r = c_r*k+k*k*0.6; g = c_g*k+k*k*0.6; b = c_b*k; a = smoothstep(1, 0.7, d)"}
 
 Style object (every key optional; `style` may also be a theme style name, or {"use":"name", ...overrides}):
   fill, opacity, noise: 0-1, blur: px (softens the whole element: light blooms, haze),
