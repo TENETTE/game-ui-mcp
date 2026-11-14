@@ -134,6 +134,31 @@ def engine_metadata(engine: str, size: tuple[int, int], borders: dict | None, sc
     return meta
 
 
+UNITY_STATE = {"hover": "highlightedSprite", "pressed": "pressedSprite", "selected": "selectedSprite",
+               "focused": "selectedSprite", "disabled": "disabledSprite"}
+GODOT_STATE = {"hover": "texture_hover", "pressed": "texture_pressed", "disabled": "texture_disabled",
+               "focused": "texture_focused", "selected": "texture_focused"}
+ROBLOX_STATE = {"hover": "HoverImage", "pressed": "PressedImage"}
+
+
+def state_metadata(engine: str, normal: str, files: dict[str, str]) -> dict:
+    """Which engine slot each exported state image goes into."""
+    out: dict = {}
+    if engine in ("unity", "generic"):
+        slots = {UNITY_STATE[s]: f for s, f in files.items() if s in UNITY_STATE}
+        if slots:
+            out["unity_button"] = {"transition": "SpriteSwap", "spriteState": slots}
+    if engine in ("godot", "generic"):
+        slots = {GODOT_STATE[s]: f for s, f in files.items() if s in GODOT_STATE}
+        if slots:
+            out["godot_texture_button"] = {"texture_normal": normal, **slots}
+    if engine in ("roblox", "generic"):
+        slots = {ROBLOX_STATE[s]: f for s, f in files.items() if s in ROBLOX_STATE}
+        if slots:
+            out["roblox_image_button"] = slots
+    return out
+
+
 def pack_atlas(images: list[tuple[str, Image.Image]], padding: int = 2, max_size: int = 4096,
                power_of_two: bool = False) -> tuple[Image.Image, dict]:
     """Shelf-pack images into one atlas. Returns (atlas, frames{name: {x,y,w,h}})."""
@@ -189,3 +214,25 @@ def update_manifest(out_dir: Path, name: str, entry: dict) -> Path:
     data["assets"][name] = entry
     write_json(path, data)
     return path
+
+
+def nine_slice_stretch(img: Image.Image, borders: dict, width: int, height: int) -> Image.Image:
+    """Draw ``img`` at width x height the way an engine 9-slices it: corners kept, edges and centre stretched."""
+    w, h = img.size
+    l, t, r, b = (int(borders[k]) for k in ("left", "top", "right", "bottom"))
+    l, r = min(l, width // 2), min(r, width - min(l, width // 2))
+    t, b = min(t, height // 2), min(b, height - min(t, height // 2))
+    out = Image.new("RGBA", (max(1, width), max(1, height)), (0, 0, 0, 0))
+    xs_src = [0, l, w - r, w]
+    ys_src = [0, t, h - b, h]
+    xs_dst = [0, l, width - r, width]
+    ys_dst = [0, t, height - b, height]
+    for i in range(3):
+        for j in range(3):
+            sx0, sx1, sy0, sy1 = xs_src[i], xs_src[i + 1], ys_src[j], ys_src[j + 1]
+            dx0, dx1, dy0, dy1 = xs_dst[i], xs_dst[i + 1], ys_dst[j], ys_dst[j + 1]
+            if sx1 <= sx0 or sy1 <= sy0 or dx1 <= dx0 or dy1 <= dy0:
+                continue
+            part = img.crop((sx0, sy0, sx1, sy1)).resize((dx1 - dx0, dy1 - dy0), Image.BILINEAR)
+            out.paste(part, (dx0, dy0))
+    return out

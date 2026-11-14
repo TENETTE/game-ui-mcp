@@ -9,7 +9,6 @@ from game_ui_mcp import export as ex
 from game_ui_mcp import geometry as geo
 from game_ui_mcp import server as s
 from game_ui_mcp.colors import parse_color
-from game_ui_mcp.icons import icon_names
 from game_ui_mcp.render import parse_anchor
 from game_ui_mcp.store import Store
 
@@ -150,14 +149,11 @@ def test_missing_glyph_warning(ws):
     assert "warnings" in r
 
 
-def test_every_icon_renders(ws):
+def test_icon_elements_are_gone(ws):
     s.create_canvas("a", 48, 48)
-    for name in icon_names():
-        for variant in ("line", "solid"):
-            r = s.add_icon("a", name, 0, 0, 48, variant=variant, id="i")
-            assert r["bbox_xywh"] == [0, 0, 48, 48]
-            assert render("a")[..., 3].max() == 255
-            s.delete_elements("a", ids=["i"])
+    assert not hasattr(s, "add_icon") and not hasattr(s, "list_icons")
+    with pytest.raises(ValueError):
+        s.batch("a", [{"op": "add_icon", "name": "star", "x": 0, "y": 0}])
 
 
 def test_rotation_keeps_shape_area(ws):
@@ -197,7 +193,7 @@ def test_batch_is_atomic(ws):
     s.add_rect("a", 0, 0, 10, 10, id="keep")
     with pytest.raises(ValueError) as err:
         s.batch("a", [{"op": "add_rect", "x": 0, "y": 0, "width": 5, "height": 5, "id": "one"},
-                      {"op": "add_icon", "name": "not-an-icon", "x": 0, "y": 0}])
+                      {"op": "add_path", "d": "not a path", "x": 0, "y": 0}])
     assert "operation 1" in str(err.value)
     assert [e["id"] for e in s.get_canvas("a")["elements"]] == ["keep"]
 
@@ -274,8 +270,9 @@ def test_export_png_scales_and_trim(ws):
     assert (one["width"], one["height"]) == (20, 10) and one["trim_offset"] == [30, 40]
     assert (two["width"], two["height"]) == (40, 20) and two["file"].endswith("a_2x.png")
     assert Image.open(one["file"]).mode == "RGBA"
+    assert s.export_png("a", "a.jpg")["files"][0]["file"].endswith("a.jpg")
     with pytest.raises(ValueError):
-        s.export_png("a", "a.jpg")
+        s.export_png("a", "a.gif")
 
 
 def test_nine_slice_auto_and_metadata(ws):
@@ -322,7 +319,8 @@ def test_minimized_nine_slice_reconstructs_original():
 def test_atlas_and_engine_helpers(ws):
     for i, size in enumerate((32, 48, 64)):
         s.create_canvas(f"ic{i}", size, size)
-        s.add_icon(f"ic{i}", "star", 0, 0, size, variant="solid")
+        s.add_polygon(f"ic{i}", cx=size / 2, cy=size / 2, radius=size / 2, inner_radius=size / 4, sides=5,
+                      fill="#ffffff")
     out = s.export_atlas(["ic0", "ic1", "ic2"], str(ws / "out" / "icons.png"))
     frames = out["frames"]
     assert set(frames) == {"ic0", "ic1", "ic2"} and frames["ic2"]["w"] == 64
@@ -1108,3 +1106,279 @@ def test_godot_export(ws, tmp_path):
     h = s.write_engine_helpers("godot", str(tmp_path / "g"))
     tres = (tmp_path / "g" / "panel.stylebox.tres").read_text()
     assert h["files"] == ["panel.stylebox.tres"] and "texture_margin_left = 16.0" in tres
+
+
+# ---------------------------------------------------------------- game / app designer workflow
+
+def test_presets_safe_area_and_guides(ws):
+    r = s.create_canvas("m", preset="iphone")
+    assert (r["width"], r["height"]) == (393, 852) and r["preset"]["safe_area_ltrb"] == [0, 59, 0, 34]
+    s.add_rect("m", 20, 10, 100, 30, fill="#fff", id="top_button")
+    rep = s.review_canvas("m")
+    assert any(i["check"] == "safe_area" and "top_button" in i["ids"] for i in rep["issues"])
+    out = s.preview("m", guides=["safe", "grid:8", "thirds"], simulate="deuteranopia")
+    assert json.loads(out[1])["simulate"] == "deuteranopia"
+    with pytest.raises(ValueError):
+        s.create_canvas("x", preset="gameboy")
+
+
+def test_colour_vision_simulation_changes_red_green():
+    from game_ui_mcp.viewing import simulate
+    img = Image.new("RGBA", (2, 1))
+    img.putpixel((0, 0), (220, 40, 40, 255))
+    img.putpixel((1, 0), (40, 180, 40, 255))
+    out = np.asarray(simulate(img, "deuteranopia")).astype(int)
+    before = abs(220 - 40) + abs(40 - 180)
+    after = abs(out[0, 0, 0] - out[0, 1, 0]) + abs(out[0, 0, 1] - out[0, 1, 1])
+    assert after < before / 2                                  # red and green collapse together
+    gray = np.asarray(simulate(img, "grayscale"))
+    assert gray[0, 0, 0] == gray[0, 0, 1] == gray[0, 0, 2]
+
+
+def test_pins_resize_and_resolutions(ws):
+    s.create_canvas("hud", 400, 200)
+    s.add_rect("hud", 10, 10, 50, 20, fill="#fff", id="hp")
+    s.add_rect("hud", 340, 10, 50, 50, fill="#fff", id="map")
+    s.add_rect("hud", 0, 190, 400, 10, fill="#fff", id="bar")
+    s.add_rect("hud", 175, 90, 50, 20, fill="#fff", id="mid")
+    s.set_pin("hud", "right", "top", ids=["map"])
+    s.set_pin("hud", "stretch", "bottom", ids=["bar"])
+    s.set_pin("hud", "center", "middle", ids=["mid"])
+    s.resize_canvas("hud", 600, 300)
+    boxes = {e["id"]: e["bbox_xywh"] for e in s.get_canvas("hud")["elements"]}
+    assert boxes["hp"] == [10, 10, 50, 20] and boxes["map"] == [540, 10, 50, 50]
+    assert boxes["bar"] == [0, 290, 600, 10] and boxes["mid"] == [275, 140, 50, 20]
+    s.undo("hud")
+    assert s.get_canvas("hud")["width"] == 400
+    assert s.redo("hud")["redone"] is True and s.get_canvas("hud")["width"] == 600
+    sheet = s.preview_resolutions("hud", sizes=[[800, 300], "iphone-landscape"])
+    assert len(json.loads(sheet[1])["sizes"]) == 2
+
+
+def test_states_render_and_export(ws, tmp_path):
+    s.create_canvas("btn", 100, 40)
+    s.add_rect("btn", 0, 0, 100, 40, fill="#0000ff", id="face")
+    s.set_state("btn", "hover", "face", {"fill": "#00ff00"})
+    s.set_state("btn", "pressed", "face", {"fill": "#ff0000"})
+    st = s.store()
+    c = st.get("btn")
+    assert tuple(np.asarray(st.renderer(c, state="hover").render())[20, 50][:3]) == (0, 255, 0)
+    assert tuple(np.asarray(st.renderer(c).render())[20, 50][:3]) == (0, 0, 255)       # normal untouched
+    out = s.export_asset("btn", engine="generic", out_dir=str(tmp_path / "o"), states="all")
+    f = out["files"][0]
+    assert set(f["states"]) == {"hover", "pressed"}
+    assert f["unity_button"]["spriteState"]["highlightedSprite"] == "btn_hover.png"
+    assert f["godot_texture_button"]["texture_pressed"] == "btn_pressed.png"
+    assert f["roblox_image_button"]["HoverImage"] == "btn_hover.png"
+    assert tuple(np.asarray(Image.open(tmp_path / "o" / "btn_pressed.png"))[20, 50][:3]) == (255, 0, 0)
+    manifest = json.loads((tmp_path / "o" / "game_ui_manifest.json").read_text())
+    assert manifest["assets"]["btn"]["states"]["hover"] == "btn_hover" and "btn_hover" in manifest["assets"]
+    s.write_engine_helpers("roblox", str(tmp_path / "o"))
+    assert 'hover = "btn_hover"' in (tmp_path / "o" / "GameUiAssets.luau").read_text()
+    with pytest.raises(ValueError):
+        s.preview("btn", state="nope")
+    s.delete_state("btn", "pressed")
+    assert sorted(s.get_canvas("btn")["states"]) == ["hover"]
+
+
+def test_strings_vars_pseudo_and_overflow(ws):
+    s.create_canvas("b", 200, 50)
+    s.add_rect("b", 0, 0, 120, 50, fill="#222222", id="face")
+    s.add_text("b", "{play}", 60, 25, anchor="center", size=20, color="#ffffff", id="label")
+    s.set_strings("en", {"play": "PLAY"})
+    s.set_strings("de", {"play": "JETZT SPIELEN LOS"})
+    st = s.store()
+    c = st.get("b")
+    assert st.renderer(c).text_of(c["elements"][1]) == "PLAY"
+    assert st.renderer(c, language="de").text_of(c["elements"][1]) == "JETZT SPIELEN LOS"
+    assert st.renderer(c, language="pseudo").text_of(c["elements"][1]).startswith("[PLÅÝ")
+    assert not any(i["check"] == "overflow" for i in s.review_canvas("b")["issues"])
+    rep = s.review_canvas("b", language="de")
+    assert any(i["check"] == "overflow" and i["ids"] == ["label", "face"] for i in rep["issues"])
+    s.update_canvas("b", vars={"play": "GO"})                   # canvas vars win over string tables
+    assert st.renderer(st.get("b"), language="de").text_of(st.get("b")["elements"][1]) == "GO"
+    assert s.get_strings()["languages"] == {"de": 1, "en": 1}
+
+
+def test_template_rows_and_canvas_colours(ws):
+    s.create_canvas("card", 60, 80)
+    s.update_canvas("card", colors={"rarity": "#808080"})
+    s.add_rect("card", 0, 0, 60, 80, fill="$rarity", id="bg")
+    s.add_text("card", "{name_label}", 30, 70, anchor="center", size=10, id="t")
+    out = s.generate_from_template("card", [{"name": "gold", "name_label": "Gold", "colors": {"rarity": "#ffcc00"}},
+                                            {"name": "plain", "name_label": "Plain",
+                                             "props": {"bg": {"radius": 10}}}], name_prefix="item")
+    assert out["canvases"] == ["item_gold", "item_plain"]
+    assert tuple(render("item_gold")[10, 30][:3]) == (255, 204, 0)
+    assert tuple(render("item_plain")[40, 30][:3]) == (128, 128, 128) and render("item_plain")[0, 0][3] == 0
+    st = s.store()
+    assert st.renderer(st.get("item_gold")).text_of(st.get("item_gold")["elements"][1]) == "Gold"
+
+
+def test_instance_vars_state_and_colours(ws):
+    s.create_canvas("btn", 40, 20)
+    s.update_canvas("btn", colors={"accent": "#0000ff"})
+    s.add_rect("btn", 0, 0, 40, 20, fill="$accent", id="face")
+    s.set_state("btn", "hover", "face", {"fill": "#00ff00"})
+    s.create_canvas("menu", 100, 20)
+    s.add_instance("menu", "btn", 0, 0, id="a")
+    s.add_instance("menu", "btn", 50, 0, id="b", state="hover")
+    s.add_instance("menu", "btn", 50, 0, width=1, id="c", colors={"accent": "#ff0000"})
+    px = render("menu")
+    assert tuple(px[10, 20][:3]) == (0, 0, 255) and tuple(px[10, 70][:3]) == (0, 255, 0)
+
+
+def test_arrange_row_grid_and_hug(ws):
+    s.create_canvas("a", 400, 300)
+    s.add_rect("a", 5, 5, 10, 10, fill="#333", id="panel")
+    for i, w in enumerate((40, 60, 30)):
+        s.add_rect("a", 300, 200, w, 20 + i * 5, fill="#fff", id=f"r{i}")
+    out = s.arrange_elements("a", "row", ids=["r0", "r1", "r2"], container="panel", padding=10, gap=5, hug=True)
+    assert out["container"]["bbox_xywh"] == [5, 5, 160, 50]
+    b = {e["id"]: e["bbox_xywh"] for e in s.get_canvas("a")["elements"]}
+    assert b["r0"][0] == 15 and b["r1"][0] == 60 and b["r2"][0] == 125
+    assert b["r0"][1] == 20 and b["r2"][1] == 15                   # centred across the row
+    s.arrange_elements("a", "grid", ids=["r0", "r1", "r2"], columns=2, origin=[100, 100], gap=4)
+    b = {e["id"]: e["bbox_xywh"] for e in s.get_canvas("a")["elements"]}
+    assert b["r2"][1] > b["r0"][1] and abs(b["r2"][0] + b["r2"][2] / 2 - (b["r0"][0] + b["r0"][2] / 2)) < 0.01
+
+
+def test_scatter_is_seeded_and_animated(ws):
+    s.create_canvas("a", 200, 200)
+    s.create_animation("a", "twinkle", 2, loop=True)
+    s.add_ellipse("a", 0, 0, 2, fill="#fff", id="dot")
+    out = s.scatter("a", "dot", 30, [0, 0, 200, 200], seed=5, scale=[0.5, 2], opacity=[0.2, 1], min_distance=8,
+                    animate={"animation": "twinkle", "property": "opacity", "keyframes": [[0, 0.2], [0.5, 1], [1, 0.2]]})
+    assert out["count"] == 30 and out["group"] == "dot_scatter"
+    first = [e["bbox_xywh"] for e in s.get_canvas("a")["elements"]]
+    s.undo("a")
+    s.scatter("a", "dot", 30, [0, 0, 200, 200], seed=5, scale=[0.5, 2], opacity=[0.2, 1], min_distance=8)
+    assert [e["bbox_xywh"] for e in s.get_canvas("a")["elements"]] == first
+    assert len(s.get_animations("a", "twinkle")["tracks"]) == 0      # undone with the scatter
+
+
+def test_stagger_copy_redo(ws):
+    s.create_canvas("a", 200, 200)
+    for i in range(3):
+        s.add_rect("a", 10, 10 + i * 30, 50, 20, fill="#fff", group="rows", id=f"row{i}")
+    s.create_animation("a", "in", 1)
+    out = s.set_keyframes("a", "in", "group:rows", "dx", [[0, -40], [0.3, 0, "quad-out"]], stagger=0.1)
+    assert out["staggered"] == ["row0", "row1", "row2"]
+    tracks = s.get_animations("a", "in")["tracks"]
+    starts = sorted(t["keyframes"][0]["t"] for t in tracks)
+    assert starts == [0, 0.1, 0.2]
+    s.create_canvas("b", 100, 100)
+    s.add_rect("b", 0, 0, 5, 5, id="row0")
+    assert s.copy_elements("a", "b", group="rows", dx=5)["copied"] == ["row0_2", "row1", "row2"]
+    assert s.redo("b")["redone"] is False
+
+
+def test_pixel_art_mode(ws, tmp_path):
+    s.create_canvas("p", 16, 16)
+    s.add_ellipse("p", 8, 8, 6, fill="#ff0000")
+    s.add_ellipse("p", 6, 6, 2, fill="#ffffff@0.5")
+    s.update_canvas("p", pixel_art={"palette": ["#ff0000", "#ffffff", "#000000"]})
+    px = render("p", scale=4)
+    alphas = set(np.unique(px[..., 3]))
+    assert alphas <= {0, 255}
+    colours = {tuple(v) for v in px[px[..., 3] == 255][:, :3]}
+    assert colours <= {(255, 0, 0), (255, 255, 255), (0, 0, 0)}
+    assert (px[0:4, 0:4] == px[0, 0]).all() and (px[32:36, 32:36] == px[32, 32]).all()   # whole-pixel blocks
+
+
+def test_export_formats_icon_sizes(ws, tmp_path):
+    s.create_canvas("i", 64, 64)
+    s.add_ellipse("i", 32, 32, 30, fill="#22c55e")
+    out = s.export_png("i", str(tmp_path / "app.png"), sizes=[16, 128])
+    assert [(f["width"], f["height"]) for f in out["files"]] == [(16, 16), (128, 128)]
+    ico = s.export_png("i", str(tmp_path / "app.ico"), format="ico", sizes=[16, 32, 48])
+    assert Image.open(ico["files"][0]["file"]).format == "ICO"
+    webp = s.export_png("i", str(tmp_path / "app.webp"))
+    assert Image.open(webp["files"][0]["file"]).format == "WEBP"
+
+
+def test_bitmap_font(ws, tmp_path):
+    out = s.export_bitmap_font("dmg", "0123", size=32, fill="#ffcc00", stroke={"color": "#000", "width": 3},
+                               out_dir=str(tmp_path / "f"), preview_text="3210")
+    info = json.loads(out[1])
+    fnt = (tmp_path / "f" / "dmg.fnt").read_text().splitlines()
+    assert info["glyphs"] == 4 and fnt[0].startswith("info face=")
+    chars = [l for l in fnt if l.startswith("char id=")]
+    assert len(chars) == 4 and "char id=48 " in chars[0]
+    atlas = Image.open(tmp_path / "f" / "dmg.png")
+    assert atlas.getchannel("A").getbbox() is not None
+
+
+def test_nine_slice_preview_and_spec_and_theme(ws, tmp_path):
+    s.set_theme(colors={"primary": "#7c3aed", "glass": "#ffffff@0.2"},
+                styles={"title": {"font": "Rajdhani", "size": 24, "weight": 700, "fill": "#ffffff"}})
+    s.create_canvas("panel", 100, 60)
+    s.add_rect("panel", 0, 0, 100, 60, radius=12, fill="$primary", id="bg")
+    s.add_text("panel", "Hi", 50, 30, anchor="center", style="title", id="t")
+    out = s.preview_nine_slice("panel", without_text=True)
+    assert json.loads(out[1])["stretch_x"] is True
+    spec = s.export_spec("panel", out_dir=str(tmp_path / "spec"))
+    data = json.loads((tmp_path / "spec" / "panel.spec.json").read_text())
+    assert data["colors"]["primary"] == "#7c3aed" and data["elements"][1]["text"]["font"] == "Rajdhani"
+    assert json.loads(spec[1])["elements"] == 2
+    for fmt, needle in (("css", "--color-primary: #7c3aed"), ("uss", "rgba(255, 255, 255, 0.2)"),
+                        ("csharp", "new Color32(124, 58, 237, 255)"), ("gdscript", "const PRIMARY := Color("),
+                        ("luau", "primary = Color3.fromRGB(124, 58, 237)"), ("json", '"primary": "#7c3aed"')):
+        r = s.export_theme(fmt, str(tmp_path / f"theme_{fmt}") + {"css": ".css", "uss": ".uss", "csharp": ".cs",
+                                                                     "gdscript": ".gd", "luau": ".luau", "json": ".json"}[fmt])
+        assert needle in Path(r["file"]).read_text(), fmt
+
+
+def test_prototype_links(ws, tmp_path):
+    s.create_canvas("btn", 60, 20)
+    s.add_rect("btn", 0, 0, 60, 20, fill="#2563eb", id="face")
+    s.set_state("btn", "hover", "face", {"fill": "#60a5fa"})
+    s.create_canvas("menu", 200, 100, background="#111111")
+    s.add_instance("menu", "btn", 70, 40, id="go")
+    s.add_text("menu", "x", 5, 5, id="plain")
+    s.create_canvas("options", 200, 100, background="#222222")
+    s.add_rect("options", 10, 10, 30, 20, fill="#fff", id="back")
+    s.set_link("menu", "go", "options")
+    s.set_link("menu", "plain", "options")
+    s.set_link("options", "back", "back")
+    out = s.export_prototype("menu", str(tmp_path / "p.html"))
+    page = (tmp_path / "p.html").read_text()
+    assert out["screens"] == ["menu", "options"] and page.count('class="page"') == 2
+    assert page.count('class="hover"') == 1 and 'data-go="back"' in page and "spot plain" in page
+    with pytest.raises(ValueError):
+        s.set_link("menu", "go", "missing_screen")
+
+
+def test_export_screen_engines(ws, tmp_path):
+    s.create_canvas("hud", 400, 200)
+    s.add_rect("hud", 10, 10, 100, 30, fill="#000@0.5", group="hp", id="hp_bg")
+    s.add_rect("hud", 15, 20, 60, 10, fill="#ef4444", group="hp")
+    s.add_text("hud", "HP", 80, 25, anchor="middle-left", size=14, font="Rajdhani", weight=700, color="#fff", id="hp_t")
+    s.add_rect("hud", 0, 0, 400, 6, fill="#7c3aed", id="bar")
+    s.add_ellipse("hud", 360, 40, 30, fill="#111", group="map")
+    s.set_pin("hud", "right", "top", group="map")
+    s.set_pin("hud", "stretch", "top", ids=["bar"])
+    g = s.export_screen("hud", "godot", out_dir=str(tmp_path / "g"))
+    assert g["pieces"] == ["hp", "bar", "map"] and g["texts"] == ["hp_t"] and g["fonts_copied"]
+    tscn = (tmp_path / "g" / "hud.tscn").read_text()
+    assert tscn.startswith("[gd_scene") and 'type="NinePatchRect"' in tscn and 'text = "HP"' in tscn
+    assert "anchor_left = 1.0000" in tscn and "anchor_right = 1.0000" in tscn
+    assert Image.open(tmp_path / "g" / "bar.png").width < 50                # stretched piece was minimised
+    rb = s.export_screen("hud", "roblox", out_dir=str(tmp_path / "r"))
+    lua = (tmp_path / "r" / rb["files"][1]).read_text()
+    assert 'Instance.new("TextLabel")' in lua and "UDim2.new(1, -70.0" in lua and "ScaleType.Slice" in lua
+    u = s.export_screen("hud", "unity", out_dir=str(tmp_path / "u"))
+    uss = (tmp_path / "u" / "hud.uss").read_text()
+    assert "right: 10.0px" in uss and "-unity-slice-left" in uss and "<ui:Label" in (tmp_path / "u" / "hud.uxml").read_text()
+    data = json.loads((tmp_path / "u" / "hud.screen.json").read_text())
+    assert [n["kind"] for n in data["nodes"]] == ["image", "text", "image", "image"]
+
+
+def test_path_scale_is_geometry_not_transform(ws):
+    s.create_canvas("a", 200, 200)
+    r = s.add_path("a", "M0 0H24V24H0Z", x=50, y=50, scale=2, fill="#fff", id="p")
+    assert r["bbox_xywh"] == [50, 50, 48, 48]
+    a = render("a")[..., 3]
+    ys, xs = np.nonzero(a)
+    assert (xs.min(), ys.min(), xs.max(), ys.max()) == (50, 50, 97, 97)
+    assert s.update_element("a", "p", {"scale_x": 0.5, "scale_y": 0.5})["bbox_xywh"] == [62, 62, 24, 24]

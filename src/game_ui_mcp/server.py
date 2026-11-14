@@ -1,7 +1,7 @@
 """game-ui-mcp: a local MCP server that lets an AI draw game UI assets with drawing tools.
 
 No AI image generation and no network access: every pixel comes from the shapes,
-text, icons and effects the model asks for. Run with ``python -m game_ui_mcp``.
+text and effects the model asks for. Run with ``python -m game_ui_mcp``.
 """
 
 from __future__ import annotations
@@ -29,7 +29,6 @@ from . import animation as anim_mod
 from . import export as ex
 from . import psd as psd_mod
 from . import engines
-from .icons import icon_names
 from .render import TextLayout, backdrop, composite as _composite, resolve_style
 from .store import Store, slugify
 
@@ -101,7 +100,8 @@ keyframed (x, width, rotation, radius, end_angle, style.glow.blur, style.fill, .
 (move), scale / scale_x / scale_y (around the pivot) and opacity. Check motion with preview_animation (a
 filmstrip of frames) and export with export_animation (sprite sheet, frames, GIF/APNG/WebP, or keyframe JSON).
 
-There are no ready-made components (no "button" or "panel" tool): build everything from these primitives,
+There are no ready-made components or icons (no "button", "panel" or icon library): build everything from
+these primitives - icons included, with add_path / add_svg -
 and judge the result yourself. Always call `preview` after a group of changes and actually inspect the
 image before exporting.
 """
@@ -210,7 +210,7 @@ def _prepare(etype: str, args: dict) -> dict:
     color = props.pop("color", None)
     if color is not None and fill is None:
         fill = color
-    if etype in ("line", "icon", "arc", "ticks"):
+    if etype in ("line", "arc", "ticks"):
         stroke = None
     style = _merge_style(props.pop("style", None), fill, stroke)
     if style is not None:
@@ -231,7 +231,7 @@ def _png_bytes(img: PILImage.Image) -> bytes:
     return buf.getvalue()
 
 
-def _out_path(path: str | None, default_name: str, subdir: str | None = None) -> Path:
+def _out_path(path: str | None, default_name: str, subdir: str | None = None, suffixes: tuple = (".png",)) -> Path:
     st = store()
     if path:
         p = Path(path).expanduser()
@@ -239,8 +239,8 @@ def _out_path(path: str | None, default_name: str, subdir: str | None = None) ->
             p = st.exports_dir / p
     else:
         p = st.exports_dir / (subdir or "") / default_name
-    if p.suffix.lower() != ".png":
-        raise ValueError("Output file must end with .png")
+    if p.suffix.lower() not in suffixes:
+        raise ValueError(f"Output file must end with {' or '.join(suffixes)}")
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -267,17 +267,40 @@ def _scale_suffix(scale: float) -> str:
 # --------------------------------------------------------------------------- canvas tools
 
 @tool
-def create_canvas(name: str, width: int, height: int, background: str | dict | None = None):
+def create_canvas(name: str, width: int | None = None, height: int | None = None,
+                  background: str | dict | None = None, preset: str | None = None):
     """Create a new canvas (one canvas = one asset or one screen mockup).
 
     Size the canvas to the asset: e.g. 64x64 icon, 320x96 button, 256x256 panel, 1920x1080 screen.
-    Leave room for shadows/glows (they are cut off at the canvas edge).
+    Leave room for shadows/glows (they are cut off at the canvas edge), or draw roomy and fit_canvas later.
     background: omit for transparent (normal for assets); a color or gradient object for mockups.
+    preset: a screen / device size that also records its safe area (notch, home bar, TV overscan) for
+      preview(guides=["safe"]): 1080p, 1440p, 4k, 720p, ultrawide, ultrawide-1440, tv-1080p, steam-deck,
+      switch, iphone, iphone-landscape, iphone-se, ipad, ipad-landscape, android, android-landscape,
+      mobile-game-landscape, app-icon. Phone / tablet presets are in points / dp (the units app layouts
+      use); export at scale 2-3 for device pixels.
     Returns the canvas id used by every other tool.
     """
-    canvas = store().create_canvas(name, width, height, _maybe_json(background))
-    return {"canvas": canvas["id"], "width": canvas["width"], "height": canvas["height"],
-            "workspace": str(store().workspace)}
+    from . import layout as lay
+    safe = None
+    note = None
+    if preset:
+        pw, ph, safe, note = lay.preset(preset)
+        width, height = width or pw, height or ph
+    if not width or not height:
+        raise ValueError("give width and height, or a preset")
+    st = store()
+    canvas = st.create_canvas(name, width, height, _maybe_json(background))
+    if preset:
+        canvas["device"] = str(preset).lower()
+        if any(safe):
+            canvas["safe_area"] = list(safe)
+        st.save_canvas(canvas)
+    out = {"canvas": canvas["id"], "width": canvas["width"], "height": canvas["height"],
+           "workspace": str(st.workspace)}
+    if preset:
+        out["preset"] = {"name": canvas["device"], "note": note, "safe_area_ltrb": canvas.get("safe_area", [0, 0, 0, 0])}
+    return out
 
 
 @tool
@@ -311,8 +334,8 @@ def get_canvas(canvas: str, details: bool = False, ids: list[str] | None = None)
             item["visible"] = False
         if el["type"] == "text":
             item["text"] = el.get("text")
-        if el["type"] == "icon":
-            item["name"] = el.get("name")
+        if el.get("pin"):
+            item["pin"] = el["pin"]
         if details:
             item["props"] = {k: v for k, v in el.items() if k not in ("id", "type")}
         items.append(item)
@@ -323,6 +346,11 @@ def get_canvas(canvas: str, details: bool = False, ids: list[str] | None = None)
         out["active_layer"] = c.get("active_layer")
     if c.get("animations"):
         out["animations"] = sorted(c["animations"])
+    for key in ("device", "safe_area", "vars", "colors", "language", "pixel_art", "links"):
+        if c.get(key):
+            out[key] = c[key]
+    if c.get("states"):
+        out["states"] = {k: sorted(v) for k, v in c["states"].items()}
     return out
 
 
@@ -346,8 +374,21 @@ def _layer_list(c: dict) -> list[dict]:
 
 @tool
 def update_canvas(canvas: str, name: str | None = None, width: int | None = None, height: int | None = None,
-                  background: str | dict | None = None, clear_background: bool = False):
-    """Rename or resize a canvas, or change its background. Elements keep their coordinates when resizing."""
+                  background: str | dict | None = None, clear_background: bool = False,
+                  safe_area: list[float] | None = None, vars: dict | None = None, colors: dict | None = None,
+                  language: str | None = None, pixel_art: bool | dict | None = None):
+    """Change canvas settings. Elements keep their coordinates when width/height change (use
+    resize_canvas to move pinned elements with the edges).
+
+    safe_area [left, top, right, bottom]: insets kept free of important UI (notch, rounded corners, TV
+      overscan); shown by preview(guides=["safe"]) and checked by review_canvas.
+    vars: values for {placeholders} in text on this canvas, e.g. {"name": "Iron Sword", "price": "250"}
+      (merged; null removes a key). colors: canvas-only overrides of theme colour tokens, e.g.
+      {"rarity": "#a855f7"} - one template, many recolours.
+    language: default string-table language for this canvas (see set_strings).
+    pixel_art: true or {"palette": [...colors], "max_colors": 16, "alpha_threshold": 128} - renders without
+      anti-aliasing at 1x, snaps alpha and colours, and scales up by whole pixels. false turns it off.
+    """
     st = store()
     c = st.get(canvas)
     changes: dict = {"name": name, "width": width, "height": height}
@@ -356,8 +397,42 @@ def update_canvas(canvas: str, name: str | None = None, width: int | None = None
     elif background is not None:
         changes["background"] = _maybe_json(background)
     st.update_canvas(c, **changes)
-    return {"canvas": c["id"], "name": c["name"], "width": c["width"], "height": c["height"],
-            "background": c.get("background")}
+    safe_area, vars, colors, pixel_art = (_maybe_json(v) for v in (safe_area, vars, colors, pixel_art))
+    if safe_area is not None:
+        if not isinstance(safe_area, list) or len(safe_area) != 4:
+            raise ValueError("safe_area must be [left, top, right, bottom]")
+        c["safe_area"] = [float(v) for v in safe_area]
+    for key, value in (("vars", vars), ("colors", colors)):
+        if value is not None:
+            if not isinstance(value, dict):
+                raise ValueError(f"{key} must be an object")
+            merged = dict(c.get(key) or {})
+            for k2, v2 in value.items():
+                if v2 is None:
+                    merged.pop(k2, None)
+                else:
+                    merged[k2] = v2 if key == "colors" else str(v2)
+            if key == "colors":
+                from .colors import parse_color
+                ctx = {**st.theme.get("colors", {}), **merged}
+                for v2 in merged.values():
+                    parse_color(v2, ctx)
+            c[key] = merged
+    if language is not None:
+        c["language"] = language or None
+    if pixel_art is not None:
+        if pixel_art is False:
+            c.pop("pixel_art", None)
+        else:
+            c["pixel_art"] = pixel_art if isinstance(pixel_art, dict) else True
+            st.renderer(c, 0.25).render()
+    st.save_canvas(c)
+    out = {"canvas": c["id"], "name": c["name"], "width": c["width"], "height": c["height"],
+           "background": c.get("background")}
+    for key in ("safe_area", "vars", "colors", "language", "pixel_art"):
+        if c.get(key):
+            out[key] = c[key]
+    return out
 
 
 @tool
@@ -563,9 +638,12 @@ def add_path(canvas: str, d: str, x: float = 0, y: float = 0, scale: float = 1,
              group: str | None = None, clip: str | None = None, layer: str | None = None):
     """Add a free-form shape from SVG path data (commands M L H V C S Q T A Z, absolute or relative).
 
-    Use it for custom icons, banners, ribbons, angled HUD frames, curved bars. The path is scaled by
-    `scale` and then moved by (x, y). Overlapping subpaths cut holes (even-odd).
-    For line art: fill "none" plus stroke {"color": ..., "width": 2, "align": "center"}.
+    Use it for icons, emblems, banners, ribbons, angled HUD frames, curved bars. The path is scaled by
+    `scale` and then moved by (x, y). Overlapping subpaths cut holes (even-odd); fill_rule "nonzero" (via
+    update_element or batch) makes same-direction overlaps merge instead.
+    Icons: design on a 24x24 grid and place with scale = size / 24. Line icons: fill "none" plus stroke
+    {"color": ..., "width": 2, "align": "center", "join": "round"}; solid icons: one filled silhouette with
+    holes for detail. Keep one stroke width and corner style across a whole icon set.
     """
     return _add(canvas, "path", dict(d=d, x=x or None, y=y or None, scale=None if scale == 1 else scale,
                                      fill=fill, stroke=stroke, style=style, rotation=rotation or None,
@@ -731,24 +809,6 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
 
 
 @tool
-def add_icon(canvas: str, name: str, x: float, y: float, size: float = 24, color: str | dict | None = None,
-             variant: str = "line", stroke_width: float = 2, style: str | dict | None = None,
-             rotation: float = 0, id: str | None = None, group: str | None = None, clip: str | None = None, layer: str | None = None):
-    """Add a built-in icon (see list_icons) inside the square at (x, y) with side `size`.
-
-    variant: "line" (outline) or "solid" (closed shapes filled). stroke_width is in 24-grid units
-    (2 = normal, 1.5 = light, 2.5 = bold) and scales with size. color may be a gradient.
-    style can add shadow / glow / inner_shadow. Need an icon that is not in the set? Draw it with add_path.
-    """
-    if variant not in ("line", "solid"):
-        raise ValueError("variant must be 'line' or 'solid'")
-    return _add(canvas, "icon", dict(name=name, x=x, y=y, size=size, color=color,
-                                     variant=None if variant == "line" else variant,
-                                     stroke_width=None if stroke_width == 2 else stroke_width, style=style,
-                                     rotation=rotation or None, id=id, group=group, clip=clip, layer=layer))
-
-
-@tool
 def add_image(canvas: str, path: str, x: float, y: float, width: float | None = None, height: float | None = None,
               fit: str = "stretch", radius: float | list[float] = 0, tint: str | None = None,
               style: str | dict | None = None, rotation: float = 0, id: str | None = None,
@@ -767,7 +827,8 @@ def add_instance(canvas: str, source: str, x: float, y: float, width: float | No
                  height: float | None = None, fit: str = "stretch", animation: str | None = None,
                  time: float = 0, background: bool = True, tint: str | None = None,
                  style: str | dict | None = None, rotation: float = 0, origin: list[float] | None = None,
-                 flip_x: bool = False, flip_y: bool = False, id: str | None = None, group: str | None = None,
+                 flip_x: bool = False, flip_y: bool = False, vars: dict | None = None, state: str | None = None,
+                 colors: dict | None = None, id: str | None = None, group: str | None = None,
                  clip: str | None = None, layer: str | None = None):
     """Place another canvas inside this one as a live, re-rendered copy (a component instance).
 
@@ -778,6 +839,9 @@ def add_instance(canvas: str, source: str, x: float, y: float, width: float | No
     animations (e.g. several spinners at different phases). background: include the source canvas
     background. tint recolors using alpha. style adds shadow / glow / light / adjust / mask like an image.
     flip_x / flip_y mirror it (shadows and lighting stay the way the scene is lit).
+    vars fill the source's {placeholders} for this copy only ({"label": "SETTINGS"} - one button
+    component, many labels); colors override its colour tokens ({"accent": "#ef4444"}); state shows one
+    of its interaction states ("hover", "disabled"...).
     """
     if fit not in ("stretch", "contain", "cover"):
         raise ValueError("fit must be 'stretch', 'contain' or 'cover'")
@@ -787,7 +851,8 @@ def add_instance(canvas: str, source: str, x: float, y: float, width: float | No
                                          fit=None if fit == "stretch" else fit, animation=animation,
                                          time=time or None, background=None if background else False,
                                          tint=tint, style=style, rotation=rotation or None, origin=origin,
-                                         flip_x=flip_x or None, flip_y=flip_y or None, id=id, group=group,
+                                         flip_x=flip_x or None, flip_y=flip_y or None, vars=_maybe_json(vars),
+                                         state=state, colors=_maybe_json(colors), id=id, group=group,
                                          clip=clip, layer=layer))
 
 
@@ -1022,7 +1087,7 @@ def align_elements(canvas: str, ids: list[str], align: str | None = None, distri
 
 _BATCH_ADD = {"add_rect": "rect", "add_ellipse": "ellipse", "add_line": "line", "add_polygon": "polygon",
               "add_arc": "arc",
-              "add_path": "path", "add_text": "text", "add_icon": "icon", "add_image": "image"}
+              "add_path": "path", "add_text": "text", "add_image": "image"}
 
 
 @tool
@@ -1031,7 +1096,7 @@ def batch(canvas: str, operations: list[dict]):
 
     Each operation is {"op": "<tool name>", ...the same arguments that tool takes, without canvas}.
     Supported ops: add_rect, add_ellipse, add_line, add_polygon, add_path, add_arc, add_ticks, add_text,
-    add_icon, add_image, add_instance, add_svg, create_layer, update_layer, set_layer, create_animation,
+    add_image, add_instance, add_svg, create_layer, update_layer, set_layer, create_animation,
     set_keyframes, update_element, delete_elements, move_elements, reorder_element, duplicate_element.
     Add ops also accept any extra element property directly (flip_x, scale, skew, fill_rule, visible...).
     Give elements explicit "id"s so later operations (clip, update, reorder) can refer to them.
@@ -1186,7 +1251,7 @@ def create_animation(canvas: str, name: str, duration: float, loop: bool = False
 
 @tool
 def set_keyframes(canvas: str, animation: str, target: str, property: str, keyframes: list,
-                  pivot: list[float] | None = None, offset: float = 0):
+                  pivot: list[float] | None = None, offset: float = 0, stagger: float = 0):
     """Animate one property of an element (or of a whole group) with keyframes. Calling it again for
     the same target + property replaces that track.
 
@@ -1208,13 +1273,35 @@ def set_keyframes(canvas: str, animation: str, target: str, property: str, keyfr
       Before the first keyframe the property holds the first value; after the last, the last value.
     pivot [x, y]: centre for rotation / scale during this animation (e.g. the hub of a gauge needle, or
       one shared point so a group scales as one piece). Default: each element's own centre or origin.
-    offset: seconds added to every keyframe time - use it to stagger the same motion across items.
+    offset: seconds added to every keyframe time.
+    stagger: with a "group:<name>" target, element i of the group starts i * stagger seconds later
+      (menu rows sliding in one after another, a list of rewards popping in sequence). Each element gets
+      its own track.
 
     Example - a button pops in: property "scale", keyframes [[0, 0.6], [0.22, 1, "back-out"]], plus
     property "opacity", keyframes [[0, 0], [0.12, 1, "quad-out"]].
     """
-    return _set_keyframes(store().get(canvas), dict(animation=animation, target=target, property=property,
-                                                    keyframes=keyframes, pivot=pivot, offset=offset))
+    c = store().get(canvas)
+    if stagger and str(target).startswith("group:"):
+        st = store()
+        members = st.select(c, None, str(target)[6:])
+        st.checkpoint(c)
+        results = []
+        try:
+            st.delete_tracks(c, st.get_animation(c, animation)[1], target, property)
+            for i, el in enumerate(members):
+                results.append(_set_keyframes(c, dict(animation=animation, target=el["id"], property=property,
+                                                      keyframes=keyframes, pivot=pivot,
+                                                      offset=float(offset) + i * float(stagger)), checkpoint=False))
+        except Exception:
+            st.drop_checkpoint(c)
+            st.save_canvas(c)
+            raise
+        st.save_canvas(c)
+        return {"animation": results[0]["animation"], "property": property, "staggered": [r["target"] for r in results],
+                "stagger": float(stagger)}
+    return _set_keyframes(c, dict(animation=animation, target=target, property=property,
+                                  keyframes=keyframes, pivot=pivot, offset=offset))
 
 
 @tool
@@ -1496,12 +1583,6 @@ def list_fonts(include_system: bool = False):
 
 
 @tool
-def list_icons():
-    """List the names of the built-in icons usable with add_icon."""
-    return {"icons": icon_names(), "grid": "24x24, line style; variant='solid' fills closed shapes"}
-
-
-@tool
 def measure_text(text: str, size: float = 24, font: str | None = None, weight: int | str | None = None,
                  letter_spacing: float = 0, max_width: float | None = None, uppercase: bool | str | None = None,
                  line_height: float = 1.2):
@@ -1530,7 +1611,9 @@ def _label_font(size: int = 12):
 @tool
 def preview(canvas: str, background: str = "checker", max_size: int = 1024, show_ids: bool = False,
             region: list[float] | None = None, zoom: float | None = None,
-            animation: str | None = None, time: float = 0, layers: list[str] | None = None):
+            animation: str | None = None, time: float = 0, layers: list[str] | None = None,
+            state: str | None = None, language: str | None = None, guides: list[str] | None = None,
+            simulate: str | None = None):
     """Render a canvas and return the picture so you can check your work. Look at it critically:
     alignment, spacing, contrast, clipped shadows, text overflow.
 
@@ -1542,6 +1625,13 @@ def preview(canvas: str, background: str = "checker", max_size: int = 1024, show
     animation + time: show the canvas posed at `time` seconds of that animation (one frame, full detail).
     layers: show only these layers (e.g. ["shade"] to inspect a shading pass alone; "base" = the
     implicit bottom layer). Clipped layers stay clipped to their base.
+    background may also be an image file path: your HUD over a real gameplay screenshot.
+    state: show an interaction state (set_state), e.g. "hover". language: fill {placeholders} from that
+      string table; "pseudo" = accented, 35% longer text to catch clipping before translation.
+    guides (drawn on the preview only): "safe" (device safe area), "tv" (title / action safe),
+      "grid:8", "columns:12", "thirds", "center", "thumb" (thumb reach on a landscape phone).
+    simulate: "protanopia", "deuteranopia", "tritanopia" (colour blindness), "grayscale", "low-contrast"
+      (sunlit phone) - check that states and rarities differ by more than hue.
     """
     st = store()
     c = st.get(canvas)
@@ -1562,7 +1652,7 @@ def preview(canvas: str, background: str = "checker", max_size: int = 1024, show
             scale = 2048 / max(rw, rh)
     else:
         scale = min(4.0, max_size / max(rw, rh))
-    r = st.renderer(c, scale)
+    r = st.renderer(c, scale, state=state, language=language)
     solo = None
     if layers:
         solo = {"base" if str(n).strip().lower() == "base" else st.get_layer(c, n)["name"] for n in layers}
@@ -1570,13 +1660,20 @@ def preview(canvas: str, background: str = "checker", max_size: int = 1024, show
     if region:
         crop = (int(round(rx * scale)), int(round(ry * scale)), int(round((rx + rw) * scale)), int(round((ry + rh) * scale)))
         img = img.crop(crop)
-    view = backdrop(img.size, background, st.theme.get("colors", {}))
+    view = _backdrop_any(background, img.size, c, scale, (rx, ry))
     view = PILImage.alpha_composite(view, img)
+    notes: list[str] = []
+    if simulate:
+        from .viewing import simulate as _sim
+        view = _sim(view, simulate)
+    if guides:
+        from .viewing import draw_guides
+        notes += draw_guides(view, list(_maybe_json(guides)), c, scale, (rx, ry))
     if show_ids:
         draw = ImageDraw.Draw(view)
         font = _label_font(12)
         palette = ["#ff4d6d", "#4dd2ff", "#ffd24d", "#7dff7a", "#d59bff", "#ff9d4d"]
-        for i, el in enumerate(c["elements"]):
+        for i, el in enumerate(r.canvas["elements"]):
             if not el.get("visible", True):
                 continue
             x0, y0, x1, y1 = r.element_box(el)
@@ -1594,9 +1691,29 @@ def preview(canvas: str, background: str = "checker", max_size: int = 1024, show
             "image_size": list(view.size), "elements": len(c["elements"])}
     if animation:
         info["animation"], info["time"] = animation, float(time)
+    for key, value in (("state", state), ("language", language), ("simulate", simulate)):
+        if value:
+            info[key] = value
+    if notes:
+        info["notes"] = notes
     if r.warnings or pose_warnings:
         info["warnings"] = sorted(set(r.warnings + pose_warnings))
     return [Image(data=_png_bytes(view.convert("RGB")), format="png"), json.dumps(info)]
+
+
+def _backdrop_any(background: str, size: tuple[int, int], c: dict, scale: float,
+                  origin: tuple[float, float] = (0.0, 0.0)) -> PILImage.Image:
+    """Preview background: a named backdrop / colour, or an image file (e.g. a gameplay screenshot)
+    stretched over the whole canvas and cropped to the shown region."""
+    text = str(background or "checker")
+    if any(text.lower().endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp")):
+        from .viewing import image_backdrop
+        full = image_backdrop(text, (max(1, round(c["width"] * scale)), max(1, round(c["height"] * scale))))
+        if full is None:
+            raise ValueError(f"background image not found: {text}")
+        ox, oy = round(origin[0] * scale), round(origin[1] * scale)
+        return full.crop((ox, oy, ox + size[0], oy + size[1]))
+    return backdrop(size, text, store().theme.get("colors", {}))
 
 
 @tool
@@ -1665,7 +1782,7 @@ def _over(rgba, under=(0, 0, 0)) -> tuple[float, float, float]:
 
 @tool
 def review_canvas(canvas: str, min_contrast: float = 4.5, min_text_size: float = 12,
-                  backdrop_color: str = "#000000"):
+                  backdrop_color: str = "#000000", language: str | None = None, state: str | None = None):
     """Automatic quality check - run it before exporting, next to looking at `preview` yourself.
 
     Reports: paint cut off at the canvas edge (shadow/glow/outline clipped), elements outside the canvas,
@@ -1674,6 +1791,11 @@ def review_canvas(canvas: str, min_contrast: float = 4.5, min_text_size: float =
     rectangles on fractional pixels (soft, blurry edges), invisible or fully transparent elements,
     empty / hidden layers, clipped layers with nothing to clip to, animation tracks whose target is gone,
     and instances whose source is missing. backdrop_color: what transparent areas sit on in the game.
+    Also: text that overflows the shape it sits in (the smallest shape drawn under it that holds its
+    anchor point, or the element named in the text's "container" prop) and important UI inside the
+    canvas safe_area margins (notch, home bar, TV overscan).
+    language: check a translation - "pseudo" (35% longer, accented) finds clipping before translators do.
+    state: check an interaction state (hover, disabled...).
     """
     import numpy as np
     from .colors import parse_color as _pc
@@ -1689,7 +1811,8 @@ def review_canvas(canvas: str, min_contrast: float = 4.5, min_text_size: float =
             item["ids"] = ids
         issues.append(item)
 
-    r = st.renderer(c)
+    r = st.renderer(c, state=state, language=language)
+    c = r.canvas                                  # the state-applied copy when a state is given
     try:
         full = r.render(include_background=False)
     except ValueError as exc:
@@ -1756,9 +1879,9 @@ def review_canvas(canvas: str, min_contrast: float = 4.5, min_text_size: float =
             add("text_size", f"text size {float(size):g}px is below {min_text_size:g}px; hard to read in game", [eid])
         try:
             if with_all is None:
-                with_all = np.asarray(st.renderer(c, cs).render(), dtype=np.float64)
+                with_all = np.asarray(st.renderer(c, cs, language=language).render(), dtype=np.float64)
             hidden = dict(c, elements=[e for e in c["elements"] if e is not el])
-            without = np.asarray(st.renderer(hidden, cs).render(), dtype=np.float64)
+            without = np.asarray(st.renderer(hidden, cs, language=language).render(), dtype=np.float64)
             bx = r.element_box(el)
         except ValueError:
             continue
@@ -1784,6 +1907,64 @@ def review_canvas(canvas: str, min_contrast: float = 4.5, min_text_size: float =
         if ratio < min_contrast:
             add("contrast", f"text contrast {ratio:.2f}:1 is below {min_contrast:g}:1 (text ~{_hex(fg)} on "
                             f"~{_hex(bg)}). Lighten/darken one side or add a dark outline / shadow.", [eid])
+
+    # text overflowing the shape it sits on
+    order = {e["id"]: i for i, e in enumerate(c["elements"])}
+    for el in texts:
+        if el.get("arc"):
+            continue
+        try:
+            tb = r.element_box(el)
+        except ValueError:
+            continue
+        holder = None
+        if el.get("container"):
+            holder = next((e for e in c["elements"] if e["id"] == el["container"]), None)
+        else:
+            ax, ay = float(el.get("x", 0)), float(el.get("y", 0))
+            best = None
+            for other in c["elements"]:
+                if other is el or other["type"] in ("text", "line", "arc", "ticks") or order[other["id"]] > order[el["id"]]:
+                    continue
+                if not other.get("visible", True):
+                    continue
+                try:
+                    ob = r.element_box(other)
+                except ValueError:
+                    continue
+                area = (ob[2] - ob[0]) * (ob[3] - ob[1])
+                if ob[0] <= ax <= ob[2] and ob[1] <= ay <= ob[3] and area > 0:
+                    if best is None or area < best[0]:
+                        best = (area, other, ob)
+            holder = best[1] if best else None
+        if holder is None:
+            continue
+        hb = r.element_box(holder)
+        over = max(hb[0] - tb[0], tb[2] - hb[2], hb[1] - tb[1], tb[3] - hb[3])
+        if over > 0.5:
+            where = f" in language '{language}'" if language else ""
+            add("overflow", f"text overflows '{holder['id']}' by {over:.0f}px{where}: use fit_width / max_width, "
+                            "a smaller size, or a wider shape", [el["id"], holder["id"]])
+
+    # important UI inside the safe-area margins
+    if c.get("safe_area"):
+        l, t, rr_, b = (float(v) for v in c["safe_area"])
+        W, H = float(c["width"]), float(c["height"])
+        offenders = []
+        for el in c["elements"]:
+            if not el.get("visible", True):
+                continue
+            try:
+                bx = r.element_box(el)
+            except ValueError:
+                continue
+            if bx[2] - bx[0] >= W * 0.9 or bx[3] - bx[1] >= H * 0.9:
+                continue                          # backgrounds and full-width bars may bleed
+            if bx[0] < l - 0.5 or bx[1] < t - 0.5 or bx[2] > W - rr_ + 0.5 or bx[3] > H - b + 0.5:
+                offenders.append(el["id"])
+        if offenders:
+            add("safe_area", "elements reach into the safe-area margin (notch, rounded corners, home bar or TV "
+                             "overscan) - keep text and buttons inside; backgrounds may bleed", offenders[:20])
 
     layers = c.get("layers", [])
     for i, layer in enumerate(layers):
@@ -1921,43 +2102,88 @@ def _gradient_blocks(c: dict, centre: tuple[float, float]) -> tuple[bool, bool]:
     return block_x, block_y
 
 
-def _render_export(c: dict, scale: float, include_background: bool, ids: list[str] | None, group: str | None):
+def _render_export(c: dict, scale: float, include_background: bool, ids: list[str] | None, group: str | None,
+                   state: str | None = None, language: str | None = None):
     st = store()
     only = None
     if ids or group:
         only = {e["id"] for e in st.select(c, ids, group)}
-    r = st.renderer(c, scale)
+    r = st.renderer(c, scale, state=state, language=language)
     return r.render(include_background=include_background, only=only), r.warnings
 
 
 @tool
 def export_png(canvas: str, path: str | None = None, scales: list[float] | None = None, trim: bool = False,
                padding: int = 0, include_background: bool = False, ids: list[str] | None = None,
-               group: str | None = None):
+               group: str | None = None, format: str = "png", state: str | None = None,
+               language: str | None = None, sizes: list[int] | None = None):
     """Save a canvas as PNG (transparent unless include_background=true).
 
     path: file path ending in .png; relative paths go to the workspace "exports" folder
     (default "<canvas>.png"). scales: e.g. [1, 2] also writes "<name>_2x.png".
     trim crops transparent margins (padding keeps a few px). ids / group export only those elements,
     e.g. one layer of a mockup. For engine-ready assets with 9-slice data use export_asset instead.
+    format: "png", "webp" (lossless), "jpg" (needs include_background or gets a black matte) or "ico"
+      (Windows app / launcher icon; `sizes` default [16, 24, 32, 48, 64, 128, 256]).
+    sizes: for square icons, exact pixel sizes instead of scales, e.g. [16, 32, 64, 128, 512, 1024]
+      (store / app icon sets): writes <name>_<size>.png each, rendered sharp at that size.
+    state / language: export an interaction state or a translated version.
     """
     st = store()
     c = st.get(canvas)
-    base = _out_path(path, f"{c['id']}.png")
+    fmt = str(format).lower().lstrip(".")
+    if fmt == "png" and path and Path(path).suffix.lower() in (".webp", ".jpg", ".jpeg", ".ico"):
+        fmt = Path(path).suffix.lower().lstrip(".")          # the file name says which format
+    if fmt == "jpeg":
+        fmt = "jpg"
+    if fmt not in ("png", "webp", "jpg", "ico"):
+        raise ValueError("format must be png, webp, jpg or ico")
+    base = _out_path(path, f"{c['id']}.{fmt}", suffixes=(".png", ".webp", ".jpg", ".jpeg", ".ico"))
+    base = base.with_suffix("." + fmt)
     files = []
     warnings: list[str] = []
-    for scale in (scales or [1]):
-        scale = float(scale)
-        if not 0.1 <= scale <= 8:
-            raise ValueError("scale must be between 0.1 and 8")
-        img, warn = _render_export(c, scale, include_background, ids, group)
+    if fmt == "ico":
+        icon_sizes = [int(v) for v in (_maybe_json(sizes) or [16, 24, 32, 48, 64, 128, 256]) if 8 <= int(v) <= 256]
+        if not icon_sizes:
+            raise ValueError("ico sizes must be between 8 and 256")
+        frames = []
+        for size in icon_sizes:
+            img, warn = _render_export(c, size / max(c["width"], c["height"]), include_background, ids, group,
+                                       state, language)
+            warnings += warn
+            sq = PILImage.new("RGBA", (size, size), (0, 0, 0, 0))
+            sq.alpha_composite(img, ((size - img.width) // 2, (size - img.height) // 2))
+            frames.append(sq)
+        out = base.with_suffix(".ico")
+        frames[-1].save(out, format="ICO", sizes=[(f.width, f.height) for f in frames], append_images=frames[:-1])
+        result: dict = {"files": [{"file": str(out), "sizes": icon_sizes}]}
+        if warnings:
+            result["warnings"] = sorted(set(warnings))
+        return result
+    jobs = []
+    if sizes:
+        for size in _maybe_json(sizes):
+            jobs.append((int(size) / max(c["width"], c["height"]), f"_{int(size)}"))
+    else:
+        jobs = [(float(v), None) for v in (scales or [1])]
+    for scale, suffix in jobs:
+        if not 0.01 <= scale <= 16:
+            raise ValueError("scale must be between 0.01 and 16 (check sizes)")
+        img, warn = _render_export(c, scale, include_background, ids, group, state, language)
         warnings += warn
         offset = (0, 0)
         if trim:
             img, offset = ex.trim(img, int(round(padding * scale)))
-        out = base.with_name(base.stem + _scale_suffix(scale) + ".png")
-        img.save(out)
-        files.append({"file": str(out), "scale": scale, "width": img.width, "height": img.height,
+        out = base.with_name(base.stem + (suffix if suffix is not None else _scale_suffix(scale)) + "." + fmt)
+        if fmt == "jpg":
+            flat = PILImage.new("RGB", img.size, (0, 0, 0))
+            flat.paste(img, mask=img.getchannel("A"))
+            flat.save(out, quality=92)
+        elif fmt == "webp":
+            img.save(out, lossless=True)
+        else:
+            img.save(out)
+        files.append({"file": str(out), "scale": round(scale, 4), "width": img.width, "height": img.height,
                       "trim_offset": list(offset)})
     result: dict = {"files": files}
     if warnings:
@@ -2190,7 +2416,8 @@ def export_psd(canvas: str, path: str | None = None, scale: float = 1, include_b
 @tool
 def export_asset(canvas: str, engine: str = "generic", out_dir: str | None = None, name: str | None = None,
                  nine_slice: str | dict | None = None, minimize: bool = True, scales: list[float] | None = None,
-                 trim: bool = False, padding: int = 0):
+                 trim: bool = False, padding: int = 0, states: list[str] | str | None = None,
+                 language: str | None = None):
     """Export a canvas as an engine-ready UI asset: PNG + "<name>.gameui.json" metadata + manifest entry.
 
     engine: "unity", "unreal", "roblox", "godot" or "generic" (metadata for all of them).
@@ -2202,9 +2429,22 @@ def export_asset(canvas: str, engine: str = "generic", out_dir: str | None = Non
     The result contains the exact numbers per engine: Unity sprite border (L,B,R,T), Unreal brush
     Margin (L,T,R,B as fractions), Roblox SliceCenter, Godot patch / texture margins (L,T,R,B px). Run write_engine_helpers once per project folder
     to get the import scripts that apply them automatically.
+    states: interaction states to export too ("all" = every state set with set_state). Each becomes
+      "<name>_<state>.png" with the same size and 9-slice borders, and the metadata maps them to the
+      engine's slots: Unity Button SpriteState (hover -> highlighted, pressed, selected/focused, disabled),
+      Godot TextureButton textures, Roblox ImageButton HoverImage / PressedImage.
+    language: export a translated version (string tables, see set_strings).
     """
     st = store()
     c = st.get(canvas)
+    wanted_states = _maybe_json(states)
+    if wanted_states == "all":
+        wanted_states = sorted(c.get("states") or {})
+    elif isinstance(wanted_states, str):
+        wanted_states = [wanted_states]
+    for sname in wanted_states or []:
+        if sname not in (c.get("states") or {}):
+            raise ValueError(f"no state '{sname}' on '{c['id']}'. States: {', '.join(sorted(c.get('states') or {})) or '(none)'}")
     engine = engine.lower()
     if engine not in ex.ENGINES:
         raise ValueError(f"engine must be one of {', '.join(ex.ENGINES)}")
@@ -2218,11 +2458,18 @@ def export_asset(canvas: str, engine: str = "generic", out_dir: str | None = Non
         scale = float(scale)
         if not 0.1 <= scale <= 8:
             raise ValueError("scale must be between 0.1 and 8")
-        img, warn = _render_export(c, scale, False, None, None)
+        img, warn = _render_export(c, scale, False, None, None, None, language)
         warnings += warn
         offset = (0, 0)
+        state_imgs = []
+        for sname in wanted_states or []:
+            simg, warn = _render_export(c, scale, False, None, None, sname, language)
+            warnings += warn
+            state_imgs.append((sname, simg))
         if trim:
             img, offset = ex.trim(img, int(round(padding * scale)))
+            box = (offset[0], offset[1], offset[0] + img.width, offset[1] + img.height)
+            state_imgs = [(n, si.crop(box)) for n, si in state_imgs]
         borders = None
         if nine:
             if isinstance(nine, str):
@@ -2254,11 +2501,22 @@ def export_asset(canvas: str, engine: str = "generic", out_dir: str | None = Non
                 if borders["left"] + borders["right"] >= img.width or borders["top"] + borders["bottom"] >= img.height:
                     raise ValueError("nine_slice borders are larger than the image")
             if minimize:
-                img, borders = ex.minimize_nine_slice(img, borders)
+                full_borders = dict(borders)
+                img, borders = ex.minimize_nine_slice(img, full_borders)
+                state_imgs = [(n, ex.minimize_nine_slice(si, full_borders)[0]) for n, si in state_imgs]
         filename = asset + _scale_suffix(scale) + ".png"
         img.save(folder / filename)
+        state_files = {}
+        for sname, simg in state_imgs:
+            sfile = f"{asset}_{sname}{_scale_suffix(scale)}.png"
+            simg.save(folder / sfile)
+            state_files[sname] = sfile
         meta = ex.engine_metadata(engine, img.size, borders, scale)
+        if state_files:
+            meta.update(ex.state_metadata(engine, filename, state_files))
         entry = {"file": filename, "scale": scale, "width": img.width, "height": img.height, **meta}
+        if state_files:
+            entry["states"] = state_files
         sidecar: dict = {"name": asset, "file": filename, "width": img.width, "height": img.height, "scale": scale,
                          "has_border": bool(borders), "pixels_per_unit": 100 * scale,
                          "border_left": 0, "border_bottom": 0, "border_right": 0, "border_top": 0}
@@ -2282,7 +2540,22 @@ def export_asset(canvas: str, engine: str = "generic", out_dir: str | None = Non
     record: dict = {"canvas": c["id"], "files": files}
     if previous.get("roblox_id"):
         record["roblox_id"] = previous["roblox_id"]
+    if wanted_states:
+        record["states"] = {sname: f"{asset}_{sname}" for sname in wanted_states}
     ex.update_manifest(folder, asset, record)
+    for sname in wanted_states or []:
+        # each state image is its own manifest asset so engines (Roblox) can hold an id per image
+        sname_asset = f"{asset}_{sname}"
+        try:
+            prev_s = json.loads(manifest.read_text(encoding="utf-8")).get("assets", {}).get(sname_asset, {})
+        except Exception:
+            prev_s = {}
+        srec: dict = {"canvas": c["id"], "state_of": asset,
+                      "files": [{**{k: v for k, v in f.items() if k not in ("states", "file", "state_slots")},
+                                 "file": f["states"][sname]} for f in files]}
+        if prev_s.get("roblox_id"):
+            srec["roblox_id"] = prev_s["roblox_id"]
+        ex.update_manifest(folder, sname_asset, srec)
     result: dict = {"asset": asset, "folder": str(folder), "files": files, "manifest": str(manifest)}
     if notes:
         result["notes"] = notes
@@ -2383,6 +2656,10 @@ def write_engine_helpers(engine: str, out_dir: str, roblox_ids: dict | None = No
                          "For a NinePatchRect use the margins_LTRB numbers from the .gameui.json files.")
                 if written else "No 9-sliced assets in the manifest; plain PNGs need no helper in Godot."}
     raise ValueError("engine must be 'unity', 'unreal', 'roblox' or 'godot'")
+
+
+from .tools_workflow import *  # noqa: E402,F401,F403  (registers the workflow tools)
+from .tools_delivery import *  # noqa: E402,F401,F403  (registers the hand-off tools)
 
 
 def main() -> None:

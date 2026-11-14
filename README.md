@@ -1,8 +1,8 @@
 # game-ui-mcp
 
-Claude'un (ya da MCP destekleyen başka bir AI'ın) **oyun UI'ı çizmesini** sağlayan, tamamen yerel çalışan bir MCP server.
+Claude'un (ya da MCP destekleyen başka bir AI'ın) **oyun ve uygulama arayüzü çizmesini, canlandırmasını ve motora teslim etmesini** sağlayan, tamamen yerel çalışan bir MCP server. MIT lisanslı: ticari dahil herkes özgürce kullanabilir.
 
-İçinde görsel üreten bir AI modeli yok ve internete bağlanmıyor. Hazır bileşen de yok: "buton" ya da "panel" diye bir tool bulunmuyor, yalnızca temel gereçler var (şekil, yazı, stil, keyframe). Ne çıkacağını ve ne kadar iyi olacağını modelin kendi tasarım kararları belirliyor. AI, "dikdörtgen çiz, içine şunu yaz, glow ekle" gibi tool'ları çağırır; server bunları temiz, kenarı yumuşatılmış PNG'ye çevirir, AI kendi çizdiğine bakıp düzeltir ve Unity / Unreal Engine / Roblox Studio için dışa aktarır.
+İçinde görsel üreten bir AI modeli yok ve internete bağlanmıyor. Hazır bileşen ya da ikon kütüphanesi de yok: "buton", "panel" ya da "ikon" diye bir tool bulunmuyor (ikonları da model `add_path` / `add_svg` ile kendisi çiziyor), yalnızca temel gereçler var (şekil, yazı, stil, keyframe). Ne çıkacağını ve ne kadar iyi olacağını modelin kendi tasarım kararları belirliyor. AI, "dikdörtgen çiz, içine şunu yaz, glow ekle" gibi tool'ları çağırır; server bunları temiz, kenarı yumuşatılmış PNG'ye çevirir, AI kendi çizdiğine bakıp düzeltir ve Unity / Unreal Engine / Roblox Studio için dışa aktarır.
 
 ![Örnek kit](examples/kit_sheet.png)
 
@@ -26,13 +26,21 @@ Bir parçayı bir kez çizip başka canvas'larda canlı kopya olarak kullanabili
 
 ![Bileşenler, diziler, yay yazısı](examples/components.png)
 
+Oyun geliştiren ya da uygulama tasarlayan birinin günlük işleri için de araçlar var: bir buton bileşeni ve onun hover / pressed / disabled durumları, tek kart şablonundan veri satırlarıyla üretilen nadirlik kartları, pixel-art modu ve hasar sayıları için hazır pişirilmiş bitmap font:
+
+![Durumlar, şablon kartlar, pixel art, bitmap font](examples/workflow.png)
+
+Aynı HUD'un elemanları ekran kenarlarına sabitlenmiş (pin) halde 16:9, 21:9, 16:10 ve telefonda nasıl durduğu, kırmızı alan cihazın güvenli alan payı:
+
+![Farklı çözünürlükler](examples/resolutions.png)
+
 Animasyon da aynı mantıkla çalışıyor: hazır efekt yok, keyframe ve ease var.
 
 | Buton girişi + parlama | Devir saati | Menü girişi ve seçim |
 | --- | --- | --- |
 | ![Buton animasyonu](examples/anim_button.gif) | ![Gösterge animasyonu](examples/anim_gauge.gif) | ![Menü animasyonu](examples/anim_menu.gif) |
 
-Görsellerin tamamı [`examples/demo.py`](examples/demo.py), [`examples/demo_racing.py`](examples/demo_racing.py), [`examples/demo_shading.py`](examples/demo_shading.py), [`examples/demo_components.py`](examples/demo_components.py) ve [`examples/demo_animation.py`](examples/demo_animation.py) içindeki tool çağrılarıyla çizildi. (GIF'ler 256 renkle sınırlı olduğu için gerçek çıktıdan biraz daha kaba görünür.)
+Görsellerin tamamı [`examples/demo.py`](examples/demo.py), [`examples/demo_racing.py`](examples/demo_racing.py), [`examples/demo_shading.py`](examples/demo_shading.py), [`examples/demo_components.py`](examples/demo_components.py), [`examples/demo_workflow.py`](examples/demo_workflow.py) ve [`examples/demo_animation.py`](examples/demo_animation.py) içindeki tool çağrılarıyla çizildi. (GIF'ler 256 renkle sınırlı olduğu için gerçek çıktıdan biraz daha kaba görünür.)
 
 ## Ne yapabiliyor
 
@@ -45,7 +53,15 @@ Görsellerin tamamı [`examples/demo.py`](examples/demo.py), [`examples/demo_rac
 - **Stil:** düz renk, linear / radial / conic gradient (isteğe bağlı OKLab geçişi), çizgili / noktalı / ızgara / petek / karbon / fırçalı metal / bulut dokusu, kendi görselinle dolgu, kenar çizgisi (iç, orta, dış), gölge, glow, iç gölge, bevel, bulanıklık, opaklık, bir pivot etrafında döndürme, başka bir şekle kırpma (`clip`)
 - **Gösterge:** `add_arc` + `add_ticks` ile devir saati, hız göstergesi, turbo, segmentli LED sıraları; ibre için pivot'lu döndürme
 - **Yazı:** 10 gömülü font (Inter, Barlow Condensed, Bebas Neue, Michroma, JetBrains Mono, Rajdhani, Orbitron, Cinzel, Fredoka, Bangers) + bilgisayardaki fontlar, italik, satır kaydırma, genişliğe sığdırma, kontur, daire üstüne dizme (`arc`), Türkçe büyük harf (`uppercase: "tr"`)
-- **İkon:** 72 hazır oyun ikonu, çizgi ve dolu hali ([hepsi](examples/icons.png))
+- **İkon:** hazır set yok; model 24'lük ızgarada `add_path` ile çizer ya da bir SVG'yi `add_svg` ile alır
+- **Ekran ve cihaz:** hazır boyutlar (`preset`: 1080p, 4K, 21:9, Steam Deck, Switch, iPhone, iPad, Android, mobil oyun, TV) ve güvenli alanları; önizlemede güvenli alan, TV kenar payı, ızgara, sütun, üçte bir, baş parmak erişimi kılavuzları; renk körlüğü (protanopi, döteranopi, tritanopi), gri ton ve güneş altında düşük kontrast simülasyonu; HUD'u gerçek bir oyun ekran görüntüsünün üstünde görme
+- **Çok çözünürlük:** elemanları kenara sabitleme (`set_pin`: sol / orta / sağ / esnet / oranla), `resize_canvas` ile başka boyuta uyarlama, `preview_resolutions` ile hepsini yan yana görme
+- **Etkileşim durumları:** `set_state` ile hover, pressed, disabled, selected, focused (gamepad); önizleme, denetim ve dışa aktarma duruma göre; motor slotları otomatik (Unity SpriteState, Godot TextureButton, Roblox HoverImage / PressedImage)
+- **Veri ve şablon:** yazıda `{yer_tutucu}`, canvas'a özel renk token'ları, `generate_from_template` ile tek şablondan onlarca kart / rozet / seviye ikonu; bileşen kopyalarına ayrı yazı, renk ve durum
+- **Yerelleştirme:** `set_strings` ile dil tabloları, her yerde `language`, 35% uzatıp aksanlayan `pseudo` dili ve taşan yazıyı bulan denetim
+- **Yerleşim ve üretim:** satır / sütun / ızgara yerleşimi ve içeriğe göre büyüyen kutu (`arrange_elements`), tohumlu rastgele dağıtma (`scatter`: kıvılcım, konfeti, yıldız; istenirse senkronsuz parıldama animasyonu), animasyonda sırayla gecikme (`stagger`), canvas'lar arası kopyalama, redo
+- **Pixel art:** kenar yumuşatmasız çizim, palet ya da renk sayısı sınırı, büyütmede tam piksel
+- **Teslim:** 9-slice germe testi, geliştirici spec'i (ölçülü görsel + JSON), tema token'ları (CSS, Unity USS, C#, GDScript, Luau, JSON), tıklanabilir HTML prototip (ekranlar arası geçiş, hover / basılı hal), ekranı motor sahnesine çevirme (Godot `.tscn`, Roblox LocalScript, Unity UXML + USS; yazılar gerçek yazı olarak kalır), bitmap font (BMFont `.fnt`), uygulama ikonu (ICO, boyut seti), PNG / WebP / JPG
 - **Animasyon:** keyframe + ease ile her özellik canlandırılır (konum, ölçek, dönme, opaklık, renk, efekt, yay açısı, yazı); film şeridi önizlemesi; sprite sheet, kare dizisi, GIF / APNG / WebP ya da motorun kendi tween'i için keyframe JSON çıktısı
 - **Tema:** renk token'ları (`$primary`) ve isimli stiller; bütün kit tutarlı kalır
 - **Önizleme:** AI çizdiğini resim olarak geri görür (yakınlaştırma, eleman kutuları, oyun sahnesi arka planı)
@@ -108,6 +124,7 @@ Varsayılan çalışma klasörü `C:\Users\SEN\GameUI`:
 | `exports/` | Yol verilmeden yapılan dışa aktarmalar |
 | `fonts/` | Buraya attığın `.ttf` / `.otf` dosyaları font listesine girer |
 | `theme.json` | Renk token'ları ve stiller |
+| `strings.json` | Dil tabloları (`set_strings`) |
 
 Başka bir klasör için `GAME_UI_MCP_DIR` ortam değişkenini ayarla (config'te `"env": {"GAME_UI_MCP_DIR": "D:\\UI"}`).
 
@@ -115,16 +132,17 @@ Başka bir klasör için `GAME_UI_MCP_DIR` ortam değişkenini ayarla (config'te
 
 | Grup | Tool'lar |
 | --- | --- |
-| Canvas | `create_canvas`, `list_canvases`, `get_canvas`, `update_canvas`, `duplicate_canvas`, `delete_canvas` |
+| Canvas | `create_canvas`, `list_canvases`, `get_canvas`, `update_canvas`, `duplicate_canvas`, `delete_canvas`, `fit_canvas`, `resize_canvas` |
 | Katman | `create_layer`, `update_layer`, `delete_layer`, `set_layer` |
-| Canvas | `fit_canvas` |
-| Çizim | `add_rect`, `add_ellipse`, `add_line`, `add_polygon`, `add_path`, `add_arc`, `add_ticks`, `add_text`, `add_icon`, `add_image`, `add_instance`, `add_svg` |
-| Düzenleme | `update_element`, `delete_elements`, `duplicate_element`, `move_elements`, `reorder_element`, `align_elements`, `batch`, `undo` |
-| Denetim | `review_canvas`, `inspect_pixels`, `view_image` |
+| Çizim | `add_rect`, `add_ellipse`, `add_line`, `add_polygon`, `add_path`, `add_arc`, `add_ticks`, `add_text`, `add_image`, `add_instance`, `add_svg` |
+| Düzenleme | `update_element`, `delete_elements`, `duplicate_element`, `move_elements`, `reorder_element`, `align_elements`, `arrange_elements`, `scatter`, `copy_elements`, `set_pin`, `batch`, `undo`, `redo` |
+| Durum, veri, dil | `set_state`, `delete_state`, `generate_from_template`, `set_strings`, `get_strings` |
+| Denetim | `review_canvas`, `inspect_pixels`, `view_image`, `preview_nine_slice` |
 | Animasyon | `create_animation`, `set_keyframes`, `delete_keyframes`, `get_animations`, `delete_animation`, `preview_animation`, `export_animation` |
-| Tema ve bilgi | `set_theme`, `get_theme`, `list_fonts`, `list_icons`, `measure_text` |
-| Önizleme | `preview`, `contact_sheet` |
-| Dışa aktarma | `export_png`, `export_asset`, `export_layers`, `export_psd`, `export_atlas`, `write_engine_helpers` |
+| Tema ve bilgi | `set_theme`, `get_theme`, `list_fonts`, `measure_text` |
+| Önizleme | `preview`, `preview_resolutions`, `contact_sheet` |
+| Dışa aktarma | `export_png`, `export_asset`, `export_layers`, `export_psd`, `export_atlas`, `export_bitmap_font`, `write_engine_helpers` |
+| Teslim | `export_spec`, `export_theme`, `set_link`, `export_prototype`, `export_screen` |
 
 Stil nesnesi kısaca:
 
@@ -185,6 +203,8 @@ Bir animasyon, canvas'a bağlı bir keyframe kümesidir. Her iz (track) bir elem
 | Roblox | `SliceCenter`, `SliceScale` | `GameUiAssets.luau`: `GameUi.apply(imageLabel, "ad")` |
 | Godot 4 | `NinePatchRect` patch margin / `StyleBoxTexture` texture margin (L, T, R, B px) | her 9-slice asset için `<ad>.stylebox.tres` |
 
+**Bütün bir ekran** için `export_screen`: her `group` bir görsel parça olur, yazılar motorun kendi yazısı olarak kalır (çevrilebilir, keskin), `set_pin` ile verilen sabitlemeler motorun anchor'larına çevrilir. Godot'ta `.tscn` sahnesi (TextureRect / NinePatchRect / Label), Roblox'ta ScreenGui kuran LocalScript (ekran yüksekliğine göre ölçeklenir), Unity'de UI Toolkit `.uxml` + `.uss` üretir; kullanılan fontlar yanına kopyalanır.
+
 Hareketli parçalar (ibre, dolan yay) için `export_layers`: her `group` ayrı PNG olur, `<ad>.layout.json` her parçanın konumunu ve dönme merkezini verir. Assetto Corsa (CSP Lua) gibi PNG kullanan her ortamda bu çıktılar doğrudan kullanılabilir.
 
 Roblox'ta görselleri Studio'ya kendin yüklemen gerekir (server internete çıkmaz); asset id'lerini sonra `write_engine_helpers(roblox_ids=...)` ile işlersin.
@@ -201,7 +221,14 @@ Roblox'ta görselleri Studio'ya kendin yüklemen gerekir (server internete çık
 - Animasyon çıktısı veri ve görseldir; motor içinde oynatan kodu (TweenService, DOTween, UMG) model yazar. Büyük canvas'larda kare kare çıktı yavaştır (1920×1080 ve 80 eleman için kare başına yaklaşık 1 sn).
 - Yazıda harf aralığı verilince kerning uygulanmaz.
 - Orbitron fontunda Ğ / ğ yok; tool böyle durumlarda uyarı döndürür.
-- Motor tarafındaki yardımcı dosyalar (C#, Unreal Python, Luau, Godot `.tres`) bu repoda yalnızca üretiliyor; Unity, Unreal, Roblox Studio ve Godot içinde henüz denenmedi.
+- Motor tarafındaki dosyalar (C#, Unreal Python, Luau, Godot `.tres` / `.tscn`, Unity UXML / USS) bu repoda yalnızca üretiliyor ve biçimleri kontrol ediliyor; Unity, Unreal, Roblox Studio ve Godot içinde henüz açılıp denenmedi. Tıklanabilir prototip ise gerçek bir tarayıcıda (headless Chrome) denendi.
+- `export_screen` Unreal için sahne üretmez (UMG dosyası dışarıdan yazılamıyor); Unreal'da parçalar + `.screen.json` kullanılır. Roblox'ta özel font yüklenemediği için yazılar en yakın hazır Roblox fontuyla eşleştirilir. Gradient'li yazı motora ilk rengiyle gider (`bake_text` ile görsel olarak gömülebilir).
+- Pixel-art modu yazıyı da keskinleştirir ama gömülü fontlar piksel font değildir; gerçek piksel yazı için `fonts/` klasörüne bir piksel font koy.
+- 71 tool var; MCP istemcisi hepsinin tanımını modele yükler (yaklaşık 23 bin token).
+
+## Lisans
+
+[MIT](LICENSE): kullan, değiştir, sat, kendi oyununa ya da ürününe koy; tek şart lisans metnini kopyalarda tutmak. Gömülü fontlar kendi lisanslarıyla (SIL Open Font License) gelir. Bu araçla çizdiğin görseller senindir.
 
 ## Geliştirme
 

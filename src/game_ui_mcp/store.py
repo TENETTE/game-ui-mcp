@@ -13,7 +13,7 @@ from typing import Any
 from .fonts import FontLibrary
 from .render import Renderer, shift_element
 
-ELEMENT_TYPES = ("rect", "ellipse", "polygon", "line", "path", "text", "icon", "image", "arc", "ticks", "instance")
+ELEMENT_TYPES = ("rect", "ellipse", "polygon", "line", "path", "text", "image", "arc", "ticks", "instance")
 MAX_CANVAS = 8192
 MAX_UNDO = 40
 
@@ -42,13 +42,22 @@ class Store:
         self.fonts = FontLibrary(self.fonts_dir if persist else None)
         self.canvases: dict[str, dict] = {}
         self.theme: dict[str, dict] = {"colors": {}, "styles": {}}
+        self.strings: dict = {"default": None, "tables": {}}
         self._undo: dict[str, list[dict]] = {}
+        self._redo: dict[str, list[dict]] = {}
         if persist:
             self._load()
 
     # ---- persistence
 
     def _load(self) -> None:
+        strings_file = self.workspace / "strings.json"
+        if strings_file.is_file():
+            try:
+                data = json.loads(strings_file.read_text(encoding="utf-8"))
+                self.strings = {"default": data.get("default"), "tables": dict(data.get("tables", {}))}
+            except Exception:
+                pass
         theme_file = self.workspace / "theme.json"
         if theme_file.is_file():
             try:
@@ -147,14 +156,29 @@ class Store:
         stack = self._undo.setdefault(canvas["id"], [])
         stack.append(copy.deepcopy(canvas))
         del stack[:-MAX_UNDO]
+        self._redo.pop(canvas["id"], None)
 
     def undo(self, canvas: dict) -> bool:
         stack = self._undo.get(canvas["id"])
         if not stack:
             return False
         previous = stack.pop()
+        redo = self._redo.setdefault(canvas["id"], [])
+        redo.append(copy.deepcopy(canvas))
+        del redo[:-MAX_UNDO]
         canvas.clear()
         canvas.update(previous)
+        self.save_canvas(canvas)
+        return True
+
+    def redo(self, canvas: dict) -> bool:
+        stack = self._redo.get(canvas["id"])
+        if not stack:
+            return False
+        nxt = stack.pop()
+        self._undo.setdefault(canvas["id"], []).append(copy.deepcopy(canvas))
+        canvas.clear()
+        canvas.update(nxt)
         self.save_canvas(canvas)
         return True
 
@@ -167,8 +191,30 @@ class Store:
 
     # ---- elements
 
-    def renderer(self, canvas: dict, scale: float = 1.0) -> Renderer:
-        return Renderer(canvas, self.theme, self.fonts, scale, lookup=self.get)
+    def renderer(self, canvas: dict, scale: float = 1.0, state: str | None = None,
+                 language: str | None = None) -> Renderer:
+        return Renderer(canvas, self.theme, self.fonts, scale, lookup=self.get, state=state, language=language,
+                        strings=self.strings)
+
+    # ---- string tables (localisation)
+
+    def set_strings(self, language: str, strings: dict, default: bool, replace: bool) -> dict:
+        lang = str(language).strip()
+        if not lang or lang == "pseudo":
+            raise ValueError("language must be a code like 'en', 'tr', 'de' ('pseudo' is built in)")
+        table = {} if replace else dict(self.strings["tables"].get(lang, {}))
+        for key, value in (strings or {}).items():
+            if value is None:
+                table.pop(key, None)
+            else:
+                table[str(key)] = str(value)
+        self.strings["tables"][lang] = table
+        if default or not self.strings.get("default"):
+            self.strings["default"] = lang
+        if self.persist:
+            (self.workspace / "strings.json").write_text(json.dumps(self.strings, ensure_ascii=False, indent=1),
+                                                         encoding="utf-8")
+        return table
 
     def find(self, canvas: dict, element_id: str) -> dict:
         for el in canvas["elements"]:

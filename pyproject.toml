@@ -4,9 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "game-ui-mcp"
-version = "0.1.0"
-description = "Local MCP server that lets an AI draw game UI assets (panels, buttons, icons, HUD) for Unity, Unreal and Roblox - no image generation model involved."
+version = "0.2.0"
+description = "Local MCP server that lets an AI draw, animate and hand off game and app UI (panels, buttons, HUDs, menus) for Unity, Unreal, Godot and Roblox - no image generation model involved."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = [
     "mcp>=1.2",

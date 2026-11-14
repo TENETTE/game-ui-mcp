@@ -138,6 +138,8 @@ export type Asset = {
 	sliceScale: number?,
 	rectOffset: Vector2?,
 	rectSize: Vector2?,
+	hover: string?,
+	pressed: string?,
 }
 
 local Assets: { [string]: Asset } = {
@@ -165,6 +167,12 @@ function GameUi.apply(image: ImageLabel | ImageButton, name: string)
 	else
 		image.ScaleType = Enum.ScaleType.Stretch
 	end
+	if image:IsA("ImageButton") then
+		local hover = asset.hover and Assets[asset.hover]
+		local pressed = asset.pressed and Assets[asset.pressed]
+		if hover then image.HoverImage = hover.id end
+		if pressed then image.PressedImage = pressed.id end
+	end
 end
 
 return GameUi
@@ -189,6 +197,9 @@ def roblox_module(manifest: dict) -> str:
             a, b, c, d = rb["SliceCenter"]
             fields.append(f"slice = Rect.new({a}, {b}, {c}, {d})")
             fields.append(f"sliceScale = {rb.get('SliceScale', 1)}")
+        for sname in ("hover", "pressed"):
+            if (entry.get("states") or {}).get(sname):
+                fields.append(f'{sname} = "{entry["states"][sname]}"')
         frame = entry.get("atlas_frame")
         if frame:
             fields.append(f"rectOffset = Vector2.new({frame['x']}, {frame['y']})")

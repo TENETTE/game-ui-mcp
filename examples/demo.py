@@ -2,7 +2,7 @@
 
     python examples/demo.py
 
-Writes kit_sheet.png, hud_mockup.png and icons.png next to this file. Nothing is saved
+Writes kit_sheet.png and hud_mockup.png next to this file. Nothing is saved
 to your normal workspace (a temporary one is used).
 """
 
@@ -10,7 +10,6 @@ import tempfile
 from pathlib import Path
 
 from game_ui_mcp import server as ui
-from game_ui_mcp.icons import icon_names
 from game_ui_mcp.store import Store
 
 OUT = Path(__file__).resolve().parent
@@ -53,6 +52,23 @@ ui.batch("panel", [
     {"op": "add_polygon", "cx": 212, "cy": 38, "radius": 5, "sides": 4, "fill": "$accent"},
 ])
 
+# Icons are drawn here like any other shape: filled silhouettes on a 24x24 grid, placed with scale = size / 24.
+ICON = {
+    "heart": "M12 21C12 21 3 15 3 9A4.5 4.5 0 0 1 12 6.5A4.5 4.5 0 0 1 21 9C21 15 12 21 12 21Z",
+    "user": "M8 8A4 4 0 1 0 16 8A4 4 0 1 0 8 8ZM4 21C4 16.5 7.5 14 12 14C16.5 14 20 16.5 20 21Z",
+    "sword": "M21 3L17 3.6L7.5 13L11 16.5L20.4 7ZM4.5 11.5L6 10L14 18L12.5 19.5ZM7 15.5L8.5 17L4.5 21L3 19.5Z",
+    "shield": "M12 2.5L20 5.5V11.5C20 16.3 16.6 19.8 12 21.5C7.4 19.8 4 16.3 4 11.5V5.5Z",
+    "potion": "M9.5 2.5H14.5V4.5H13.5V8.2C16.6 9.2 19 12 19 15.5A7 7 0 0 1 5 15.5C5 12 7.4 9.2 10.5 8.2V4.5H9.5Z",
+    "bolt": "M13.5 2L4.5 13.5H11L10 22L19.5 10H13Z",
+    "key": "M2.5 12A5 5 0 1 0 12.5 12A5 5 0 1 0 2.5 12ZM5.5 12A2 2 0 1 1 9.5 12A2 2 0 1 1 5.5 12Z"
+           "M12 10.5V13.5H13V15H15.5V13.5H17V16H19.5V13.5H21.5V10.5Z",
+}
+
+
+def icon(name: str, x: float, y: float, size: float, **extra) -> dict:
+    return {"op": "add_path", "d": ICON[name], "x": x, "y": y, "scale": size / 24, "fill_rule": "nonzero", **extra}
+
+
 # --- health bar (fill clipped to the rounded track)
 ui.create_canvas("hp_bar", 360, 64)
 ui.batch("hp_bar", [
@@ -64,8 +80,7 @@ ui.batch("hp_bar", [
     {"op": "add_ellipse", "id": "badge", "cx": 34, "cy": 32, "rx": 24,
      "fill": {"type": "radial", "stops": [[0, "#3b1d2a"], [1, "#190b12"]]},
      "stroke": {"color": "#fb7185", "width": 2}, "style": {"shadow": {"blur": 8, "dy": 3}}},
-    {"op": "add_icon", "name": "heart", "variant": "solid", "x": 20, "y": 18, "size": 28, "color": "#fb7185",
-     "style": {"glow": {"color": "#fb7185@0.8", "blur": 8}}},
+    icon("heart", 20, 18, 28, fill="#fb7185", style={"glow": {"color": "#fb7185@0.8", "blur": 8}}),
     {"op": "add_text", "text": "72 / 100", "x": 200, "y": 32, "anchor": "center", "font": "Rajdhani", "weight": 700,
      "size": 18, "color": "#fff", "stroke": {"color": "#000@0.6", "width": 2}},
 ])
@@ -76,9 +91,8 @@ ui.batch("slot", [
     {"op": "add_rect", "id": "s", "x": 8, "y": 8, "width": 80, "height": 80, "radius": 12,
      "fill": {"type": "radial", "stops": [[0, "#2a2540"], [1, "#15121f"]]}, "stroke": {"color": "$gold@0.8", "width": 2},
      "style": {"inner_shadow": {"color": "#000@0.6", "blur": 10, "dy": 2}, "glow": {"color": "$gold@0.35", "blur": 10}}},
-    {"op": "add_icon", "name": "sword", "x": 24, "y": 24, "size": 48, "variant": "solid",
-     "color": {"type": "linear", "angle": 135, "stops": [[0, "#fde68a"], [1, "#d97706"]]},
-     "style": {"shadow": {"blur": 4, "dy": 2}}},
+    icon("sword", 24, 24, 48, fill={"type": "linear", "angle": 135, "stops": [[0, "#fde68a"], [1, "#d97706"]]},
+         style={"shadow": {"blur": 4, "dy": 2}}),
     {"op": "add_text", "text": "x3", "x": 82, "y": 82, "anchor": "bottom-right", "weight": 800, "size": 14,
      "color": "#fff", "stroke": {"color": "#000", "width": 2}},
 ])
@@ -108,7 +122,7 @@ ops = [
     {"op": "add_rect", "x": 40, "y": 32, "width": 520, "height": 120, "radius": 20, "style": "panel"},
     {"op": "add_ellipse", "cx": 110, "cy": 92, "rx": 44, "fill": {"type": "radial", "stops": ["#4c3a8a", "#1a1530"]},
      "stroke": {"color": "$primary", "width": 3}},
-    {"op": "add_icon", "name": "user", "x": 82, "y": 64, "size": 56, "variant": "solid", "color": "$text"},
+    icon("user", 82, 64, 56, fill="$text"),
     {"op": "add_text", "text": "mustafa", "x": 176, "y": 58, "style": "title"},
     {"op": "add_rect", "id": "hpt", "x": 176, "y": 98, "width": 350, "height": 20, "radius": 10, "fill": "#000000@0.5",
      "stroke": {"color": "#ffffff@0.2", "width": 1.5}},
@@ -122,8 +136,7 @@ for i, name in enumerate(["sword", "shield", "potion", "bolt", "key"]):
         {"op": "add_rect", "x": x, "y": 962, "width": 72, "height": 72, "radius": 12, "fill": "#0b0a12cc",
          "stroke": {"color": "$gold" if i == 0 else "$primary@0.5", "width": 2},
          "style": {"inner_shadow": {"blur": 8, "dy": 2}}},
-        {"op": "add_icon", "name": name, "x": x + 14, "y": 976, "size": 44, "variant": "solid",
-         "color": "$gold" if i == 0 else "$text"},
+        icon(name, x + 14, 976, 44, fill="$gold" if i == 0 else "$text"),
         {"op": "add_text", "text": str(i + 1), "x": x + 8, "y": 968, "size": 12, "weight": 700, "color": "$muted"},
     ]
 ops += [
@@ -139,20 +152,4 @@ ui.batch("hud", ops)
 ui.export_png("hud", str(OUT / "hud_mockup.png"), scales=[0.5], include_background=True)
 (OUT / "hud_mockup_0_5x.png").replace(OUT / "hud_mockup.png")
 
-# --- every built-in icon (line on top, solid below)
-names = icon_names()
-cols, cell = 10, 72
-rows = (len(names) + cols - 1) // cols
-ui.create_canvas("icons", cols * cell, rows * cell * 2, "#15131c")
-ops = []
-for i, name in enumerate(names):
-    x, y = (i % cols) * cell + 12, (i // cols) * cell * 2 + 8
-    ops += [
-        {"op": "add_icon", "name": name, "x": x, "y": y, "size": 48},
-        {"op": "add_icon", "name": name, "x": x, "y": y + cell - 8, "size": 48, "color": "#c4a1ff", "variant": "solid"},
-        {"op": "add_text", "text": name, "x": x + 24, "y": y + cell * 2 - 22, "size": 9, "anchor": "top-center",
-         "color": "#aaaaaa"},
-    ]
-ui.batch("icons", ops)
-ui.export_png("icons", str(OUT / "icons.png"), include_background=True)
 print("written:", ", ".join(p.name for p in sorted(OUT.glob("*.png"))))

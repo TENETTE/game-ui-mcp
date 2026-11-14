@@ -8,6 +8,7 @@ All element coordinates are in canvas units; ``k`` is pixels per unit (1 = 1x).
 from __future__ import annotations
 
 import math
+import re
 import zlib
 from pathlib import Path
 from typing import Any
@@ -20,15 +21,14 @@ from . import geometry as geo
 from . import raster
 from .colors import parse_color
 from .fonts import FontLibrary, load_font, missing_glyphs, parse_weight
-from .icons import get_icon
 
 SS = 4
 MAX_MASK_PIXELS = 40_000_000
 TEXT_STYLE_KEYS = ("font", "weight", "size", "letter_spacing", "line_height", "uppercase", "italic")
-VECTOR_TYPES = {"rect", "ellipse", "polygon", "line", "path", "icon", "arc", "ticks"}
+VECTOR_TYPES = {"rect", "ellipse", "polygon", "line", "path", "arc", "ticks"}
 BITMAP_TYPES = {"image", "instance"}
 MAX_INSTANCE_DEPTH = 6
-LINE_TYPES = {"line", "icon", "arc", "ticks"}
+LINE_TYPES = {"line", "arc", "ticks"}
 BLENDS = ("normal", "add", "screen", "multiply", "overlay", "soft-light", "hard-light", "color-dodge",
           "color-burn", "darken", "lighten", "difference", "erase")
 CUT_K = math.tan(math.pi / 8)
@@ -582,8 +582,8 @@ def _tr_upper(text: str) -> str:
 class TextLayout:
     """Lays out a text element at a given pixel density (px per canvas unit)."""
 
-    def __init__(self, el: dict, st: dict, fonts: FontLibrary, ppu: float):
-        text = str(el.get("text", ""))
+    def __init__(self, el: dict, st: dict, fonts: FontLibrary, ppu: float, text: str | None = None):
+        text = str(el.get("text", "")) if text is None else text
         upper = el.get("uppercase", st.get("uppercase"))
         if upper:
             text = _tr_upper(text) if str(upper).lower() == "tr" else text.upper()
@@ -797,7 +797,6 @@ class Geometry:
         self.fills: list[list[geo.Point]] = []                                  # even-odd filled outlines
         self.lines: list[tuple[list[geo.Point], bool, float, str]] = []          # intrinsic strokes (pts, closed, width, cap)
         self.outline: list[tuple[list[geo.Point], bool]] = []                    # for style.stroke on polygons/paths
-        self.knock: list[tuple[list[geo.Point], bool, float, str]] = []          # detail strokes cut out of solid icons
         self.kind = "poly"
         self.rect: tuple | None = None
         self.ellipse: tuple | None = None
@@ -896,31 +895,13 @@ def vector_geometry(el: dict, res: float) -> Geometry:
             raise ValueError("ticks: every / skip_every removed every tick")
         x0, y0, x1, y1 = geo.bbox_of([pts for pts, _, _, _ in g.lines])
         g.box = (x0 - width / 2, y0 - width / 2, x1 + width / 2, y1 + width / 2)
-    elif t in ("path", "icon"):
-        if t == "icon":
-            size = float(el.get("size", 24))
-            scale = size / 24.0
-            d = get_icon(el["name"])
-            dx, dy = float(el.get("x", 0)), float(el.get("y", 0))
-        else:
-            scale = float(el.get("scale", 1))
-            d = el["d"]
-            dx, dy = float(el.get("x", 0)), float(el.get("y", 0))
-        subs = [(geo.transform(pts, scale, dx, dy), closed) for pts, closed in geo.parse_svg_path(d, res * scale)]
-        if t == "icon":
-            width = max(0.25, float(el.get("stroke_width", 2)) * scale)
-            solid = str(el.get("variant", "line")).lower() == "solid"
-            for pts, closed in subs:
-                g.lines.append((pts, closed, width, "round"))
-                if solid and closed:
-                    g.fills.append(pts)
-                elif solid:
-                    g.knock.append((pts, False, width, "round"))
-            g.box = (dx, dy, dx + 24 * scale, dy + 24 * scale)
-        else:
-            g.fills = [pts for pts, _ in subs if len(pts) >= 3]
-            g.outline = subs
-            g.box = geo.bbox_of([pts for pts, _ in subs])
+    elif t == "path":
+        scale = float(el.get("scale", 1))
+        dx, dy = float(el.get("x", 0)), float(el.get("y", 0))
+        subs = [(geo.transform(pts, scale, dx, dy), closed) for pts, closed in geo.parse_svg_path(el["d"], res * scale)]
+        g.fills = [pts for pts, _ in subs if len(pts) >= 3]
+        g.outline = subs
+        g.box = geo.bbox_of([pts for pts, _ in subs])
     else:
         raise ValueError(f"Not a vector element type: {t}")
     return g
@@ -961,12 +942,19 @@ def _inset_rect(rect: tuple, delta: float, res: float) -> list[geo.Point] | None
 
 class Renderer:
     def __init__(self, canvas: dict, theme: dict, fonts: FontLibrary, scale: float = 1.0,
-                 lookup=None, depth: int = 0):
+                 lookup=None, depth: int = 0, state: str | None = None, language: str | None = None,
+                 strings: dict | None = None, extra_vars: dict | None = None, extra_colors: dict | None = None):
+        if state:
+            canvas = apply_state(canvas, state)
         self.canvas = canvas
         self.lookup = lookup            # canvas id -> canvas dict, for instance elements
         self.depth = depth
         self.theme = theme
-        self.colors = theme.get("colors", {})
+        self.state = state
+        self.language = language
+        self.strings = strings or {}
+        self.colors = {**theme.get("colors", {}), **(canvas.get("colors") or {}), **(extra_colors or {})}
+        self.text_vars = text_vars(canvas, language, self.strings, extra_vars)
         self.fonts = fonts
         self.k = float(scale)
         self.width = max(1, int(round(canvas["width"] * self.k)))
@@ -978,6 +966,18 @@ class Renderer:
 
     def render(self, include_background: bool = True, only: set[str] | None = None,
                only_layers: set[str] | None = None) -> Image.Image:
+        pixel = self.canvas.get("pixel_art")
+        if pixel and not getattr(self, "_pixel_pass", False):
+            # pixel art: draw once at 1x without anti-aliasing, snap alpha and colours, then scale by
+            # whole pixels (nearest neighbour) so every art pixel stays a crisp square
+            base = self.derive(1.0)
+            base._pixel_pass = True
+            img = base.render(include_background, only, only_layers)
+            self.warnings += base.warnings
+            img = pixelate(img, pixel if isinstance(pixel, dict) else {}, self.colors)
+            if (self.width, self.height) != img.size:
+                img = img.resize((self.width, self.height), Image.NEAREST)
+            return img
         img = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
         bg = self.canvas.get("background")
         if include_background and not _is_none(bg):
@@ -1002,6 +1002,39 @@ class Renderer:
             rot = -rot
         return geo.rotated_bbox(box, rot, pivot)
 
+    def derive(self, scale: float) -> "Renderer":
+        """Same canvas, context and colours at another resolution."""
+        r = Renderer.__new__(Renderer)
+        r.__dict__.update(self.__dict__)
+        r.k = float(scale)
+        r.width = max(1, int(round(self.canvas["width"] * r.k)))
+        r.height = max(1, int(round(self.canvas["height"] * r.k)))
+        r.warnings = []
+        return r
+
+    def text_of(self, el: dict) -> str:
+        """The text an element shows: {placeholders} filled from vars / string tables, then the
+        pseudo-localisation transform when language is "pseudo"."""
+        raw = str(el.get("text", ""))
+        missing: list[str] = []
+
+        def sub(m) -> str:
+            key = m.group(1)
+            if key in self.text_vars:
+                return str(self.text_vars[key])
+            missing.append(key)
+            return m.group(0)
+
+        text = _PLACEHOLDER.sub(sub, raw)
+        if missing:
+            msg = f"{el.get('id')}: no value for {', '.join('{' + k + '}' for k in missing)}" + (
+                f" in language '{self.language}'" if self.language else "")
+            if msg not in self.warnings:
+                self.warnings.append(msg)
+        if self.language == "pseudo":
+            text = pseudo_localize(text)
+        return text
+
     @staticmethod
     def _pivot(el: dict, box: Box) -> tuple[float, float]:
         """Rotation centre: the element's ``origin`` [x, y] if given, else the middle of its box."""
@@ -1022,7 +1055,7 @@ class Renderer:
             lean = abs(_skew_tan(el)) * (box[3] - box[1]) / 2
             return (box[0] - lean, box[1], box[2] + lean, box[3])
         if t == "text":
-            layout = TextLayout(el, st, self.fonts, 4.0)
+            layout = TextLayout(el, st, self.fonts, 4.0, self.text_of(el))
             box = layout.box_units()
             lean = abs(math.tan(math.radians(layout.skew))) * (box[3] - box[1]) / 2
             return (box[0] - lean, box[1], box[2] + lean, box[3])
@@ -1098,8 +1131,9 @@ class Renderer:
         px1, py1 = int(math.ceil(x1 * k)) + 1, int(math.ceil(y1 * k)) + 1
         return px0, py0, px1 - px0, py1 - py0
 
-    @staticmethod
-    def _pick_ss(w: int, h: int) -> int:
+    def _pick_ss(self, w: int, h: int) -> int:
+        if self.canvas.get("pixel_art"):
+            return 1                       # hard pixel edges: sample each pixel centre once
         ss = SS
         while ss > 1 and w * h * ss * ss > MAX_MASK_PIXELS:
             ss -= 1
@@ -1137,14 +1171,7 @@ class Renderer:
 
         shape = fill(g.fills)
         if g.lines:
-            interior = None
-            if g.knock and g.fills:
-                # detail lines that sit inside a filled area become cut-outs instead of vanishing
-                rim = [(pts, True, width * 1.5, "round") for pts, closed, width, _ in g.lines if closed]
-                interior = shape & ~lines(rim)
             shape = shape | lines(g.lines)
-            if interior is not None:
-                shape = shape & ~(lines(g.knock) & interior)
 
         bands: list[np.ndarray] = []
         if strokes and el["type"] not in LINE_TYPES:
@@ -1211,7 +1238,7 @@ class Renderer:
     def _text_masks(self, el: dict, st: dict, region, ss: int, strokes: list[dict]):
         px0, py0, w, h = region
         k = self.k
-        layout = TextLayout(el, st, self.fonts, k * ss)
+        layout = TextLayout(el, st, self.fonts, k * ss, self.text_of(el))
         miss = missing_glyphs(layout.font, layout.text)
         if miss:
             self.warnings.append(
@@ -1262,7 +1289,11 @@ class Renderer:
         fit = str(el.get("fit", "stretch")).lower()
         sx, sy = tw / float(src["width"]), th / float(src["height"])
         scale = max(sx, sy) if fit in ("stretch", "cover") else min(sx, sy)
-        sub = Renderer(src, self.theme, self.fonts, scale, self.lookup, self.depth + 1)
+        sub = Renderer(src, self.theme, self.fonts, scale, self.lookup, self.depth + 1, state=el.get("state"),
+                       language=self.language, strings=self.strings,
+                       extra_vars={**{k: v for k, v in self.text_vars.items() if k in (el.get("pass_vars") or [])},
+                                   **(el.get("vars") or {})},
+                       extra_colors=el.get("colors"))
         img = sub.render(include_background=bool(el.get("background", True)))
         self.warnings += [f"{el['id']} -> {w}" for w in sub.warnings]
         return img
@@ -1332,8 +1363,8 @@ class Renderer:
         fx_, fy_ = sx < 0, sy < 0
         k = self.k
         m = max(ax, ay)
-        plain = {key: value for key, value in el.items()
-                 if key not in ("scale", "scale_x", "scale_y", "flip_x", "flip_y", "clip")}
+        drop = ("scale_x", "scale_y", "flip_x", "flip_y", "clip") + (() if el["type"] == "path" else ("scale",))
+        plain = {key: value for key, value in el.items() if key not in drop}
         if fx_ or fy_:
             # mirror the shape, not the lighting: pre-mirror offsets and light so they come out unchanged
             plain["style"] = _mirror_style(resolve_style(el.get("style"), self.theme), fx_, fy_)
@@ -1343,7 +1374,7 @@ class Renderer:
             sub = self
             result = self._render_plain(plain, clip_region=False)
         else:
-            sub = Renderer(self.canvas, self.theme, self.fonts, k * m, self.lookup, self.depth)   # true vector scale
+            sub = self.derive(k * m)                                     # true vector scale
             result = sub._render_plain(plain, clip_region=False)
             self.warnings += sub.warnings
         if result is None:
@@ -1626,6 +1657,88 @@ class Renderer:
         return img
 
 
+_PLACEHOLDER = re.compile(r"\{([A-Za-z_][\w.\-]*)\}")
+_PSEUDO = str.maketrans("aeiouycnsAEIOUYCNS", "áéîöüýçñšÅÉÎÖÛÝÇÑŠ")
+
+
+def pseudo_localize(text: str) -> str:
+    """Accented and ~35% longer, the classic pseudo-localisation test for clipping and missing glyphs."""
+    if not text.strip():
+        return text
+    out = []
+    for line in text.split("\n"):
+        body = line.translate(_PSEUDO)
+        pad = "·" * max(1, int(round(len(line) * 0.35)))
+        out.append(f"[{body} {pad}]")
+    return "\n".join(out)
+
+
+def text_vars(canvas: dict, language: str | None, strings: dict, extra: dict | None = None) -> dict:
+    """Placeholder values: default-language strings < chosen language < canvas vars < instance vars."""
+    tables = strings.get("tables", {}) if strings else {}
+    default = strings.get("default") if strings else None
+    out: dict = {}
+    if default and default in tables:
+        out.update(tables[default])
+    lang = language or canvas.get("language")
+    if lang and lang in tables:
+        out.update(tables[lang])
+    out.update(canvas.get("vars") or {})
+    out.update(extra or {})
+    return out
+
+
+def apply_state(canvas: dict, state: str) -> dict:
+    """A copy of ``canvas`` with the overrides of one interaction state (hover, pressed...) applied."""
+    import copy as _copy
+    states = canvas.get("states") or {}
+    if state not in states:
+        known = ", ".join(sorted(states)) or "(none)"
+        raise ValueError(f"canvas '{canvas.get('id')}' has no state '{state}'. States: {known}")
+    out = _copy.deepcopy(canvas)
+    by_id = {e["id"]: e for e in out["elements"]}
+    for eid, props in states[state].items():
+        el = by_id.get(eid)
+        if el is None:
+            continue
+        for key, value in props.items():
+            if key == "style" and isinstance(value, dict):
+                base = el.get("style")
+                merged = dict(base) if isinstance(base, dict) else ({"use": base} if base else {})
+                for sk, sv in value.items():
+                    if sv is None:
+                        merged.pop(sk, None)
+                    else:
+                        merged[sk] = sv
+                el["style"] = merged
+            elif value is None:
+                el.pop(key, None)
+            else:
+                el[key] = value
+    return out
+
+
+def pixelate(img: Image.Image, spec: dict, colors: dict) -> Image.Image:
+    """Binary alpha + limited palette for pixel-art canvases."""
+    arr = np.asarray(img, dtype=np.uint8).copy()
+    thr = int(spec.get("alpha_threshold", 128))
+    opaque = arr[..., 3] >= thr
+    arr[..., 3] = np.where(opaque, 255, 0)
+    palette = spec.get("palette")
+    if palette:
+        pal = np.array([parse_color(c, colors)[:3] for c in palette], dtype=np.float64)
+        rgb = arr[..., :3].reshape(-1, 3).astype(np.float64)
+        idx = np.argmin(((rgb[:, None, :] - pal[None, :, :]) ** 2).sum(-1), axis=1)
+        arr[..., :3] = pal[idx].reshape(arr.shape[:2] + (3,)).astype(np.uint8)
+    elif spec.get("max_colors"):
+        n = max(2, min(256, int(spec["max_colors"])))
+        q = Image.fromarray(arr[..., :3], "RGB").quantize(colors=n, method=Image.Quantize.MAXCOVERAGE,
+                                                          dither=Image.Dither.NONE).convert("RGB")
+        arr[..., :3] = np.asarray(q)
+    arr[~opaque] = 0
+    return Image.fromarray(arr, "RGBA")
+
+
 def _instance_cycle(src: dict, target: Any, lookup, seen: tuple = ()) -> list[str] | None:
     """Path of canvas ids from ``src`` back to ``target`` through instance elements, if any."""
     sid = src.get("id")
@@ -1646,9 +1759,13 @@ def _instance_cycle(src: dict, target: Any, lookup, seen: tuple = ()) -> list[st
 
 
 def _scales(el: dict) -> tuple[float, float]:
-    """Signed scale of an element: scale / scale_x / scale_y, with flip_x / flip_y mirroring."""
-    sx = float(el.get("scale_x", el.get("scale", 1)) if el.get("scale_x", el.get("scale", 1)) is not None else 1)
-    sy = float(el.get("scale_y", el.get("scale", 1)) if el.get("scale_y", el.get("scale", 1)) is not None else 1)
+    """Signed scale of an element: scale / scale_x / scale_y, with flip_x / flip_y mirroring.
+    A path's own "scale" sizes its path data, so only scale_x / scale_y transform a path."""
+    uniform = 1 if el.get("type") == "path" else el.get("scale", 1)
+    sx = el.get("scale_x", uniform)
+    sy = el.get("scale_y", uniform)
+    sx = float(sx) if sx is not None else 1.0
+    sy = float(sy) if sy is not None else 1.0
     if el.get("flip_x"):
         sx = -sx
     if el.get("flip_y"):
