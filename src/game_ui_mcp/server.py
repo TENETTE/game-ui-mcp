@@ -94,6 +94,11 @@ exact vector outline (strokes and shadows follow the cut; prefer it to blend "er
 smoothing 0..1 gives Figma-style smoothed "squircle" corners; arrange_elements(wrap=true) flows items onto new
 lines; set_theme(modes={...}, mode=...) switches every $token between light / dark / team / seasonal sets.
 export_svg writes an editable vector SVG for Figma, Penpot, Illustrator and the web.
+style.backdrop_blur: px blurs whatever is already drawn beneath the shape (frosted glass panels; give
+  its shadow "knockout": true so the shadow does not show through the glass);
+stroke.sides ["top", "bottom"...] strokes only some edges of a rect (tab underlines, dividers);
+add_text max_lines + max_width truncates with "...", decoration "underline" | "strikethrough";
+canvas_version saves / restores named versions of a canvas.
 
 Layers (create_layer): a canvas is a stack of layers, bottom to top; new elements go to the active layer.
 A layer has its own opacity, blend mode and style - layer styles (shadow, glow, stroke, light, blur, adjust,
@@ -830,7 +835,7 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
              stroke: str | dict | None = None, style: str | dict | None = None, rotation: float = 0,
              origin: list[float] | None = None, arc: dict | None = None, id: str | None = None,
              group: str | None = None, clip: str | None = None, layer: str | None = None,
-             lang: str | None = None):
+             lang: str | None = None, max_lines: int | None = None, decoration: str | None = None):
     """Add text.
 
     (x, y) is where `anchor` sits: "top-left", "center" (centre of a button), "middle-left",
@@ -840,6 +845,8 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
     weight: 100-900 or "regular"/"medium"/"semibold"/"bold"/"black".
     color: color or gradient. stroke: outline drawn behind the glyphs, e.g. {"color":"#000","width":3}.
     max_width: wrap lines at this width. fit_width: shrink the size until the text fits this width.
+    max_lines (with max_width): cut longer text and end the last line with "..." (player names, item
+      titles, chat previews; 1 = single line). decoration: "underline" or "strikethrough" (old prices).
     letter_spacing: extra px between letters. uppercase: true, or "tr" for Turkish i -> İ rules.
     italic: use the family's italic (Barlow Condensed has one); other fonts are slanted automatically.
     skew: extra slant in degrees.
@@ -863,7 +870,8 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
                                      letter_spacing=letter_spacing, uppercase=uppercase or None,
                                      italic=italic or None, skew=skew or None, stroke=stroke, style=style,
                                      rotation=rotation or None, origin=origin, arc=arc, id=id, group=group,
-                                     clip=clip, layer=layer, lang=lang))
+                                     clip=clip, layer=layer, lang=lang, max_lines=max_lines,
+                                     decoration=decoration))
 
 
 @tool
@@ -1326,6 +1334,35 @@ def undo(canvas: str):
     if not st.undo(c):
         return {"undone": False, "reason": "nothing to undo"}
     return {"undone": True, "elements": [e["id"] for e in c["elements"]]}
+
+
+@tool
+def canvas_version(canvas: str, action: str = "list", name: str | None = None, note: str | None = None):
+    """Named version history for a canvas (like Figma's version history), beyond the 40-step undo.
+
+    action "save": snapshot the canvas now as `name` (default v1, v2...) with an optional note - do it
+      before a risky redesign or to keep alternatives ("rounded", "sharp") to compare later.
+    "list": saved versions with time, note and element count. "restore": put the canvas back to that
+      version (undo returns to what was there before). "delete": remove a saved version.
+    Versions are stored next to the canvas file and survive restarts (at most 30 per canvas).
+    """
+    st = store()
+    c = st.get(canvas)
+    act = str(action).lower()
+    if act == "save":
+        entry = st.save_version(c, name, note)
+        return {"saved": entry["name"], "versions": [v["name"] for v in st.list_versions(c)]}
+    if act == "list":
+        return {"canvas": c["id"], "versions": st.list_versions(c)}
+    if act in ("restore", "delete"):
+        if not name:
+            raise ValueError(f"{act} needs the version name (see action='list')")
+        if act == "restore":
+            st.restore_version(c, name)
+            return {"restored": slugify(name, "version"), "elements": [e["id"] for e in c["elements"]]}
+        st.delete_version(c, name)
+        return {"deleted": slugify(name, "version"), "versions": [v["name"] for v in st.list_versions(c)]}
+    raise ValueError("action must be 'save', 'list', 'restore' or 'delete'")
 
 
 # --------------------------------------------------------------------------- animation tools

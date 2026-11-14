@@ -140,3 +140,63 @@ def test_parallel_frames_match_sequential(ws):
     par, _ = s._poses(c, anim, times, 1.0)
     seq = [s._pose(c, anim, t, 1.0)[0] for t in times]
     assert all(a.tobytes() == b.tobytes() for a, b in zip(par, seq))
+
+
+def test_backdrop_blur_softens_what_is_beneath_only_inside_the_shape(ws):
+    s.create_canvas("c", 120, 60)
+    for i in range(12):                                         # hard black / white stripes
+        s.add_rect("c", i * 10, 0, 5, 60, fill="#ffffff")
+    s.add_rect("c", 30, 10, 60, 40, id="glass", style={"fill": "#ffffff@0.1", "backdrop_blur": 12})
+    st = s.store()
+    img = np.asarray(st.renderer(st.get("c")).render(include_background=False)).astype(int)
+    inside, outside = img[30, 40:80, 0], img[5, 40:80, 0]
+    assert inside.max() - inside.min() < 60                     # stripes melted under the glass
+    assert outside.max() - outside.min() > 200                  # untouched outside it
+
+
+def test_text_truncation_and_decoration(ws):
+    s.create_canvas("c", 200, 60)
+    s.add_text("c", "Supercalifragilistic expialidocious hero name", x=5, y=5, size=16, max_width=120,
+               max_lines=1, id="name")
+    s.add_text("c", "999", x=5, y=35, size=16, decoration="strikethrough", id="old")
+    st = s.store()
+    r = st.renderer(st.get("c"))
+    box = r.element_box(st.find(st.get("c"), "name"))
+    assert box[2] - box[0] <= 121
+    from game_ui_mcp.render import TextLayout, resolve_style
+    el = st.find(st.get("c"), "name")
+    assert TextLayout(el, resolve_style(el.get("style"), st.theme), st.fonts, 1.0).lines[0][0].endswith("…")
+    with_line = np.asarray(r.render(include_background=False))[..., 3].astype(int).sum()
+    s.update_element("c", "old", {"decoration": "none"})
+    without = np.asarray(st.renderer(st.get("c")).render(include_background=False))[..., 3].astype(int).sum()
+    assert with_line > without
+    with pytest.raises(ValueError, match="max_width"):
+        s.add_text("c", "x", x=0, y=0, max_lines=2)
+
+
+def test_stroke_on_chosen_sides_only(ws):
+    s.create_canvas("c", 100, 60)
+    s.add_rect("c", 10, 10, 80, 40, style={"fill": "none",
+                                           "stroke": {"color": "#ffffff", "width": 4, "sides": ["bottom"]}})
+    a = alpha()
+    assert a[48, 50] > 200 and a[12, 50] == 0 and a[30, 12] == 0
+    with pytest.raises(ValueError, match="rects only"):
+        s.add_ellipse("c", 50, 30, 10, style={"stroke": {"color": "#fff", "width": 2, "sides": ["top"]}})
+
+
+def test_version_history_save_restore_and_survives_restart(ws):
+    s.create_canvas("c", 50, 50)
+    s.add_rect("c", 0, 0, 10, 10, id="a")
+    s.canvas_version("c", "save", name="first", note="one rect")
+    s.add_rect("c", 20, 20, 10, 10, id="b")
+    assert [v["name"] for v in s.canvas_version("c")["versions"]] == ["first"]
+    s.canvas_version("c", "restore", name="first")
+    assert [e["id"] for e in s.store().get("c")["elements"]] == ["a"]
+    s.undo("c")
+    assert [e["id"] for e in s.store().get("c")["elements"]] == ["a", "b"]
+    s.set_store(Store(ws / "ws"))                                # a new session reads it from disk
+    assert s.canvas_version("c")["versions"][0]["note"] == "one rect"
+    with pytest.raises(ValueError, match="already exists"):
+        s.canvas_version("c", "save", name="first")
+    s.canvas_version("c", "delete", name="first")
+    assert s.canvas_version("c")["versions"] == []

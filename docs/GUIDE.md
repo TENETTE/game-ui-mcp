@@ -7,7 +7,7 @@ Kısa tanıtım ve kurulum için [README](../README.md).
 - **Şekiller:** dikdörtgen (yuvarlak ya da kesik köşe, eğik), elips, çokgen, yıldız, çizgi (kesikli olabilir), yay, kadran çizgileri, SVG path; konturlarda keskin (miter), yuvarlak ya da pah köşe ve kesikli kontur; `flip_x` / `flip_y` ile aynalama (gölge ve ışık yönü korunur)
 - **Yeniden kullanma ve içe aktarma:** `add_instance` (başka canvas'ı canlı bileşen olarak yerleştirir, istenirse animasyonunun belli bir anıyla), `duplicate_element` ile doğrusal ve dairesel dizi (`count`, `rotate`, `pivot`), `add_svg` ile SVG'yi düzenlenebilir path'lere çevirme (logo, hazır ikon setleri)
 - **Delik açma:** `blend: "erase"` aynı katmandaki şeyleri keser (pencere, çentik, oyma yazı)
-- **Figma / Penpot tarzı araçlar:** `boolean_elements` ile birleştir / çıkar / kesiştir / dışla (sonuç gerçek vektör şekil, kontur ve gölge kesilen kenarı izler, işlem sonradan değiştirilebilir); `add_rect(smoothing=...)` ile yumuşatılmış "squircle" köşe; `fill` listesiyle üst üste dolgu yığını; `set_theme(modes=..., mode=...)` ile açık / koyu / takım renkleri gibi değişken modları (canvas başına da seçilebilir, `export_theme` CSS'te `[data-theme]` blokları yazar); `arrange_elements(wrap=true)` ile satır atlayan otomatik yerleşim; `export_svg` ile Figma, Penpot, Illustrator ve Inkscape'te düzenlenebilir vektör SVG
+- **Figma / Penpot tarzı araçlar:** `boolean_elements` ile birleştir / çıkar / kesiştir / dışla (sonuç gerçek vektör şekil, kontur ve gölge kesilen kenarı izler, işlem sonradan değiştirilebilir); `add_rect(smoothing=...)` ile yumuşatılmış "squircle" köşe; `fill` listesiyle üst üste dolgu yığını; `set_theme(modes=..., mode=...)` ile açık / koyu / takım renkleri gibi değişken modları (canvas başına da seçilebilir, `export_theme` CSS'te `[data-theme]` blokları yazar); `arrange_elements(wrap=true)` ile satır atlayan otomatik yerleşim; `export_svg` ile Figma, Penpot, Illustrator ve Inkscape'te düzenlenebilir vektör SVG; `style.backdrop_blur` ile arkadakini bulanıklaştıran buzlu cam; `stroke.sides` ile dikdörtgenin yalnızca seçili kenarlarına kontur (sekme alt çizgisi, ayraç); `add_text(max_lines=..., decoration=...)` ile "..." ile kırpma ve altı / üstü çizili yazı; `canvas_version` ile isimli sürüm kaydetme ve geri dönme
 - **Öz denetim:** `review_canvas` kenarda kesilen gölgeyi, düşük yazı kontrastını (WCAG), çok küçük yazıyı, eksik glifi, yarım piksele düşen bulanık kenarları, bozuk katman ve animasyonları bulur; `inspect_pixels` tam renk okur; `view_image` diskteki bir referans görseli gösterir ve renk paletini çıkarır; `fit_canvas` canvas'ı boyanan alana göre daraltır ya da genişletir
 - **Katmanlar:** her katmanın kendi opaklığı, karışım modu (multiply, screen, overlay, soft-light, erase... 13 mod) ve stili var; `clip` ile alttaki katmana kırpılır (taşmadan serbest gölge ve ışık boyama); katman stili içindeki her şeyi tek şekil sayar (ortak kontur, ortak gölge)
 - **Işık ve gölgeleme:** yönlü ışıkla kabartma (`light`: açı, pah, profil, parlaklık), çoklu ve aralıklı kontur, kademeli gölge, gradient maskeyle söndürme (`mask`), renk düzeltme (`adjust`: parlaklık, kontrast, doygunluk, ton)
@@ -48,16 +48,16 @@ Başka bir klasör için `GAME_UI_MCP_DIR` ortam değişkenini ayarla (config'te
 
 | Grup | Tool'lar |
 | --- | --- |
-| Canvas | `create_canvas`, `list_canvases`, `get_canvas`, `update_canvas`, `duplicate_canvas`, `delete_canvas`, `fit_canvas`, `resize_canvas` |
+| Canvas | `create_canvas`, `list_canvases`, `get_canvas`, `update_canvas`, `duplicate_canvas`, `delete_canvas`, `fit_canvas`, `resize_canvas`, `canvas_version` |
 | Katman | `create_layer`, `update_layer`, `delete_layer`, `set_layer` |
 | Çizim | `add_rect`, `add_ellipse`, `add_line`, `add_polygon`, `add_path`, `add_arc`, `add_ticks`, `add_text`, `add_image`, `add_instance`, `add_svg` |
-| Düzenleme | `update_element`, `delete_elements`, `duplicate_element`, `move_elements`, `reorder_element`, `align_elements`, `arrange_elements`, `scatter`, `copy_elements`, `set_pin`, `batch`, `undo`, `redo` |
+| Düzenleme | `update_element`, `delete_elements`, `duplicate_element`, `boolean_elements`, `move_elements`, `reorder_element`, `align_elements`, `arrange_elements`, `scatter`, `copy_elements`, `set_pin`, `batch`, `undo`, `redo` |
 | Durum, veri, dil | `set_state`, `delete_state`, `generate_from_template`, `set_strings`, `get_strings` |
 | Denetim | `review_canvas`, `inspect_pixels`, `view_image`, `preview_nine_slice` |
 | Animasyon | `create_animation`, `set_keyframes`, `delete_keyframes`, `get_animations`, `delete_animation`, `preview_animation`, `export_animation` |
 | Tema ve bilgi | `set_theme`, `get_theme`, `list_fonts`, `measure_text` |
 | Önizleme | `preview`, `preview_resolutions`, `contact_sheet` |
-| Dışa aktarma | `export_png`, `export_asset`, `export_layers`, `export_psd`, `export_atlas`, `export_bitmap_font`, `write_engine_helpers` |
+| Dışa aktarma | `export_png`, `export_svg`, `export_asset`, `export_layers`, `export_psd`, `export_atlas`, `export_bitmap_font`, `write_engine_helpers` |
 | Teslim | `export_spec`, `export_theme`, `set_link`, `export_prototype`, `export_screen` |
 
 Stil nesnesi kısaca:
@@ -140,7 +140,9 @@ Roblox'ta görselleri Studio'ya kendin yüklemen gerekir (server internete çık
 - Motor tarafındaki dosyalar (C#, Unreal Python, Luau, Godot `.tres` / `.tscn`, Unity UXML / USS) bu repoda yalnızca üretiliyor ve biçimleri kontrol ediliyor; Unity, Unreal, Roblox Studio ve Godot içinde henüz açılıp denenmedi. Tıklanabilir prototip ise gerçek bir tarayıcıda (headless Chrome) denendi.
 - `export_screen` Unreal için sahne üretmez (UMG dosyası dışarıdan yazılamıyor); Unreal'da parçalar + `.screen.json` kullanılır. Roblox'ta özel font yüklenemediği için yazılar en yakın hazır Roblox fontuyla eşleştirilir. Gradient'li yazı motora ilk rengiyle gider (`bake_text` ile görsel olarak gömülebilir).
 - Pixel-art modu yazıyı da keskinleştirir ama gömülü fontlar piksel font değildir; gerçek piksel yazı için `fonts/` klasörüne bir piksel font koy.
-- 73 tool var; MCP istemcisi hepsinin tanımını modele yükler (yaklaşık 25 bin token).
+- 74 tool var; MCP istemcisi hepsinin tanımını modele yükler (yaklaşık 25 bin token).
+- `backdrop_blur` yalnızca aynı canvas'ta altta çizilmiş şeyleri bulanıklaştırır (oyundaki gerçek sahneyi değil; motorda buzlu cam için `BackgroundBlur` gibi motor özelliği gerekir). Stilli, clip'li ya da yarı saydam bir katmandaysa yalnızca o katmanın içindekileri görür. `scale_x` / `flip` verilmiş elemanlarda bulanık alan ölçeklenmemiş şekle göre kesilir.
+- `stroke.sides` yalnızca dikdörtgenlerde çalışır; SVG'ye resim olarak gider.
 - `export_svg`: shader / desen dolgusu, `light`, iç gölge, bulanıklık, özel karışım modları, clip'li ya da stilli katmanlar, görseller ve yay üstü yazı SVG'ye o elemanın resmi olarak gömülür; `erase` SVG'de karşılığı olmadığı için atlanır (delik için `boolean_elements` kullan). Dış konturlar SVG'de dolgunun altına çizilir; yarı saydam dolguda konturun iç yarısı görünür.
 - Animasyon kareleri işlemcinin çekirdeklerinde paralel çizilir (8 çekirdekte yaklaşık 1,7 kat hız); Python'un kilidi yüzünden tam çekirdek sayısı kadar hızlanmaz.
 

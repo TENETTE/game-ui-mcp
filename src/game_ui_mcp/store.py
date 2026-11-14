@@ -17,6 +17,7 @@ ELEMENT_TYPES = ("rect", "ellipse", "polygon", "line", "path", "text", "image", 
                  "boolean")
 MAX_CANVAS = 8192
 MAX_UNDO = 40
+MAX_VERSIONS = 30
 
 
 def default_workspace() -> Path:
@@ -46,6 +47,7 @@ class Store:
         self.strings: dict = {"default": None, "tables": {}}
         self._undo: dict[str, list[dict]] = {}
         self._redo: dict[str, list[dict]] = {}
+        self._version_mem: dict[str, dict] = {}
         if persist:
             self._load()
 
@@ -133,6 +135,63 @@ class Store:
                 canvas["background"] = old
                 raise
         self.save_canvas(canvas)
+
+    # ---- named versions (Figma-style version history, kept next to the canvas file)
+
+    def _versions(self, cid: str) -> dict:
+        mem = self._version_mem
+        if cid not in mem:
+            mem[cid] = {}
+            folder = self.projects_dir / "versions" / cid
+            if self.persist and folder.is_dir():
+                for path in sorted(folder.glob("*.json")):
+                    try:
+                        mem[cid][path.stem] = json.loads(path.read_text(encoding="utf-8"))
+                    except Exception:
+                        continue
+        return mem[cid]
+
+    def save_version(self, canvas: dict, name: str | None, note: str | None) -> dict:
+        import time
+        versions = self._versions(canvas["id"])
+        key = slugify(name or f"v{len(versions) + 1}", "version")
+        if key in versions:
+            raise ValueError(f"version '{key}' already exists - pick another name or delete it first")
+        if len(versions) >= MAX_VERSIONS:
+            raise ValueError(f"at most {MAX_VERSIONS} versions per canvas - delete old ones first")
+        entry = {"name": key, "note": note or "", "saved": time.strftime("%Y-%m-%d %H:%M:%S"),
+                 "canvas": copy.deepcopy(canvas)}
+        versions[key] = entry
+        if self.persist:
+            folder = self.projects_dir / "versions" / canvas["id"]
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / f"{key}.json").write_text(json.dumps(entry, ensure_ascii=False), encoding="utf-8")
+        return entry
+
+    def list_versions(self, canvas: dict) -> list[dict]:
+        return [{"name": v["name"], "note": v.get("note", ""), "saved": v.get("saved", ""),
+                 "elements": len(v["canvas"].get("elements", []))} for v in self._versions(canvas["id"]).values()]
+
+    def restore_version(self, canvas: dict, name: str) -> None:
+        versions = self._versions(canvas["id"])
+        key = slugify(name, "version")
+        if key not in versions:
+            raise ValueError(f"no version '{key}'. Versions: {', '.join(versions) or '(none - save one first)'}")
+        self.checkpoint(canvas)                 # undo brings the replaced state back
+        snapshot = copy.deepcopy(versions[key]["canvas"])
+        snapshot["id"] = canvas["id"]
+        canvas.clear()
+        canvas.update(snapshot)
+        self.save_canvas(canvas)
+
+    def delete_version(self, canvas: dict, name: str) -> None:
+        versions = self._versions(canvas["id"])
+        key = slugify(name, "version")
+        if versions.pop(key, None) is None:
+            raise ValueError(f"no version '{key}'. Versions: {', '.join(versions) or '(none)'}")
+        path = self.projects_dir / "versions" / canvas["id"] / f"{key}.json"
+        if self.persist and path.is_file():
+            path.unlink()
 
     def delete_canvas(self, canvas: dict) -> None:
         self.canvases.pop(canvas["id"], None)

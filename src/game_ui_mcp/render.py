@@ -183,7 +183,12 @@ def _stroke_specs(st: dict, colors: dict) -> list[dict]:
             dash = [float(v) for v in dash]
         else:
             dash = None
-        out.append({"paint": item.get("fill", item.get("color", "#ffffff")), "width": width, "align": align,
+        sides = item.get("sides")
+        if sides is not None:
+            sides = [str(s).lower() for s in (sides if isinstance(sides, (list, tuple)) else [sides])]
+            if not sides or any(s not in ("top", "right", "bottom", "left") for s in sides):
+                raise ValueError("stroke.sides must list 'top', 'right', 'bottom' and/or 'left' (rects only)")
+        out.append({"sides": sides, "paint": item.get("fill", item.get("color", "#ffffff")), "width": width, "align": align,
                     "offset": offset, "d0": d0, "d1": d1, "join": str(join).lower() if join else None,
                     "miter_limit": max(1.0, float(item.get("miter_limit", 4))),
                     "dash": dash, "dash_offset": float(item.get("dash_offset", 0) or 0)})
@@ -622,6 +627,24 @@ class TextLayout:
                 self._load()
         self.lines = self._wrap(text, float(max_width) * ppu if max_width else None)
         self.text = text
+        self.truncated = False
+        max_lines = el.get("max_lines")
+        if max_lines:
+            keep = int(max_lines)
+            if keep < 1:
+                raise ValueError("max_lines must be 1 or more")
+            if not max_width:
+                raise ValueError("max_lines needs max_width (the width the text is cut to)")
+            if len(self.lines) > keep:
+                # Figma "truncate text": cut the last kept line and end it with an ellipsis
+                last, limit = self.lines[keep - 1][0].rstrip(), float(max_width) * ppu
+                while last and self._width(last + "\u2026") > limit:
+                    last = last[:-1].rstrip()
+                self.lines = self.lines[:keep - 1] + [(last + "\u2026", self._width(last + "\u2026"))]
+                self.truncated = True
+        self.decoration = str(el.get("decoration") or "none").lower()
+        if self.decoration not in ("none", "underline", "strikethrough"):
+            raise ValueError("decoration must be 'underline', 'strikethrough' or 'none'")
 
         n = max(1, len(self.lines))
         step = self.size * ppu * self.line_height
@@ -820,6 +843,19 @@ class TextLayout:
 
     def draw(self, img: Image.Image, ox: float, oy: float, stroke_px: int = 0) -> None:
         """Draw glyph coverage (optionally dilated by stroke_px) onto ``img`` (L mode) at offset (-ox, -oy)."""
+        self._draw_glyphs(img, ox, oy, stroke_px)
+        if self.decoration != "none":
+            px = self.size * self.ppu
+            thick = max(1.0, px * 0.07)
+            lift = -px * 0.12 if self.decoration == "underline" else px * 0.3   # below / through the x-height
+            draw = ImageDraw.Draw(img)
+            for (line, width), lx, by in zip(self.lines, self.line_x, self.baselines):
+                if line.strip():
+                    y = by - lift - oy
+                    draw.rectangle((lx - ox - stroke_px, y - thick / 2 - stroke_px,
+                                    lx + width - ox + stroke_px, y + thick / 2 + stroke_px), fill=255)
+
+    def _draw_glyphs(self, img: Image.Image, ox: float, oy: float, stroke_px: int = 0) -> None:
         if self.shaper:
             for (line, _), lx, by in zip(self.lines, self.line_x, self.baselines):
                 if line:
@@ -1023,6 +1059,17 @@ def _boolean_polys(el: dict, res: float) -> list[list[geo.Point]]:
             pc.AddPaths(polys, pyclipper.PT_CLIP, True)
         result = pc.Execute(clip_type, pyclipper.PFT_NONZERO, rule(child))
     return [[(x / q, y / q) for x, y in p] for p in (result or [])]
+
+
+def _side_strips(rect: tuple, sides: list[str], d0: float, d1: float) -> list[list[geo.Point]]:
+    """Strips along each chosen edge that hold that edge's stroke band (full length, like Figma)."""
+    x, y, w, h = rect[:4]
+    inner = max(0.0, -d0) + 0.01                       # how far the band reaches inside the shape
+    far = max(0.0, d1) + 1.0 + max(w, h)              # and outside it
+    x0, y0, x1, y1 = x - far, y - far, x + w + far, y + h + far
+    strips = {"top": (x0, y0, x1, y + inner), "bottom": (x0, y + h - inner, x1, y1),
+              "left": (x0, y0, x + inner, y1), "right": (x + w - inner, y0, x1, y1)}
+    return [[(a, b), (c, b), (c, d), (a, d)] for a, b, c, d in (strips[s] for s in sides)]
 
 
 def _dashed(el: dict, pts: list, closed: bool, width: float, cap: str) -> list:
@@ -1352,6 +1399,10 @@ class Renderer:
                         & ~grown(spec["d0"], join, spec["miter_limit"]))
                 if open_paths:
                     band = band | lines([(pts, False, spec["width"], "round") for pts in open_paths])
+                if spec["sides"]:
+                    if g.kind != "rect":
+                        raise ValueError("stroke.sides works on rects only (Figma individual strokes)")
+                    band = band & fill(_side_strips(g.rect, spec["sides"], spec["d0"], spec["d1"]), "nonzero")
                 if spec["dash"]:
                     # dashes run along the shape edge; each dash is a wide butt-capped strip across the band
                     edge = [(pts, c) for pts, c in g.outline] if g.outline else [(pts, True) for pts in g.fills]
@@ -1708,7 +1759,25 @@ class Renderer:
             if result is None:
                 continue
             layer, ox, oy, blend = result
+            frost = float(resolve_style(el.get("style"), self.theme).get("backdrop_blur", 0) or 0)
+            if frost > 0:
+                self._backdrop_blur(img, el, (ox, oy, layer.width, layer.height), margin, frost)
             composite(img, layer, ox + margin, oy + margin, blend)
+
+    def _backdrop_blur(self, img: Image.Image, el: dict, region, margin: int, radius: float) -> None:
+        """Figma "background blur": blur what is already drawn beneath the element, inside its shape."""
+        ox, oy, w, h = region
+        r_px = radius * self.k / 2
+        pad = int(math.ceil(r_px * 3)) + 1                  # blur from a larger patch so edges do not darken
+        x0, y0 = max(0, ox + margin - pad), max(0, oy + margin - pad)
+        x1, y1 = min(img.width, ox + margin + w + pad), min(img.height, oy + margin + h + pad)
+        if x1 <= x0 or y1 <= y0:
+            return
+        patch = img.crop((x0, y0, x1, y1))
+        soft = patch.convert("RGBa").filter(ImageFilter.GaussianBlur(r_px)).convert("RGBA")
+        mask = Image.new("L", patch.size, 0)
+        mask.paste(self.shape_mask(el, region), (ox + margin - x0, oy + margin - y0))
+        img.paste(Image.composite(soft, patch, mask), (x0, y0))
 
     def _style_layer(self, content: Image.Image, st: dict, box_px: Box) -> Image.Image:
         """Apply layer-level effects to the merged content of a layer, using its alpha as the silhouette."""

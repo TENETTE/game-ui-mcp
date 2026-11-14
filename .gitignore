@@ -6,3 +6,9 @@ venv/
 dist/
 build/
 *.egg-info/
+
+# local tool state
+.claude/
+*.log
+.DS_Store
+Thumbs.db

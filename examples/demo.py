@@ -123,7 +123,7 @@ ops = [
     {"op": "add_ellipse", "cx": 110, "cy": 92, "rx": 44, "fill": {"type": "radial", "stops": ["#4c3a8a", "#1a1530"]},
      "stroke": {"color": "$primary", "width": 3}},
     icon("user", 82, 64, 56, fill="$text"),
-    {"op": "add_text", "text": "mustafa", "x": 176, "y": 58, "style": "title"},
+    {"op": "add_text", "text": "nova", "x": 176, "y": 58, "style": "title"},
     {"op": "add_rect", "id": "hpt", "x": 176, "y": 98, "width": 350, "height": 20, "radius": 10, "fill": "#000000@0.5",
      "stroke": {"color": "#ffffff@0.2", "width": 1.5}},
     {"op": "add_rect", "x": 176, "y": 98, "width": 250, "height": 20, "clip": "hpt",

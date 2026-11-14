@@ -19,7 +19,7 @@ from .render import (LINE_TYPES, VECTOR_TYPES, Renderer, TextLayout, _is_fill_st
 from . import geometry as geo
 
 RASTER_SCALE = 2.0                      # embedded fallbacks are drawn at 2x so they stay crisp when zoomed
-_VECTOR_KEYS = {"fill", "stroke", "opacity", "shadow", "glow", "blend", "use"}
+_VECTOR_KEYS = {"fill", "stroke", "opacity", "shadow", "glow", "blend", "use"}      # anything else -> picture
 _TEXT_KEYS = _VECTOR_KEYS | {"font", "weight", "size", "letter_spacing", "line_height", "uppercase", "italic"}
 
 
@@ -180,7 +180,7 @@ def _vector_element(doc: _Doc, r: Renderer, el: dict, st: dict) -> bool:
                        + (f' stroke-opacity="{_num(paint[1])}"' if paint[1] < 1 else "") + "/>")
     else:
         strokes = _stroke_specs(st, colors)
-        if any(s["offset"] for s in strokes):
+        if any(s["offset"] or s["sides"] for s in strokes):
             return False
         under, over = [], []
         clip_id = None
@@ -259,6 +259,8 @@ def _text_element(doc: _Doc, r: Renderer, el: dict, st: dict) -> bool:
     attrs.append(f'text-anchor="{anchor}"')
     if layout.lang:
         attrs.append(f'xml:lang="{escape(layout.lang, quote=True)}"')
+    if layout.decoration != "none":
+        attrs.append(f'text-decoration="{"underline" if layout.decoration == "underline" else "line-through"}"')
     spans = []
     for (line, width), lx, base in zip(layout.lines, layout.line_x, layout.baselines):
         ax = lx + (width / 2 if anchor == "middle" else width if anchor == "end" else 0)

@@ -219,6 +219,10 @@ Aynı şeyi elle tekrar çizme; şu gereçler işi hem hızlandırır hem tutarl
 - **Yumuşak köşe (`add_rect(smoothing=0.6)`):** iOS / Figma tarzı "squircle" köşe; modern uygulama ikonu, mobil kart, buton. 0 düz çember köşe, 1 en yumuşak.
 - **Dolgu yığını (`fill: [...]`):** birden çok dolguyu alttan üste üst üste koy: gradient + çizgi dokusu + hafif renk. Ayrı şekil çizmeye gerek kalmaz.
 - **Modlar (`set_theme(modes=..., mode=...)`):** aynı kiti açık / koyu, takım renkleri ya da sezon temasıyla çiz; yalnızca `$token` kullandıysan tek satırla tüm ekran değişir. Bir canvas'a ayrı mod: `update_canvas(mode=...)`.
+- **Buzlu cam (`style.backdrop_blur`):** panelin altındaki her şey bulanıklaşır; hafif beyaz dolgu (`#ffffff@0.1`) ve ince açık kontur ekle, gölgesine `knockout: true` ver ki gölge camın içinden görünmesin.
+- **Tek kenar kontur (`stroke.sides: ["bottom"]`):** seçili sekmenin alt çizgisi, liste ayraçları, başlık altı çizgisi; ayrı ince dikdörtgen çizme.
+- **Kırpılan yazı (`max_width` + `max_lines`):** oyuncu adı, eşya adı, sohbet önizlemesi taşmasın, "..." ile bitsin. İndirimli eski fiyat için `decoration: "strikethrough"`.
+- **Sürüm (`canvas_version`):** büyük bir değişiklikten önce `save` et; iki alternatif tasarımı karşılaştırmak için ikisini de kaydet, `restore` ile geri dön.
 - **Akan yerleşim (`arrange_elements(wrap=true)`):** envanter slotları, etiketler, yetenek ikonları kutuya sığmayınca alt satıra geçer.
 - **Delik (`style.blend: "erase"`):** aynı katmanda altta ne varsa keser: panelde pencere, kartta çentik, yıldızın ortasında halka, oyma yazı. Kesilecek şeyle kesen şekli kendi katmanına koy; o zaman delik yalnızca o katmanı keser, katman stili (gölge, kontur) deliğin kenarına da uygulanır.
 - **Aynalama (`flip_x` / `flip_y`):** sol ve sağ ok, simetrik kanatlar, karşılıklı sekmeler için ikinci yarıyı çizme; kopyala ve aynala. Gölge ve ışık yönü aynalanmaz, sahnenin ışığıyla tutarlı kalır.

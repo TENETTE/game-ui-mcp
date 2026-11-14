@@ -10,7 +10,7 @@ Bir AI'ın (Claude, Cursor, VS Code Copilot... MCP destekleyen her istemci) **oy
 
 ![Gerçekçi yarış HUD'u](examples/racing_hud.png)
 
-Tasarım aracı özellikleri: boolean şekiller, yumuşatılmış köşe, dolgu yığını, satır atlayan yerleşim ve tek satırla açık / koyu mod. Aynı ekran Figma ve Penpot'ta düzenlenebilir [vektör SVG](examples/design_tools.svg) olarak da çıkıyor:
+Tasarım aracı özellikleri: boolean şekiller, yumuşatılmış köşe, dolgu yığını, satır atlayan yerleşim, buzlu cam, tek kenar kontur, "..." ile kırpılan yazı ve tek satırla açık / koyu mod. Aynı ekran Figma ve Penpot'ta düzenlenebilir [vektör SVG](examples/design_tools.svg) olarak da çıkıyor:
 
 ![Tasarım araçları](examples/design_tools.png)
 
@@ -55,9 +55,9 @@ Claude Desktop'ta dosya: Ayarlar → Developer → Edit Config. Kaydettikten son
 ## Ne yapabiliyor
 
 - **Çizim:** dikdörtgen (Figma tarzı yumuşak "squircle" köşe dahil), elips, çokgen, yay, kadran çizgisi, SVG path ve SVG içe aktarma, boolean (birleştir / çıkar / kesiştir / dışla), başka canvas'ı bileşen olarak kullanma
-- **Stil:** gradient, doku, üst üste dolgu yığını, gölge, glow, bevel, yönlü ışık, 13 karışım modlu katmanlar, AI'ın kendi yazdığı piksel formülleri (shader dolgusu)
-- **Tasarım sistemi:** renk token'ları, isimli stiller, açık / koyu / takım renkleri gibi modlar (Figma variables), satır atlayan otomatik yerleşim
-- **Yazı:** 10 gömülü font + sistem fontları; Arapça, İbranice, Hintçe, Tayca, Çince, Japonca, Korece doğru şekillenir
+- **Stil:** gradient, doku, üst üste dolgu yığını, arka plan bulanıklığı (buzlu cam), tek kenara kontur, gölge, glow, bevel, yönlü ışık, 13 karışım modlu katmanlar, AI'ın kendi yazdığı piksel formülleri (shader dolgusu)
+- **Tasarım sistemi:** renk token'ları, isimli stiller, açık / koyu / takım renkleri gibi modlar (Figma variables), satır atlayan otomatik yerleşim, isimli sürüm geçmişi
+- **Yazı:** 10 gömülü font + sistem fontları, "..." ile kırpma, altı / üstü çizili yazı; Arapça, İbranice, Hintçe, Tayca, Çince, Japonca, Korece doğru şekillenir
 - **Ekranlar:** hazır cihaz boyutları ve güvenli alanlar, kenara sabitleme, çok çözünürlük önizleme, renk körlüğü simülasyonu
 - **Durum ve veri:** hover / pressed / disabled, tek şablondan onlarca kart, dil tabloları ve sahte (pseudo) dillerle taşma testi
 - **Animasyon:** her özellik keyframe + ease ile; GIF, sprite sheet, kare dizisi ya da motorun tween'i için JSON
@@ -65,11 +65,11 @@ Claude Desktop'ta dosya: Ayarlar → Developer → Edit Config. Kaydettikten son
 
 Ayrıntılı özellik listesi, stil nesnesi, katmanlar, animasyon ve motor tabloları: **[docs/GUIDE.md](docs/GUIDE.md)**
 
-## Tool'lar (73)
+## Tool'lar (74)
 
 | Grup | Tool'lar |
 | --- | --- |
-| Canvas | `create_canvas`, `list_canvases`, `get_canvas`, `update_canvas`, `duplicate_canvas`, `delete_canvas`, `fit_canvas`, `resize_canvas` |
+| Canvas | `create_canvas`, `list_canvases`, `get_canvas`, `update_canvas`, `duplicate_canvas`, `delete_canvas`, `fit_canvas`, `resize_canvas`, `canvas_version` |
 | Katman | `create_layer`, `update_layer`, `delete_layer`, `set_layer` |
 | Çizim | `add_rect`, `add_ellipse`, `add_line`, `add_polygon`, `add_path`, `add_arc`, `add_ticks`, `add_text`, `add_image`, `add_instance`, `add_svg` |
 | Düzenleme | `update_element`, `delete_elements`, `duplicate_element`, `boolean_elements`, `move_elements`, `reorder_element`, `align_elements`, `arrange_elements`, `scatter`, `copy_elements`, `set_pin`, `batch`, `undo`, `redo` |
@@ -97,7 +97,7 @@ Canvas'lar, tema ve dışa aktarmalar `~/GameUI` klasöründe durur (oturum kapa
 
 - Karakter, illüstrasyon, fotoğraf üretmez; hazır görseli `add_image` ile yerleştirebilirsin.
 - Motor tarafı dosyalar üretiliyor ve biçimleri test ediliyor, ama Unity / Unreal / Godot / Roblox içinde henüz denenmedi.
-- 73 tool'un tanımı yaklaşık 25 bin token; tool'ları gerektikçe yükleyen istemcilerde (Claude Code) bu maliyet düşer.
+- 74 tool'un tanımı yaklaşık 25 bin token; tool'ları gerektikçe yükleyen istemcilerde (Claude Code) bu maliyet düşer.
 
 Tam liste: [docs/GUIDE.md](docs/GUIDE.md#sınırlar).
 
@@ -112,6 +112,12 @@ uv run pytest
 
 Örnek görseller `examples/demo*.py` ile yeniden üretilir.
 
+## Katkı ve güvenlik
+
+Hata bildirimi ve katkı için [CONTRIBUTING.md](CONTRIBUTING.md); güvenlik açıklarını herkese açık issue yerine [SECURITY.md](SECURITY.md)'deki yoldan bildir. Topluluk kuralları: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
 ## Lisans
 
-[MIT](LICENSE): ticari dahil özgürce kullan. Gömülü fontlar SIL Open Font License ile gelir. Bu araçla çizdiğin görseller senindir.
+[MIT](LICENSE): ticari dahil özgürce kullan. Gömülü fontlar SIL Open Font License ile gelir (her font klasöründe `OFL.txt`). Bu araçla çizdiğin görseller senindir.
+
+Figma, Penpot, Unity, Unreal Engine, Godot, Roblox, Photoshop, Illustrator, Inkscape ve adı geçen diğer ürünler kendi sahiplerinin markalarıdır. Bu proje onlarla bağlantılı değildir ve onlar tarafından desteklenmez; adlar yalnızca uyumluluğu anlatmak için geçer.

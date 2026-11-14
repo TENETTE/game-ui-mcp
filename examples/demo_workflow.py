@@ -97,7 +97,7 @@ ui.batch("hud", [
     {"op": "add_rect", "x": 64, "y": 90, "width": 372, "height": 18, "radius": 9, "fill": "#000@0.5", "group": "status", "id": "hp_track"},
     {"op": "add_rect", "x": 64, "y": 90, "width": 280, "height": 18, "radius": 9, "clip": "hp_track", "group": "status",
      "fill": {"type": "linear", "angle": 0, "stops": ["#fb7185", "#e11d48"]}},
-    {"op": "add_text", "text": "MUSTAFA  ·  LV 27", "x": 64, "y": 58, "size": 20, "font": "Rajdhani", "weight": 700,
+    {"op": "add_text", "text": "NOVA  ·  LV 27", "x": 64, "y": 58, "size": 20, "font": "Rajdhani", "weight": 700,
      "color": "$ink", "group": "status"},
     {"op": "add_ellipse", "cx": 1760, "cy": 170, "rx": 128, "fill": {"type": "grid", "color": "$violet@0.3", "color2": "#0a0912", "size": 24},
      "stroke": [{"color": "#ffffff@0.25", "width": 2}], "group": "map"},

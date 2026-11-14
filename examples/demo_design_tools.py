@@ -25,9 +25,10 @@ ui.set_theme(
 
 
 def screen(name: str) -> None:
-    ui.create_canvas(name, 860, 330, background="$bg")
-    for i, title in enumerate(("boolean", "smoothing + fills", "wrap")):
-        ui.add_text(name, title, x=40 + i * 280, y=34, style="caption")
+    ui.create_canvas(name, 860, 620, background="$bg")
+    for i, title in enumerate(("boolean", "smoothing + fills", "wrap", "background blur", "side strokes",
+                               "truncate + decoration")):
+        ui.add_text(name, title, x=40 + (i % 3) * 280, y=34 + (i // 3) * 310, style="caption")
 
     # boolean: a crescent badge (subtract) and a keyhole (union) - one outline each, stroke follows the cut
     ui.add_ellipse(name, 100, 150, 70, id="moon")
@@ -59,6 +60,37 @@ def screen(name: str) -> None:
                     style={"fill": "$bg", "stroke": {"color": "$accent@0.8" if i < 3 else "$muted@0.4", "width": 2}})
     ui.arrange_elements(name, group="slots", container="tray", gap=10, padding=14, wrap=True, hug=True,
                         align="start")
+
+    row2 = len(ui.store().get(name)["elements"])
+    # frosted glass: colourful blobs behind, a panel that blurs them
+    for cx, cy, r, col in ((90, 400, 50, "$accent"), (170, 450, 42, "$gold"), (120, 500, 34, "$accent2")):
+        ui.add_ellipse(name, cx, cy, r, fill=col)
+    ui.add_rect(name, 60, 380, 170, 120, radius=20, smoothing=0.6, id="glass",
+                style={"fill": "#ffffff@0.12", "backdrop_blur": 18,
+                       "stroke": {"color": "#ffffff@0.35", "width": 1},
+                       "shadow": {"blur": 20, "dy": 8, "knockout": True}})
+    ui.add_text(name, "GLASS", x=145, y=440, size=22, weight=800, anchor="center", letter_spacing=3,
+                style={"fill": "#ffffff"})
+
+    # tabs: one stroke side only
+    for i, label in enumerate(("Gear", "Skills", "Map")):
+        on = i == 0
+        ui.add_rect(name, 320 + i * 75, 400, 70, 44, id=f"tab{i}",
+                    style={"fill": "$panel" if on else "none",
+                           "stroke": {"color": "$accent" if on else "$muted@0.3", "width": 3 if on else 1,
+                                      "sides": ["bottom"]}})
+        ui.add_text(name, label, x=355 + i * 75, y=422, size=15, weight=700 if on else 500, anchor="center",
+                    style={"fill": "$ink" if on else "$muted"})
+
+    # truncated names, a struck-through old price
+    ui.add_rect(name, 600, 380, 230, 140, radius=14, smoothing=0.6, style={"fill": "$panel"})
+    ui.add_text(name, "Lady Seraphina of the Eternal Ember Throne", x=618, y=398, size=17, weight=700,
+                max_width=194, max_lines=1, style={"fill": "$ink"})
+    ui.add_text(name, "A blade forged in starfire, said to cut through shadow itself and the doubts of "
+                "whoever holds it.", x=618, y=428, size=13, max_width=194, max_lines=2, style={"fill": "$muted"})
+    ui.add_text(name, "1200", x=618, y=488, size=15, decoration="strikethrough", style={"fill": "$muted"})
+    ui.add_text(name, "900", x=668, y=484, size=20, weight=800, style={"fill": "$gold"})
+    ui.move_elements(name, ids=[e["id"] for e in ui.store().get(name)["elements"][row2:]], dx=0, dy=40)
 
 
 screen("dark")
