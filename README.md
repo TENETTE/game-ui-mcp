@@ -10,6 +10,10 @@ Bir AI'ın (Claude, Cursor, VS Code Copilot... MCP destekleyen her istemci) **oy
 
 ![Gerçekçi yarış HUD'u](examples/racing_hud.png)
 
+Tasarım aracı özellikleri: boolean şekiller, yumuşatılmış köşe, dolgu yığını, satır atlayan yerleşim ve tek satırla açık / koyu mod. Aynı ekran Figma ve Penpot'ta düzenlenebilir [vektör SVG](examples/design_tools.svg) olarak da çıkıyor:
+
+![Tasarım araçları](examples/design_tools.png)
+
 | Buton girişi + parlama | Devir saati | Menü girişi ve seçim |
 | --- | --- | --- |
 | ![Buton animasyonu](examples/anim_button.gif) | ![Gösterge animasyonu](examples/anim_gauge.gif) | ![Menü animasyonu](examples/anim_menu.gif) |
@@ -50,30 +54,31 @@ Claude Desktop'ta dosya: Ayarlar → Developer → Edit Config. Kaydettikten son
 
 ## Ne yapabiliyor
 
-- **Çizim:** dikdörtgen, elips, çokgen, yay, kadran çizgisi, SVG path ve SVG içe aktarma, başka canvas'ı bileşen olarak kullanma
-- **Stil:** gradient, doku, gölge, glow, bevel, yönlü ışık, 13 karışım modlu katmanlar, AI'ın kendi yazdığı piksel formülleri (shader dolgusu)
+- **Çizim:** dikdörtgen (Figma tarzı yumuşak "squircle" köşe dahil), elips, çokgen, yay, kadran çizgisi, SVG path ve SVG içe aktarma, boolean (birleştir / çıkar / kesiştir / dışla), başka canvas'ı bileşen olarak kullanma
+- **Stil:** gradient, doku, üst üste dolgu yığını, gölge, glow, bevel, yönlü ışık, 13 karışım modlu katmanlar, AI'ın kendi yazdığı piksel formülleri (shader dolgusu)
+- **Tasarım sistemi:** renk token'ları, isimli stiller, açık / koyu / takım renkleri gibi modlar (Figma variables), satır atlayan otomatik yerleşim
 - **Yazı:** 10 gömülü font + sistem fontları; Arapça, İbranice, Hintçe, Tayca, Çince, Japonca, Korece doğru şekillenir
 - **Ekranlar:** hazır cihaz boyutları ve güvenli alanlar, kenara sabitleme, çok çözünürlük önizleme, renk körlüğü simülasyonu
 - **Durum ve veri:** hover / pressed / disabled, tek şablondan onlarca kart, dil tabloları ve sahte (pseudo) dillerle taşma testi
 - **Animasyon:** her özellik keyframe + ease ile; GIF, sprite sheet, kare dizisi ya da motorun tween'i için JSON
-- **Teslim:** PNG / WebP / JPG, katman katman (PNG, JPG, WebP ya da katmanlı SVG), PSD, atlas, bitmap font, uygulama ikonu, tıklanabilir HTML prototip, motor sahneleri
+- **Teslim:** Figma / Penpot'ta düzenlenebilir vektör SVG, PNG / WebP / JPG, katman katman (PNG, JPG, WebP ya da katmanlı SVG), PSD, atlas, bitmap font, uygulama ikonu, tıklanabilir HTML prototip, motor sahneleri
 
 Ayrıntılı özellik listesi, stil nesnesi, katmanlar, animasyon ve motor tabloları: **[docs/GUIDE.md](docs/GUIDE.md)**
 
-## Tool'lar (71)
+## Tool'lar (73)
 
 | Grup | Tool'lar |
 | --- | --- |
 | Canvas | `create_canvas`, `list_canvases`, `get_canvas`, `update_canvas`, `duplicate_canvas`, `delete_canvas`, `fit_canvas`, `resize_canvas` |
 | Katman | `create_layer`, `update_layer`, `delete_layer`, `set_layer` |
 | Çizim | `add_rect`, `add_ellipse`, `add_line`, `add_polygon`, `add_path`, `add_arc`, `add_ticks`, `add_text`, `add_image`, `add_instance`, `add_svg` |
-| Düzenleme | `update_element`, `delete_elements`, `duplicate_element`, `move_elements`, `reorder_element`, `align_elements`, `arrange_elements`, `scatter`, `copy_elements`, `set_pin`, `batch`, `undo`, `redo` |
+| Düzenleme | `update_element`, `delete_elements`, `duplicate_element`, `boolean_elements`, `move_elements`, `reorder_element`, `align_elements`, `arrange_elements`, `scatter`, `copy_elements`, `set_pin`, `batch`, `undo`, `redo` |
 | Durum, veri, dil | `set_state`, `delete_state`, `generate_from_template`, `set_strings`, `get_strings` |
 | Denetim | `review_canvas`, `inspect_pixels`, `view_image`, `preview_nine_slice` |
 | Animasyon | `create_animation`, `set_keyframes`, `delete_keyframes`, `get_animations`, `delete_animation`, `preview_animation`, `export_animation` |
 | Tema ve bilgi | `set_theme`, `get_theme`, `list_fonts`, `measure_text` |
 | Önizleme | `preview`, `preview_resolutions`, `contact_sheet` |
-| Dışa aktarma | `export_png`, `export_asset`, `export_layers`, `export_psd`, `export_atlas`, `export_bitmap_font`, `write_engine_helpers` |
+| Dışa aktarma | `export_png`, `export_svg`, `export_asset`, `export_layers`, `export_psd`, `export_atlas`, `export_bitmap_font`, `write_engine_helpers` |
 | Teslim | `export_spec`, `export_theme`, `set_link`, `export_prototype`, `export_screen` |
 
 Bakmaya yarayan tool'lar (`preview`, `get_*`, `review_canvas`...) salt okunur, `delete_*` ise yıkıcı olarak işaretli; istemciler buna göre onay sorar. Hatalar AI'a neyin yanlış olduğunu ve nasıl düzelteceğini söyler.
@@ -92,7 +97,7 @@ Canvas'lar, tema ve dışa aktarmalar `~/GameUI` klasöründe durur (oturum kapa
 
 - Karakter, illüstrasyon, fotoğraf üretmez; hazır görseli `add_image` ile yerleştirebilirsin.
 - Motor tarafı dosyalar üretiliyor ve biçimleri test ediliyor, ama Unity / Unreal / Godot / Roblox içinde henüz denenmedi.
-- 71 tool'un tanımı yaklaşık 24 bin token; tool'ları gerektikçe yükleyen istemcilerde (Claude Code) bu maliyet düşer.
+- 73 tool'un tanımı yaklaşık 25 bin token; tool'ları gerektikçe yükleyen istemcilerde (Claude Code) bu maliyet düşer.
 
 Tam liste: [docs/GUIDE.md](docs/GUIDE.md#sınırlar).
 

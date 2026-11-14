@@ -62,6 +62,7 @@ Fill: a color, or a gradient/pattern object:
   {"type":"clouds","color":"#fff@0.3","color2":"transparent","size":48,"octaves":4,"seed":1,"contrast":1.5}
   {"type":"image","path":"C:/textures/metal.png","fit":"cover"|"stretch"|"tile","scale":1}   (your own texture)
   Gradients take "space":"oklab" for vivid, even blends between distant hues (default "srgb").
+  A list of fills stacks them bottom to top (Figma fill stack): [gradient, {"type":"stripes",...}, "#fff@0.1"].
   {"type":"shader","code":"...","params":{...}} - your own per-pixel formula when no preset fits (plasma,
     energy, hologram scanlines, marble, wood, rust, ripples, scales, cracks, warped patterns...). Write plain
     statements that end by assigning r, g, b (0..1) and optionally a. Inputs: x, y (units from the box's
@@ -87,6 +88,12 @@ Style object (every key optional; `style` may also be a theme style name, or {"u
   mask: a fill spec whose alpha fades the element out (e.g. a linear gradient from opaque to "#000@0"),
   adjust {brightness, contrast, saturation: -1..1, hue: degrees, tint: color, invert}.
   shadow / glow / inner_shadow / inner_glow also accept a list for stacked effects.
+
+Shapes like a design tool: boolean_elements merges / subtracts / intersects / excludes filled shapes into one
+exact vector outline (strokes and shadows follow the cut; prefer it to blend "erase" for holes); add_rect
+smoothing 0..1 gives Figma-style smoothed "squircle" corners; arrange_elements(wrap=true) flows items onto new
+lines; set_theme(modes={...}, mode=...) switches every $token between light / dark / team / seasonal sets.
+export_svg writes an editable vector SVG for Figma, Penpot, Illustrator and the web.
 
 Layers (create_layer): a canvas is a stack of layers, bottom to top; new elements go to the active layer.
 A layer has its own opacity, blend mode and style - layer styles (shadow, glow, stroke, light, blur, adjust,
@@ -411,7 +418,7 @@ def _layer_list(c: dict) -> list[dict]:
 def update_canvas(canvas: str, name: str | None = None, width: int | None = None, height: int | None = None,
                   background: str | dict | None = None, clear_background: bool = False,
                   safe_area: list[float] | None = None, vars: dict | None = None, colors: dict | None = None,
-                  language: str | None = None, pixel_art: bool | dict | None = None):
+                  language: str | None = None, pixel_art: bool | dict | None = None, mode: str | None = None):
     """Change canvas settings. Elements keep their coordinates when width/height change (use
     resize_canvas to move pinned elements with the edges).
 
@@ -423,9 +430,17 @@ def update_canvas(canvas: str, name: str | None = None, width: int | None = None
     language: default string-table language for this canvas (see set_strings).
     pixel_art: true or {"palette": [...colors], "max_colors": 16, "alpha_threshold": 128} - renders without
       anti-aliasing at 1x, snaps alpha and colours, and scales up by whole pixels. false turns it off.
+    mode: theme variable mode for this canvas only (see set_theme modes); "" follows the theme's mode.
     """
     st = store()
     c = st.get(canvas)
+    if mode is not None:
+        if mode and mode not in (st.theme.get("modes") or {}):
+            raise ValueError(f"no mode '{mode}'. Modes: {', '.join(sorted(st.theme.get('modes') or {})) or '(none)'}")
+        if mode:
+            c["mode"] = mode
+        else:
+            c.pop("mode", None)
     changes: dict = {"name": name, "width": width, "height": height}
     if clear_background:
         changes["background"] = None
@@ -599,11 +614,13 @@ def add_rect(canvas: str, x: float, y: float, width: float, height: float, radiu
              corner: str = "round", fill: str | dict | None = None, stroke: str | dict | None = None,
              style: str | dict | None = None, rotation: float = 0, skew: float = 0,
              origin: list[float] | None = None, id: str | None = None,
-             group: str | None = None, clip: str | None = None, layer: str | None = None):
+             group: str | None = None, clip: str | None = None, layer: str | None = None,
+             smoothing: float = 0):
     """Add a rectangle (panels, buttons, bars, slots, dividers).
 
     x, y: top-left corner. radius: one number or [top-left, top-right, bottom-right, bottom-left].
     corner: "round" (default) or "cut" (chamfered corners, sci-fi / military look).
+    smoothing: 0..1 corner smoothing (Figma-style "squircle"; 0.6 = iOS app-icon look) for round corners.
     fill / stroke: shortcuts for style.fill / style.stroke (see server instructions for the style object).
     skew: slant in degrees (top edge moves right) -> parallelogram tabs and banners, racing-style.
     rotation turns it clockwise around origin [x, y] (default: its centre).
@@ -613,7 +630,7 @@ def add_rect(canvas: str, x: float, y: float, width: float, height: float, radiu
     return _add(canvas, "rect", dict(x=x, y=y, width=width, height=height, radius=radius or None,
                                      corner=None if corner == "round" else corner, fill=fill, stroke=stroke,
                                      style=style, rotation=rotation or None, skew=skew or None, origin=origin,
-                                     id=id, group=group, clip=clip, layer=layer))
+                                     id=id, group=group, clip=clip, layer=layer, smoothing=smoothing or None))
 
 
 @tool
@@ -1010,6 +1027,58 @@ def delete_elements(canvas: str, ids: list[str] | None = None, group: str | None
 
 
 @tool
+def boolean_elements(canvas: str, ids: list[str], op: str = "union", id: str | None = None,
+                     style: str | dict | None = None, keep_originals: bool = False):
+    """Combine filled shapes into one exact vector shape (Figma / Penpot boolean groups).
+
+    op: "union" (merge), "subtract" (cut every later shape out of the first), "intersect" (keep only the
+    overlap) or "exclude" (keep what is covered an odd number of times). ids: rects, ellipses, polygons,
+    paths or other booleans, first = the base shape. The result takes the first shape's style, layer and
+    group unless `style` is given; its stroke, shadow and light follow the combined outline (unlike
+    blend "erase", which only hides pixels). The children are kept inside the element, so the result stays
+    editable: update_element(id, {"op": "intersect"}) switches the operation. keep_originals leaves the
+    source shapes on the canvas too. Lines, arcs, ticks, text and images cannot be combined.
+    """
+    st = store()
+    c = st.get(canvas)
+    st.checkpoint(c)
+    try:
+        el, warnings = _boolean(c, ids, op, id, style, keep_originals)
+    except Exception:
+        st.drop_checkpoint(c)
+        raise
+    st.save_canvas(c)
+    return _summary(st, c, el, warnings)
+
+
+def _boolean(c: dict, ids, op: str, new_id: str | None, style, keep_originals: bool):
+    """Replace shapes by one boolean element (no undo checkpoint: the caller owns it)."""
+    from .render import BOOLEAN_OPS
+    import copy
+    st = store()
+    ids = _maybe_json(ids)
+    if not isinstance(ids, list) or len(ids) < 2:
+        raise ValueError("ids must list at least 2 shapes, base shape first")
+    op = str(op).lower()
+    if op not in BOOLEAN_OPS:
+        raise ValueError(f"op must be one of {', '.join(BOOLEAN_OPS)}")
+    children = [st.find(c, str(i)) for i in ids]
+    if len({ch["id"] for ch in children}) != len(children):
+        raise ValueError("ids contains the same shape twice")
+    first = children[0]
+    positions = [c["elements"].index(ch) for ch in children]
+    props = {"op": op, "children": [copy.deepcopy(ch) for ch in children], "id": new_id,
+             "group": first.get("group"), "layer": first.get("layer"),
+             "style": _maybe_json(style) if style is not None else first.get("style")}
+    if not keep_originals:
+        c["elements"] = [e for e in c["elements"] if e not in children]
+    el, warnings = st.add_element(c, "boolean", props, checkpoint=False)
+    c["elements"].remove(el)
+    c["elements"].insert(min(positions) if not keep_originals else max(positions) + 1, el)
+    return el, warnings
+
+
+@tool
 def duplicate_element(canvas: str, id: str, dx: float = 0, dy: float = 0, new_id: str | None = None,
                       props: dict | None = None, count: int = 1, rotate: float = 0,
                       pivot: list[float] | None = None):
@@ -1138,7 +1207,8 @@ def batch(canvas: str, operations: list[dict]):
     Each operation is {"op": "<tool name>", ...the same arguments that tool takes, without canvas}.
     Supported ops: add_rect, add_ellipse, add_line, add_polygon, add_path, add_arc, add_ticks, add_text,
     add_image, add_instance, add_svg, create_layer, update_layer, set_layer, create_animation,
-    set_keyframes, update_element, delete_elements, move_elements, reorder_element, duplicate_element.
+    set_keyframes, update_element, delete_elements, move_elements, reorder_element, duplicate_element,
+    boolean_elements (its op name goes in "operation", since "op" names the batch op).
     Add ops also accept any extra element property directly (flip_x, scale, skew, fill_rule, visible...).
     Give elements explicit "id"s so later operations (clip, update, reorder) can refer to them.
     The batch is atomic: if any operation fails nothing is changed, and the error names the failing op.
@@ -1223,6 +1293,10 @@ def batch(canvas: str, operations: list[dict]):
                     st.get(op_args["source"])
                     op_args["source"] = slugify(op_args["source"])
                     el, warnings = st.add_element(c, "instance", _prepare("instance", op_args), checkpoint=False)
+                    results.append(_summary(st, c, el, warnings))
+                elif op == "boolean_elements":
+                    el, warnings = _boolean(c, op_args["ids"], op_args.get("operation", "union"),
+                                            op_args.get("id"), op_args.get("style"), op_args.get("keep_originals", False))
                     results.append(_summary(st, c, el, warnings))
                 elif op == "add_svg":
                     results.append(_svg_elements(c, op_args["svg"], op_args.get("x", 0), op_args.get("y", 0),
@@ -1388,6 +1462,20 @@ def _pose(c: dict, anim: dict, t: float, scale: float, include_background: bool 
     return r.render(include_background=include_background, only=only), warnings + r.warnings
 
 
+def _poses(c: dict, anim: dict, times: list[float], scale: float, include_background: bool = True,
+           only: set[str] | None = None) -> tuple[list[PILImage.Image], list[str]]:
+    """Render many animation frames at once: Pillow and numpy release the GIL, so threads use every core."""
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+    workers = max(1, min(len(times), os.cpu_count() or 1, 8))
+    if workers == 1:
+        done = [_pose(c, anim, t, scale, include_background, only) for t in times]
+    else:
+        with ThreadPoolExecutor(workers) as pool:
+            done = list(pool.map(lambda t: _pose(c, anim, t, scale, include_background, only), times))
+    return [img for img, _ in done], [w for _, warns in done for w in warns]
+
+
 @tool
 def preview_animation(canvas: str, animation: str, frames: int = 8, columns: int = 4, cell: int = 320,
                       background: str = "checker", region: list[float] | None = None,
@@ -1426,10 +1514,8 @@ def preview_animation(canvas: str, animation: str, frames: int = 8, columns: int
     sheet = PILImage.new("RGBA", (columns * (fw + pad) + pad, rows * (fh + label_h + pad) + pad), (18, 18, 22, 255))
     draw = ImageDraw.Draw(sheet)
     font = _label_font(12)
-    warnings: list[str] = []
-    for i, t in enumerate(moments):
-        img, warn = _pose(c, anim, t, scale)
-        warnings += warn
+    frames_img, warnings = _poses(c, anim, moments, scale)
+    for i, (t, img) in enumerate(zip(moments, frames_img)):
         if region:
             img = img.crop((int(round(rx * scale)), int(round(ry * scale)),
                             int(round(rx * scale)) + fw, int(round(ry * scale)) + fh))
@@ -1496,12 +1582,9 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
     times = anim_mod.frame_times(anim, fps)
     rate = float(fps or anim.get("fps", 30))
     only = {e["id"] for e in st.select(c, ids, group)} if (ids or group) else None
-    images: list[PILImage.Image] = []
-    warnings: list[str] = []
-    for t in times:
-        img, warn = _pose(c, anim, t, float(scale), include_background=False, only=only)
-        warnings += warn
-        images.append(img)
+    own_bg = c.get("background") if fmt in ("gif", "apng", "webp") and not background else None
+    # animated preview files show the canvas as designed, background included
+    images, warnings = _poses(c, anim, times, float(scale), include_background=bool(own_bg), only=only)
     result: dict = {"animation": key, "frames": len(images), "fps": rate, "duration": anim["duration"],
                     "loop": bool(anim.get("loop"))}
     offset = (0, 0)
@@ -1512,11 +1595,7 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
             box = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
             images = [im.crop(box) for im in images]
             offset = (box[0], box[1])
-    own_bg = c.get("background") if fmt in ("gif", "apng", "webp") and not background else None
-    if own_bg:
-        # animated preview files show the canvas as designed, background included
-        images = [_pose(c, anim, t, float(scale), include_background=True, only=only)[0] for t in times]
-    elif background or fmt == "gif":
+    if not own_bg and (background or fmt == "gif"):
         flat = []
         for im in images:
             bg = backdrop(im.size, background or "dark", st.theme.get("colors", {}))
@@ -1589,9 +1668,15 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
 # --------------------------------------------------------------------------- theme / info tools
 
 @tool
-def set_theme(colors: dict | None = None, styles: dict | None = None, replace: bool = False):
+def set_theme(colors: dict | None = None, styles: dict | None = None, replace: bool = False,
+              modes: dict | None = None, mode: str | None = None):
     """Define the design tokens shared by every canvas, so a whole UI kit stays consistent.
 
+    modes: Figma-style variable modes - named sets of colour overrides, e.g.
+      {"light": {"bg": "#f5f5f7", "text": "#111"}, "colorblind": {"danger": "#ff8800"}}. mode: the active one
+      for every canvas ("" = base colours); one canvas can pick its own with update_canvas(mode=...).
+      Every "$token" in fills, strokes, effects and theme styles follows the mode, so one kit renders as
+      dark, light, team colours or seasonal skins; export_theme writes all modes.
     colors: {"bg": "#0d0b14", "primary": "#8b5cf6", ...} -> use anywhere as "$primary" or "$primary@0.5".
     styles: named style objects, usable as style="panel" or {"use": "panel", ...overrides}. A style can
       hold any style key plus text defaults (font, weight, size, letter_spacing, uppercase), e.g.
@@ -1601,8 +1686,9 @@ def set_theme(colors: dict | None = None, styles: dict | None = None, replace: b
     Changing the theme restyles every element that references it.
     """
     st = store()
-    st.set_theme(_maybe_json(colors), _maybe_json(styles), replace)
-    return {"colors": st.theme["colors"], "styles": sorted(st.theme["styles"])}
+    st.set_theme(_maybe_json(colors), _maybe_json(styles), replace, _maybe_json(modes), mode)
+    return {"colors": st.theme["colors"], "styles": sorted(st.theme["styles"]),
+            "modes": sorted(st.theme.get("modes") or {}), "mode": st.theme.get("mode")}
 
 
 @tool
@@ -2169,6 +2255,34 @@ def _render_export(c: dict, scale: float, include_background: bool, ids: list[st
         only = {e["id"] for e in st.select(c, ids, group)}
     r = st.renderer(c, scale, state=state, language=language)
     return r.render(include_background=include_background, only=only), r.warnings
+
+
+@tool
+def export_svg(canvas: str, path: str | None = None, include_background: bool = True, state: str | None = None,
+               language: str | None = None):
+    """Save the canvas as an editable vector SVG for Figma, Penpot, Illustrator, Inkscape or the web.
+
+    Shapes (rect, ellipse, polygon, path, boolean, line, arc, ticks) keep their outlines, solid / linear /
+    radial fills, fill stacks, strokes (inside / center / outside, dashes) and drop shadows / glows; text
+    stays real, editable text (same font names - install them where the SVG is opened). Layers become
+    named groups. Whatever SVG cannot show the same way (shader / pattern fills, light, inner effects,
+    blur, special blends, clipped or styled layers, images, arc text) is embedded as a picture of just that
+    element, so the SVG still looks like the PNG. The result lists which ids stayed vector.
+    """
+    from . import svgexport
+    st = store()
+    c = st.get(canvas)
+    st.require_glyphs(c, language)
+    r = st.renderer(c, 1.0, state=state, language=language)
+    svg, report = svgexport.canvas_svg(r, include_background)
+    out = _out_path(path, f"{c['id']}.svg", suffixes=(".svg",))
+    out.write_text(svg, encoding="utf-8")
+    result: dict = {"file": str(out), "vector": report["vector"], "embedded_as_image": report["raster"]}
+    if report["notes"]:
+        result["notes"] = report["notes"]
+    if r.warnings:
+        result["warnings"] = sorted(set(r.warnings))
+    return result
 
 
 @tool

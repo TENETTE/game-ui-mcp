@@ -303,11 +303,51 @@ def generate_from_template(template: str, rows: list[dict], name_prefix: str | N
 
 # --------------------------------------------------------------------------- arranging / scattering
 
+def _wrap_rows(r, elements, mode, gap, cont_el, padding, max_width, origin, align, justify):
+    """Greedy line breaking for wrap=true, then each line laid out as a row."""
+    if mode != "row":
+        raise ValueError("wrap works with mode='row' (items flow left to right, then onto the next line)")
+    if not elements:
+        raise ValueError("nothing to arrange - pass element ids or a group that has elements")
+    if cont_el is not None:
+        frame = r.element_box(cont_el)
+        limit = frame[2] - frame[0] - 2 * padding
+        x0, y0 = frame[0] + padding, frame[1] + padding
+    elif max_width:
+        limit = float(max_width)
+        first = r.element_box(elements[0])
+        x0, y0 = (float(origin[0]), float(origin[1])) if origin else (first[0], first[1])
+    else:
+        raise ValueError("wrap needs a container or max_width to know where lines break")
+    lines, cur, used = [], [], 0.0
+    for el in elements:
+        b = r.element_box(el)
+        w = b[2] - b[0]
+        if cur and used + gap + w > limit + 1e-6:
+            lines.append(cur)
+            cur, used = [], 0.0
+        used = w if not cur else used + gap + w
+        cur.append(el)
+    lines.append(cur)
+    moves, content, y = [], None, y0
+    share = {"center": 0.5, "end": 1.0}.get(justify, 0.0)      # shortcut: space-between wraps like start
+    for line in lines:
+        lc, lm = lay.arrange(r, line, "row", gap, None, (x0, y), None, 0.0, align, "start")
+        shift = max(0.0, limit - (lc[2] - lc[0])) * share
+        moves += [(e, dx + shift, dy) for e, dx, dy in lm]
+        lc = (lc[0] + shift, lc[1], lc[2] + shift, lc[3])
+        content = lc if content is None else (min(content[0], lc[0]), min(content[1], lc[1]),
+                                              max(content[2], lc[2]), max(content[3], lc[3]))
+        y = lc[3] + gap
+    return content, moves
+
+
 @tool
 def arrange_elements(canvas: str, mode: str = "row", ids: list[str] | None = None, group: str | None = None,
                      gap: float = 8, columns: int | None = None, origin: list[float] | None = None,
                      container: str | None = None, padding: float = 0, align: str = "center",
-                     justify: str = "start", hug: bool = False):
+                     justify: str = "start", hug: bool = False, wrap: bool = False,
+                     max_width: float | None = None):
     """Lay elements out in a row, column or grid (like auto-layout), measured by their real bounds.
 
     ids are placed in the order given (or a group in draw order). gap: space between items.
@@ -316,6 +356,9 @@ def arrange_elements(canvas: str, mode: str = "row", ids: list[str] | None = Non
     inside, with `padding`; justify "start" | "center" | "end" | "space-between" along the main axis;
     align "start" | "center" | "end" across it. hug=true resizes the container rect to wrap the content
     plus padding (a button growing with its label, a list panel growing with its rows).
+    wrap=true (mode "row"): items flow onto a new line when the next one would pass the container's inner
+    width (or max_width without a container), like Figma auto-layout wrap / CSS flex-wrap - inventory
+    slots, tag chips, skill icons. Lines are `gap` apart; justify start / center / end aligns each line.
     To move multi-part widgets as units, give each widget a group and arrange instances or use offsets.
     """
     st = store()
@@ -337,8 +380,13 @@ def arrange_elements(canvas: str, mode: str = "row", ids: list[str] | None = Non
         box = None                                    # lay out freely from the container's corner, then wrap
         ob = r.element_box(cont_el)
         origin = [ob[0] + padding, ob[1] + padding]
-    content, moves = lay.arrange(r, elements, mode, float(gap), columns,
-                                 tuple(_maybe_json(origin)) if origin else None, box, float(padding), align, justify)
+    if wrap:
+        content, moves = _wrap_rows(r, elements, mode, float(gap), cont_el, float(padding), max_width,
+                                    _maybe_json(origin), align, justify)
+    else:
+        content, moves = lay.arrange(r, elements, mode, float(gap), columns,
+                                     tuple(_maybe_json(origin)) if origin else None, box, float(padding), align,
+                                     justify)
     st.checkpoint(c)
     for el, dx, dy in moves:
         st.shift(el, dx, dy)

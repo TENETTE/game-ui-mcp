@@ -13,7 +13,8 @@ from typing import Any
 from .fonts import FontLibrary
 from .render import Renderer, shift_element
 
-ELEMENT_TYPES = ("rect", "ellipse", "polygon", "line", "path", "text", "image", "arc", "ticks", "instance")
+ELEMENT_TYPES = ("rect", "ellipse", "polygon", "line", "path", "text", "image", "arc", "ticks", "instance",
+                 "boolean")
 MAX_CANVAS = 8192
 MAX_UNDO = 40
 
@@ -62,7 +63,8 @@ class Store:
         if theme_file.is_file():
             try:
                 data = json.loads(theme_file.read_text(encoding="utf-8"))
-                self.theme = {"colors": dict(data.get("colors", {})), "styles": dict(data.get("styles", {}))}
+                self.theme = {"colors": dict(data.get("colors", {})), "styles": dict(data.get("styles", {})),
+                              "modes": dict(data.get("modes", {})), "mode": data.get("mode")}
             except Exception:
                 pass
         for path in sorted(self.projects_dir.glob("*.json")):
@@ -708,10 +710,32 @@ class Store:
 
     # ---- theme
 
-    def set_theme(self, colors: dict | None, styles: dict | None, replace: bool) -> None:
+    def set_theme(self, colors: dict | None, styles: dict | None, replace: bool,
+                  modes: dict | None = None, mode: str | None = None) -> None:
         old = copy.deepcopy(self.theme)
         if replace:
             self.theme = {"colors": {}, "styles": {}}
+        theme_modes = self.theme.setdefault("modes", {})
+        for name, values in (modes or {}).items():
+            if values is None:
+                theme_modes.pop(name, None)
+                continue
+            if not isinstance(values, dict):
+                self.theme = old
+                raise ValueError(f"mode '{name}' must be an object of colour overrides, e.g. {{\"bg\": \"#ffffff\"}}")
+            merged = dict(theme_modes.get(name) or {})
+            for key, value in values.items():
+                if value is None:
+                    merged.pop(key, None)
+                else:
+                    merged[key] = value
+            theme_modes[name] = merged
+        if mode is not None:
+            if mode and mode not in theme_modes:
+                self.theme = old
+                raise ValueError(f"no mode '{mode}'. Modes: {', '.join(sorted(theme_modes)) or '(none)'} - "
+                                 "define it with modes={...} first; mode='' goes back to the base colours")
+            self.theme["mode"] = mode or None
         for key, value in (colors or {}).items():
             if value is None:
                 self.theme["colors"].pop(key, None)
@@ -730,6 +754,13 @@ class Store:
             from .render import resolve_style
             for value in self.theme["colors"].values():
                 parse_color(value, self.theme["colors"])
+            for name, values in self.theme.get("modes", {}).items():
+                palette = {**self.theme["colors"], **values}
+                for key, value in values.items():
+                    try:
+                        parse_color(value, palette)
+                    except ValueError as exc:
+                        raise ValueError(f"mode '{name}', colour '{key}': {exc}") from exc
             probe = {"id": "theme_probe", "width": 16, "height": 16, "background": None, "elements": []}
             for name in self.theme["styles"]:
                 st = resolve_style(name, self.theme)

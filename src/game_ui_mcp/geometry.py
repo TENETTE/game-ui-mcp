@@ -42,9 +42,13 @@ def normalize_radii(radius, w: float, h: float) -> list[float]:
     return [min(r, limit) for r in radii]
 
 
-def rect_path(x: float, y: float, w: float, h: float, radius=0, corner: str = "round", res: float = 4.0) -> list[Point]:
-    """Rectangle outline. corner='round' gives arcs, corner='cut' gives chamfered corners."""
+def rect_path(x: float, y: float, w: float, h: float, radius=0, corner: str = "round", res: float = 4.0,
+              smoothing: float = 0.0) -> list[Point]:
+    """Rectangle outline. corner='round' gives arcs, corner='cut' gives chamfered corners.
+    smoothing 0..1 (round corners): continuous-curvature "squircle" corners like Figma's corner smoothing
+    (0.6 = iOS look) - the curve starts further along each edge and eases into it instead of a circle."""
     tl, tr, br, bl = normalize_radii(radius, w, h)
+    s = max(0.0, min(1.0, float(smoothing or 0)))
     pts: list[Point] = []
     if corner == "cut":
         for (px, py, r, dx0, dy0, dx1, dy1) in (
@@ -66,7 +70,15 @@ def rect_path(x: float, y: float, w: float, h: float, radius=0, corner: str = "r
         (x + bl, y + h - bl, bl, 0.5 * math.pi, math.pi, (x, y + h)),
     )
     for cx, cy, r, a0, a1, sharp in corners:
-        if r > 0:
+        if r > 0 and s > 0:
+            e = min(r * (1 + s), min(w, h) / 2.0)            # the smoothed corner reaches further along the edges
+            n = 2.0 + 2.0 * s                                 # superellipse exponent: 2 = circle, higher = eased
+            ccx = sharp[0] + math.copysign(e, cx - sharp[0])
+            ccy = sharp[1] + math.copysign(e, cy - sharp[1])
+            for px_, py_ in _arc_points(0, 0, 1, 1, a0, a1, res * e):
+                pts.append((ccx + e * math.copysign(abs(px_) ** (2 / n), px_),
+                            ccy + e * math.copysign(abs(py_) ** (2 / n), py_)))
+        elif r > 0:
             pts.extend(_arc_points(cx, cy, r, r, a0, a1, res))
         else:
             pts.append(sharp)

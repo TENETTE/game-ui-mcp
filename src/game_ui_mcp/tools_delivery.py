@@ -262,6 +262,8 @@ def export_theme(format: str = "json", path: str | None = None):
         raise ValueError(f"format must be one of {', '.join(ext)}")
     colors = st.theme.get("colors", {})
     rgba = {k: parse_color(v, colors) for k, v in colors.items()}
+    modes = {name: {k: parse_color(v, {**colors, **vals}) for k, v in vals.items()}
+             for name, vals in (st.theme.get("modes") or {}).items()}
     text_styles = {}
     for name in st.theme.get("styles", {}):
         sty = resolve_style(name, st.theme)
@@ -275,13 +277,20 @@ def export_theme(format: str = "json", path: str | None = None):
                     pass
     lines: list[str] = []
     if fmt == "json":
-        text = json.dumps({"colors": {k: to_hex(v) for k, v in rgba.items()}, "text_styles": text_styles},
+        text = json.dumps({"colors": {k: to_hex(v) for k, v in rgba.items()}, "text_styles": text_styles,
+                           "modes": {m: {k: to_hex(v) for k, v in vals.items()} for m, vals in modes.items()}},
                           ensure_ascii=False, indent=1)
     elif fmt in ("css", "uss"):
         lines.append(":root {")
         for k, v in rgba.items():
             lines.append(f"    --color-{_ident(k, 'kebab')}: {to_hex(v) if fmt == 'css' or v[3] == 255 else f'rgba({v[0]}, {v[1]}, {v[2]}, {round(v[3] / 255, 3)})'};")
         lines.append("}")
+        for mname, vals in modes.items():               # css: <html data-theme="light">, uss: add class theme-light
+            sel = f'[data-theme="{_ident(mname, "kebab")}"]' if fmt == "css" else f".theme-{_ident(mname, 'kebab')}"
+            lines.append(sel + " {")
+            for k, v in vals.items():
+                lines.append(f"    --color-{_ident(k, 'kebab')}: {to_hex(v) if fmt == 'css' or v[3] == 255 else f'rgba({v[0]}, {v[1]}, {v[2]}, {round(v[3] / 255, 3)})'};")
+            lines.append("}")
         for name, ts in text_styles.items():
             lines.append(f".text-{_ident(name, 'kebab')} {{")
             if fmt == "css" and ts.get("font"):
@@ -332,7 +341,10 @@ def export_theme(format: str = "json", path: str | None = None):
         text = "\n".join(lines) + "\n"
     out = _out_path(path, "ui_theme" + ext[fmt], suffixes=tuple(ext.values()))
     out.write_text(text, encoding="utf-8")
-    return {"file": str(out), "colors": len(rgba), "text_styles": len(text_styles)}
+    result = {"file": str(out), "colors": len(rgba), "text_styles": len(text_styles), "modes": sorted(modes)}
+    if modes and fmt in ("csharp", "gdscript", "luau"):
+        result["note"] = "this format holds the base colours only; use json, css or uss for every mode"
+    return result
 
 
 # --------------------------------------------------------------------------- prototype

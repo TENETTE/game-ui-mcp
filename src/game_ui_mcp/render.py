@@ -27,7 +27,8 @@ SS = 4
 MAX_MASK_PIXELS = 40_000_000
 MAX_OUTPUT_PIXELS = 140_000_000      # 16K x 8K; larger renders exhaust RAM before Python can raise MemoryError
 TEXT_STYLE_KEYS = ("font", "weight", "size", "letter_spacing", "line_height", "uppercase", "italic")
-VECTOR_TYPES = {"rect", "ellipse", "polygon", "line", "path", "arc", "ticks"}
+VECTOR_TYPES = {"rect", "ellipse", "polygon", "line", "path", "arc", "ticks", "boolean"}
+BOOLEAN_OPS = ("union", "subtract", "intersect", "exclude")
 BITMAP_TYPES = {"image", "instance"}
 MAX_INSTANCE_DEPTH = 6
 LINE_TYPES = {"line", "arc", "ticks"}
@@ -867,8 +868,9 @@ def vector_geometry(el: dict, res: float) -> Geometry:
         g.box = (x, y, x + w, y + h)
         if w == 0 or h == 0:
             return g                      # collapsed (e.g. a bar animating from zero): draws nothing
-        g.kind, g.rect = "rect", (x, y, w, h, el.get("radius", 0), corner)
-        g.fills = [geo.rect_path(x, y, w, h, el.get("radius", 0), corner, res)]
+        smooth = float(el.get("smoothing", 0) or 0)
+        g.kind, g.rect = "rect", (x, y, w, h, el.get("radius", 0), corner, smooth)
+        g.fills = [geo.rect_path(x, y, w, h, el.get("radius", 0), corner, res, smooth)]
     elif t == "ellipse":
         cx, cy, rx = float(el["cx"]), float(el["cy"]), float(el["rx"])
         ry = float(rx if el.get("ry") is None else el["ry"])
@@ -952,9 +954,75 @@ def vector_geometry(el: dict, res: float) -> Geometry:
         g.fills = [pts for pts, _ in subs if len(pts) >= 3]
         g.outline = subs
         g.box = geo.bbox_of([pts for pts, _ in subs])
+    elif t == "boolean":
+        g.fills = _boolean_polys(el, res)
+        g.outline = [(pts, True) for pts in g.fills]
+        g.box = geo.bbox_of(g.fills) if g.fills else (0, 0, 0, 0)
     else:
         raise ValueError(f"Not a vector element type: {t}")
     return g
+
+
+def _placed_polys(el: dict, res: float) -> list[list[geo.Point]]:
+    """A child's filled outlines with its own skew and rotation applied, for boolean operations."""
+    if el.get("type") in LINE_TYPES or el.get("type") not in VECTOR_TYPES:
+        raise ValueError(f"boolean: '{el.get('id')}' is a {el.get('type')}; only filled shapes (rect, ellipse, "
+                         "polygon, path, boolean) can be combined - draw lines as thin rects or paths")
+    g = vector_geometry(el, res)
+    polys = [list(p) for p in g.fills]
+    lean = _skew_tan(el)
+    if lean:
+        mid = (g.box[1] + g.box[3]) / 2
+        polys = [[(x + (mid - y) * lean, y) for x, y in p] for p in polys]
+    rot = float(el.get("rotation", 0) or 0)
+    if rot:
+        cx, cy = Renderer._pivot(el, g.box)
+        c, s = math.cos(math.radians(rot)), math.sin(math.radians(rot))
+        polys = [[(cx + (x - cx) * c - (y - cy) * s, cy + (x - cx) * s + (y - cy) * c) for x, y in p]
+                 for p in polys]
+    return polys
+
+
+def _boolean_polys(el: dict, res: float) -> list[list[geo.Point]]:
+    """Exact polygon boolean of the children (first child = subject), like Figma / Penpot boolean groups."""
+    import pyclipper
+    op = str(el.get("op", "union")).lower()
+    if op not in BOOLEAN_OPS:
+        raise ValueError(f"boolean op must be one of {', '.join(BOOLEAN_OPS)}")
+    children = el.get("children") or []
+    if len(children) < 2:
+        raise ValueError("boolean needs at least 2 child shapes")
+    q = 1024.0                                           # clipper works on integers: 1/1024 unit precision
+
+    def ints(polys):
+        return [[(round(x * q), round(y * q)) for x, y in p] for p in polys if len(p) >= 3]
+
+    def rule(child):
+        nonzero = child.get("type") == "path" and str(child.get("fill_rule", "evenodd")).lower() == "nonzero"
+        return pyclipper.PFT_NONZERO if nonzero else pyclipper.PFT_EVENODD
+
+    clip_type = {"union": pyclipper.CT_UNION, "subtract": pyclipper.CT_DIFFERENCE,
+                 "intersect": pyclipper.CT_INTERSECTION, "exclude": pyclipper.CT_XOR}[op]
+    # fold left: ((a op b) op c) ..., so "subtract" removes every later child from the first
+    result = None
+    for child in children:
+        polys = ints(_placed_polys(child, res))
+        pc = pyclipper.Pyclipper()
+        if result is None:
+            if not polys:
+                result = []
+                continue
+            pc.AddPaths(polys, pyclipper.PT_SUBJECT, True)
+            result = pc.Execute(pyclipper.CT_UNION, rule(child), rule(child))
+            continue
+        if not result and not polys:
+            continue
+        if result:
+            pc.AddPaths(result, pyclipper.PT_SUBJECT, True)
+        if polys:
+            pc.AddPaths(polys, pyclipper.PT_CLIP, True)
+        result = pc.Execute(clip_type, pyclipper.PFT_NONZERO, rule(child))
+    return [[(x / q, y / q) for x, y in p] for p in (result or [])]
 
 
 def _dashed(el: dict, pts: list, closed: bool, width: float, cap: str) -> list:
@@ -978,14 +1046,14 @@ def _skew_tan(el: dict) -> float:
 
 def _inset_rect(rect: tuple, delta: float, res: float) -> list[geo.Point] | None:
     """Rect outline grown (delta > 0) or shrunk (delta < 0) by ``delta`` on every side."""
-    x, y, w, h, radius, corner = rect
+    x, y, w, h, radius, corner, smooth = rect
     nw, nh = w + 2 * delta, h + 2 * delta
     if nw <= 0 or nh <= 0:
         return None
     radii = geo.normalize_radii(radius, w, h)
     factor = CUT_K if corner == "cut" else 1.0
     radii = [max(0.0, r + delta * factor) if r > 0 else 0.0 for r in radii]
-    return geo.rect_path(x - delta, y - delta, nw, nh, radii, corner, res)
+    return geo.rect_path(x - delta, y - delta, nw, nh, radii, corner, res, smooth)
 
 
 # --------------------------------------------------------------------------- renderer
@@ -1003,7 +1071,10 @@ class Renderer:
         self.state = state
         self.language = language
         self.strings = strings or {}
-        self.colors = {**theme.get("colors", {}), **(canvas.get("colors") or {}), **(extra_colors or {})}
+        self.mode = canvas.get("mode") or theme.get("mode")       # Figma-style variable mode (light / dark ...)
+        mode_colors = (theme.get("modes") or {}).get(self.mode) or {} if self.mode else {}
+        self.colors = {**theme.get("colors", {}), **mode_colors, **(canvas.get("colors") or {}),
+                       **(extra_colors or {})}
         self.text_vars = text_vars(canvas, language, self.strings, extra_vars)
         self.fonts = fonts
         self.k = float(scale)
@@ -1554,6 +1625,12 @@ class Renderer:
         if has_fill:
             if color_layer is not None:
                 fill_img = color_layer
+            elif _is_fill_stack(fill_spec):
+                fill_img = None                # Figma-style fill stack: bottom to top, each with its own alpha
+                for one in fill_spec:
+                    one_img = paint(shape, one, box_px, self.colors, k)
+                    if one_img is not None:
+                        fill_img = one_img if fill_img is None else Image.alpha_composite(fill_img, one_img)
             else:
                 fill_img = paint(shape, fill_spec, box_px, self.colors, k)
             noise = float(st.get("noise", 0) or 0)
@@ -1892,9 +1969,17 @@ def _mirror_style(st: dict, fx: bool, fy: bool) -> dict:
     return st
 
 
+def _is_fill_stack(spec: Any) -> bool:
+    """A list of fills (not an [r, g, b(, a)] colour list)."""
+    return isinstance(spec, list) and bool(spec) and not all(isinstance(v, (int, float)) for v in spec)
+
+
 def shift_element(el: dict, dx: float, dy: float) -> None:
     """Move an element (and its rotation pivot) by (dx, dy) in place."""
-    if "points" in el and el["type"] in ("polygon", "line"):
+    if el.get("type") == "boolean":
+        for child in el.get("children") or []:
+            shift_element(child, dx, dy)
+    elif "points" in el and el["type"] in ("polygon", "line"):
         el["points"] = [[float(p[0]) + dx, float(p[1]) + dy] for p in el["points"]]
     elif "cx" in el:
         el["cx"], el["cy"] = float(el["cx"]) + dx, float(el["cy"]) + dy

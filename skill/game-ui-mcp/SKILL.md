@@ -215,6 +215,11 @@ Aynı şeyi elle tekrar çizme; şu gereçler işi hem hızlandırır hem tutarl
 
 - **Bileşen (`add_instance`):** tekrar eden bir parçayı (mücevher, slot çerçevesi, tuş, madalya) kendi canvas'ında bir kez çiz, sonra başka canvas'lara `add_instance(source=...)` ile koy. Kaynağı değiştirince bütün kopyalar değişir; her yerleştirildiği boyutta vektör olarak yeniden çizilir, bulanıklaşmaz. `animation` + `time` ile kaynağın animasyonunun belli bir anını gösterir (farklı fazlarda dönen yükleme göstergeleri). Kopyaya ayrıca gölge, glow, `light`, `adjust` verilebilir. Bir canvas kendini (dolaylı da olsa) içeremez.
 - **Dizi (`duplicate_element`):** `count` ile doğrusal dizi (envanter satırı: `dx=72, count=7`); `rotate` + `pivot` ile dairesel dizi (dişli dişi, perçin, kadran işareti, slot halkası: `count=23, rotate=15, pivot=[merkez]`). Tek elemanı doğru çiz, sonra çoğalt.
+- **Boolean (`boolean_elements`):** Figma / Penpot'taki gibi şekilleri birleştir (`union`), çıkar (`subtract`), kesiştir (`intersect`) ya da üst üste geleni at (`exclude`). Sonuç tek, gerçek bir vektör şekildir: kontur, gölge ve ışık kesilen kenarı izler, SVG'ye vektör olarak çıkar. Çentikli panel, hilal, anahtar deliği, dişli, kesik rozet için `erase` yerine bunu kullan. `update_element(id, {"op": ...})` işlemi sonradan değiştirir.
+- **Yumuşak köşe (`add_rect(smoothing=0.6)`):** iOS / Figma tarzı "squircle" köşe; modern uygulama ikonu, mobil kart, buton. 0 düz çember köşe, 1 en yumuşak.
+- **Dolgu yığını (`fill: [...]`):** birden çok dolguyu alttan üste üst üste koy: gradient + çizgi dokusu + hafif renk. Ayrı şekil çizmeye gerek kalmaz.
+- **Modlar (`set_theme(modes=..., mode=...)`):** aynı kiti açık / koyu, takım renkleri ya da sezon temasıyla çiz; yalnızca `$token` kullandıysan tek satırla tüm ekran değişir. Bir canvas'a ayrı mod: `update_canvas(mode=...)`.
+- **Akan yerleşim (`arrange_elements(wrap=true)`):** envanter slotları, etiketler, yetenek ikonları kutuya sığmayınca alt satıra geçer.
 - **Delik (`style.blend: "erase"`):** aynı katmanda altta ne varsa keser: panelde pencere, kartta çentik, yıldızın ortasında halka, oyma yazı. Kesilecek şeyle kesen şekli kendi katmanına koy; o zaman delik yalnızca o katmanı keser, katman stili (gölge, kontur) deliğin kenarına da uygulanır.
 - **Aynalama (`flip_x` / `flip_y`):** sol ve sağ ok, simetrik kanatlar, karşılıklı sekmeler için ikinci yarıyı çizme; kopyala ve aynala. Gölge ve ışık yönü aynalanmaz, sahnenin ışığıyla tutarlı kalır.
 - **Yay üstü yazı (`add_text(arc={cx, cy, radius, side})`):** amblem, rozet, yuvarlak gösterge yazıları. `side: "outer"` üstten saat yönünde, `"inner"` alttan soldan sağa okunur. `anchor`'ın dikey kısmı yarıçapa neyin oturacağını seçer: `"middle-center"` harflerin ortasını bandın ortasına koyar.
@@ -319,6 +324,8 @@ Bir şey beklediğin gibi çıkmadıysa `get_canvas(details=true)` ile gerçek d
 - İkon setini tek dosyada vermek için `export_atlas`.
 
 ## Export ve motor tarafı
+
+- **Tasarım aracına (`export_svg`):** Figma, Penpot, Illustrator, Inkscape'te düzenlenebilir SVG. Şekiller, gradient, kontur, gölge ve yazı vektör kalır; shader, ışık, iç efekt gibi SVG'nin birebir gösteremediği şeyler o elemanın resmi olarak gömülür. Sonuçtaki `embedded_as_image` listesine bak: düzenlenebilir kalmasını istediğin bir eleman oradaysa stilini sadeleştir.
 
 `export_asset` her PNG'nin yanına `<ad>.gameui.json` ve klasöre `game_ui_manifest.json` yazar; sonuçta motorun istediği sayılar hazır gelir. `write_engine_helpers` proje başına bir kez çalıştırılır.
 
