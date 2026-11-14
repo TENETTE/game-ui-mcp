@@ -22,27 +22,34 @@ Kürenin katmanları tek tek (örnek çıktı: [`examples/orb.psd`](examples/orb
 
 ![Kürenin katmanları](examples/orb_layers.png)
 
+Bir parçayı bir kez çizip başka canvas'larda canlı kopya olarak kullanabilir (kaynağı değiştirince hepsi değişir), dairesel dizi kurabilir, yazıyı daire üstüne dizebilir, şekilden delik açabilir ve SVG içe aktarabilir. Soldaki amblemde yazılar yay üstünde, perçinler tek elemanın 24'lü dairesel dizisi, yıldızın ortası `erase` ile delinmiş, mücevher başka bir canvas'tan gelen bir instance; ortadaki halkada 8 slot ve 8 mücevher dizi, oklar SVG'den alınıp biri aynalanmış:
+
+![Bileşenler, diziler, yay yazısı](examples/components.png)
+
 Animasyon da aynı mantıkla çalışıyor: hazır efekt yok, keyframe ve ease var.
 
 | Buton girişi + parlama | Devir saati | Menü girişi ve seçim |
 | --- | --- | --- |
 | ![Buton animasyonu](examples/anim_button.gif) | ![Gösterge animasyonu](examples/anim_gauge.gif) | ![Menü animasyonu](examples/anim_menu.gif) |
 
-Görsellerin tamamı [`examples/demo.py`](examples/demo.py), [`examples/demo_racing.py`](examples/demo_racing.py), [`examples/demo_shading.py`](examples/demo_shading.py) ve [`examples/demo_animation.py`](examples/demo_animation.py) içindeki tool çağrılarıyla çizildi. (GIF'ler 256 renkle sınırlı olduğu için gerçek çıktıdan biraz daha kaba görünür.)
+Görsellerin tamamı [`examples/demo.py`](examples/demo.py), [`examples/demo_racing.py`](examples/demo_racing.py), [`examples/demo_shading.py`](examples/demo_shading.py), [`examples/demo_components.py`](examples/demo_components.py) ve [`examples/demo_animation.py`](examples/demo_animation.py) içindeki tool çağrılarıyla çizildi. (GIF'ler 256 renkle sınırlı olduğu için gerçek çıktıdan biraz daha kaba görünür.)
 
 ## Ne yapabiliyor
 
-- **Şekiller:** dikdörtgen (yuvarlak ya da kesik köşe, eğik), elips, çokgen, yıldız, çizgi (kesikli olabilir), yay, kadran çizgileri, SVG path
-- **Katmanlar:** her katmanın kendi opaklığı, karışım modu (multiply, screen, overlay, soft-light... 12 mod) ve stili var; `clip` ile alttaki katmana kırpılır (taşmadan serbest gölge ve ışık boyama); katman stili içindeki her şeyi tek şekil sayar (ortak kontur, ortak gölge)
+- **Şekiller:** dikdörtgen (yuvarlak ya da kesik köşe, eğik), elips, çokgen, yıldız, çizgi (kesikli olabilir), yay, kadran çizgileri, SVG path; konturlarda keskin (miter), yuvarlak ya da pah köşe ve kesikli kontur; `flip_x` / `flip_y` ile aynalama (gölge ve ışık yönü korunur)
+- **Yeniden kullanma ve içe aktarma:** `add_instance` (başka canvas'ı canlı bileşen olarak yerleştirir, istenirse animasyonunun belli bir anıyla), `duplicate_element` ile doğrusal ve dairesel dizi (`count`, `rotate`, `pivot`), `add_svg` ile SVG'yi düzenlenebilir path'lere çevirme (logo, hazır ikon setleri)
+- **Delik açma:** `blend: "erase"` aynı katmandaki şeyleri keser (pencere, çentik, oyma yazı)
+- **Öz denetim:** `review_canvas` kenarda kesilen gölgeyi, düşük yazı kontrastını (WCAG), çok küçük yazıyı, eksik glifi, yarım piksele düşen bulanık kenarları, bozuk katman ve animasyonları bulur; `inspect_pixels` tam renk okur; `view_image` diskteki bir referans görseli gösterir ve renk paletini çıkarır; `fit_canvas` canvas'ı boyanan alana göre daraltır ya da genişletir
+- **Katmanlar:** her katmanın kendi opaklığı, karışım modu (multiply, screen, overlay, soft-light, erase... 13 mod) ve stili var; `clip` ile alttaki katmana kırpılır (taşmadan serbest gölge ve ışık boyama); katman stili içindeki her şeyi tek şekil sayar (ortak kontur, ortak gölge)
 - **Işık ve gölgeleme:** yönlü ışıkla kabartma (`light`: açı, pah, profil, parlaklık), çoklu ve aralıklı kontur, kademeli gölge, gradient maskeyle söndürme (`mask`), renk düzeltme (`adjust`: parlaklık, kontrast, doygunluk, ton)
 - **Stil:** düz renk, linear / radial / conic gradient (isteğe bağlı OKLab geçişi), çizgili / noktalı / ızgara / petek / karbon / fırçalı metal / bulut dokusu, kendi görselinle dolgu, kenar çizgisi (iç, orta, dış), gölge, glow, iç gölge, bevel, bulanıklık, opaklık, bir pivot etrafında döndürme, başka bir şekle kırpma (`clip`)
 - **Gösterge:** `add_arc` + `add_ticks` ile devir saati, hız göstergesi, turbo, segmentli LED sıraları; ibre için pivot'lu döndürme
-- **Yazı:** 10 gömülü font (Inter, Barlow Condensed, Bebas Neue, Michroma, JetBrains Mono, Rajdhani, Orbitron, Cinzel, Fredoka, Bangers) + bilgisayardaki fontlar, italik, satır kaydırma, genişliğe sığdırma, kontur, Türkçe büyük harf (`uppercase: "tr"`)
+- **Yazı:** 10 gömülü font (Inter, Barlow Condensed, Bebas Neue, Michroma, JetBrains Mono, Rajdhani, Orbitron, Cinzel, Fredoka, Bangers) + bilgisayardaki fontlar, italik, satır kaydırma, genişliğe sığdırma, kontur, daire üstüne dizme (`arc`), Türkçe büyük harf (`uppercase: "tr"`)
 - **İkon:** 72 hazır oyun ikonu, çizgi ve dolu hali ([hepsi](examples/icons.png))
 - **Animasyon:** keyframe + ease ile her özellik canlandırılır (konum, ölçek, dönme, opaklık, renk, efekt, yay açısı, yazı); film şeridi önizlemesi; sprite sheet, kare dizisi, GIF / APNG / WebP ya da motorun kendi tween'i için keyframe JSON çıktısı
 - **Tema:** renk token'ları (`$primary`) ve isimli stiller; bütün kit tutarlı kalır
 - **Önizleme:** AI çizdiğini resim olarak geri görür (yakınlaştırma, eleman kutuları, oyun sahnesi arka planı)
-- **Dışa aktarma:** PNG (1x, 2x), otomatik 9-slice, atlas, katman katman PNG + yerleşim JSON'u, düzenlenebilir katmanlı PSD, motor başına hazır değerler ve yardımcı scriptler
+- **Dışa aktarma:** PNG (1x, 2x), otomatik 9-slice, atlas, katman katman PNG + yerleşim JSON'u, düzenlenebilir katmanlı PSD, Unity / Unreal / Roblox / Godot için hazır değerler ve yardımcı dosyalar
 
 ## Kurulum (Windows)
 
@@ -110,8 +117,10 @@ Başka bir klasör için `GAME_UI_MCP_DIR` ortam değişkenini ayarla (config'te
 | --- | --- |
 | Canvas | `create_canvas`, `list_canvases`, `get_canvas`, `update_canvas`, `duplicate_canvas`, `delete_canvas` |
 | Katman | `create_layer`, `update_layer`, `delete_layer`, `set_layer` |
-| Çizim | `add_rect`, `add_ellipse`, `add_line`, `add_polygon`, `add_path`, `add_arc`, `add_ticks`, `add_text`, `add_icon`, `add_image` |
+| Canvas | `fit_canvas` |
+| Çizim | `add_rect`, `add_ellipse`, `add_line`, `add_polygon`, `add_path`, `add_arc`, `add_ticks`, `add_text`, `add_icon`, `add_image`, `add_instance`, `add_svg` |
 | Düzenleme | `update_element`, `delete_elements`, `duplicate_element`, `move_elements`, `reorder_element`, `align_elements`, `batch`, `undo` |
+| Denetim | `review_canvas`, `inspect_pixels`, `view_image` |
 | Animasyon | `create_animation`, `set_keyframes`, `delete_keyframes`, `get_animations`, `delete_animation`, `preview_animation`, `export_animation` |
 | Tema ve bilgi | `set_theme`, `get_theme`, `list_fonts`, `list_icons`, `measure_text` |
 | Önizleme | `preview`, `contact_sheet` |
@@ -122,7 +131,7 @@ Stil nesnesi kısaca:
 ```json
 {
   "fill": {"type": "linear", "angle": 90, "stops": [[0, "#a78bfa"], [1, "#5b21b6"]]},
-  "stroke": {"color": "$primary@0.6", "width": 2, "align": "inside"},
+  "stroke": {"color": "$primary@0.6", "width": 2, "align": "inside", "join": "miter", "dash": [8, 4]},
   "shadow": {"color": "#000000@0.5", "blur": 12, "dy": 6},
   "glow": {"color": "$accent", "blur": 16},
   "inner_shadow": {"color": "#000@0.6", "blur": 8, "dy": 2},
@@ -131,7 +140,7 @@ Stil nesnesi kısaca:
 }
 ```
 
-Renkler: `#rrggbb`, `#rrggbbaa`, `rgba(...)`, `$token`; sonuna `@0.5` eklenince alfa olur.
+Renkler: `#rrggbb`, `#rrggbbaa`, `rgba(...)`, `hsl(...)`, CSS renk adları (`gold`, `crimson`...), `$token`; sonuna `@0.5` eklenince alfa olur.
 
 Açılar (yay, kadran çizgisi, conic gradient): derece, 0 = saat 3 yönü, saat yönünde artar. Klasik bir gösterge 135'ten 405'e süpürür.
 
@@ -174,6 +183,7 @@ Bir animasyon, canvas'a bağlı bir keyframe kümesidir. Her iz (track) bir elem
 | Unity | Sprite border (L, B, R, T) | `GameUiImporter.cs`: yanında `.gameui.json` olan her PNG'yi UI sprite olarak ayarlar |
 | Unreal | Brush `Draw As: Box`, Margin (L, T, R, B, 0-1) | `import_game_ui.py`: texture'ları UI ayarlarıyla içe aktarır, margin'leri log'a yazar |
 | Roblox | `SliceCenter`, `SliceScale` | `GameUiAssets.luau`: `GameUi.apply(imageLabel, "ad")` |
+| Godot 4 | `NinePatchRect` patch margin / `StyleBoxTexture` texture margin (L, T, R, B px) | her 9-slice asset için `<ad>.stylebox.tres` |
 
 Hareketli parçalar (ibre, dolan yay) için `export_layers`: her `group` ayrı PNG olur, `<ad>.layout.json` her parçanın konumunu ve dönme merkezini verir. Assetto Corsa (CSP Lua) gibi PNG kullanan her ortamda bu çıktılar doğrudan kullanılabilir.
 
@@ -182,15 +192,16 @@ Roblox'ta görselleri Studio'ya kendin yüklemen gerekir (server internete çık
 ## Sınırlar
 
 - Karakter portresi, illüstrasyon, fotoğraf gibi şeyleri üretmez. Bunlar için hazır bir görseli `add_image` ile yerleştirebilirsin.
-- Stroke birleşimleri çokgen ve path'lerde yuvarlaktır (dikdörtgenlerde keskin).
+- Katman stilindeki kontur (`create_layer(style={"stroke":...})`) köşelerde her zaman yuvarlaktır; keskin köşe için konturu elemana ver.
+- `add_svg` metin, filtre, maske, `<use>` ve CSS sınıflarını almaz (atladıklarını `notes` ile söyler); `gradientTransform` yok sayılır.
+- Instance'lar iç içe en fazla 6 seviye olabilir; bir canvas kendini (dolaylı da olsa) içeremez.
 - Arka planı bulanıklaştıran gerçek "buzlu cam" PNG'ye gömülemez; o efekt motor tarafında yapılır (Unreal'da `BackgroundBlur`). Burada camın koyu, yarı saydam hali çizilir.
-- PSD'de katman adı, opaklık, karışım modu, görünürlük ve clip korunur; katman stilleri ve katmandaki elemanlar piksele gömülür (vektör ya da canlı efekt olarak kalmaz). Dosya sıkıştırılmadan yazılır, büyük canvas'larda boyut büyür.
+- PSD'de katman adı, opaklık, karışım modu, görünürlük ve clip korunur; katman stilleri ve katmandaki elemanlar piksele gömülür (vektör ya da canlı efekt olarak kalmaz). `erase` modundaki bir katman PSD'de karşılığı olmadığı için gizli katman olarak kaydedilir. Dosya sıkıştırılmadan yazılır, büyük canvas'larda boyut büyür.
 - Motorlar multiply / screen gibi karışım modlarını düz görselle uygulayamaz; bu yüzden clip'li gölge ve ışık katmanları dışa aktarılırken tabana gömülür.
 - Animasyon çıktısı veri ve görseldir; motor içinde oynatan kodu (TweenService, DOTween, UMG) model yazar. Büyük canvas'larda kare kare çıktı yavaştır (1920×1080 ve 80 eleman için kare başına yaklaşık 1 sn).
-- Çok büyük blur'lu gölgelerde 8 bit bantlanma görülebilir (gradient'ler dither'lanır, gölgeler dither'lanmaz).
 - Yazıda harf aralığı verilince kerning uygulanmaz.
 - Orbitron fontunda Ğ / ğ yok; tool böyle durumlarda uyarı döndürür.
-- Motor tarafındaki yardımcı dosyalar (C#, Unreal Python, Luau) bu repoda yalnızca üretiliyor; Unity, Unreal ve Roblox Studio içinde henüz denenmedi.
+- Motor tarafındaki yardımcı dosyalar (C#, Unreal Python, Luau, Godot `.tres`) bu repoda yalnızca üretiliyor; Unity, Unreal, Roblox Studio ve Godot içinde henüz denenmedi.
 
 ## Geliştirme
 

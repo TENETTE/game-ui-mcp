@@ -26,9 +26,11 @@ SS = 4
 MAX_MASK_PIXELS = 40_000_000
 TEXT_STYLE_KEYS = ("font", "weight", "size", "letter_spacing", "line_height", "uppercase", "italic")
 VECTOR_TYPES = {"rect", "ellipse", "polygon", "line", "path", "icon", "arc", "ticks"}
+BITMAP_TYPES = {"image", "instance"}
+MAX_INSTANCE_DEPTH = 6
 LINE_TYPES = {"line", "icon", "arc", "ticks"}
 BLENDS = ("normal", "add", "screen", "multiply", "overlay", "soft-light", "hard-light", "color-dodge",
-          "color-burn", "darken", "lighten", "difference")
+          "color-burn", "darken", "lighten", "difference", "erase")
 CUT_K = math.tan(math.pi / 8)
 
 Box = tuple[float, float, float, float]
@@ -165,8 +167,23 @@ def _stroke_specs(st: dict, colors: dict) -> list[dict]:
             d0, d1 = offset, offset + width
         else:
             d0, d1 = offset - width / 2, offset + width / 2
+        join = item.get("join")
+        if join is not None and str(join).lower() not in ("miter", "round", "bevel"):
+            raise ValueError("stroke.join must be 'miter', 'round' or 'bevel'")
+        dash = item.get("dash")
+        if dash is not None and not _is_none(dash):
+            if isinstance(dash, (int, float)):
+                dash = [dash, dash]
+            if (not isinstance(dash, (list, tuple)) or not dash
+                    or any(not isinstance(v, (int, float)) or v < 0 for v in dash) or sum(dash) <= 0):
+                raise ValueError("stroke.dash must be a number or a list like [dash, gap, ...] (canvas units)")
+            dash = [float(v) for v in dash]
+        else:
+            dash = None
         out.append({"paint": item.get("fill", item.get("color", "#ffffff")), "width": width, "align": align,
-                    "offset": offset, "d0": d0, "d1": d1})
+                    "offset": offset, "d0": d0, "d1": d1, "join": str(join).lower() if join else None,
+                    "miter_limit": max(1.0, float(item.get("miter_limit", 4))),
+                    "dash": dash, "dash_offset": float(item.get("dash_offset", 0) or 0)})
     return out
 
 
@@ -386,6 +403,31 @@ def _image_fill(mask: Image.Image, spec: dict, box_px: Box, k: float) -> Image.I
     return out
 
 
+_DITHER: dict[tuple[int, int], np.ndarray] = {}
+
+
+def _dither(shape: tuple[int, int]) -> np.ndarray:
+    """Fixed blue-ish noise in [0, 1) used to break 8-bit banding in soft gradients (deterministic)."""
+    noise = _DITHER.get(shape)
+    if noise is None:
+        noise = np.random.default_rng(7).random(shape)
+        if len(_DITHER) > 32:
+            _DITHER.clear()
+        _DITHER[shape] = noise
+    return noise
+
+
+def _soft_tint(cov: np.ndarray, color: tuple[int, int, int, int], strength: float) -> Image.Image:
+    """Float coverage (0-255) -> colour layer whose alpha is dithered, so wide soft shadows and glows
+    fade smoothly instead of in visible 8-bit steps."""
+    r, g, b, a = color
+    alpha = cov * (a / 255.0 * strength)
+    alpha = np.floor(np.clip(alpha, 0, 255) + _dither(alpha.shape))
+    img = Image.new("RGBA", (cov.shape[1], cov.shape[0]), (r, g, b, 0))
+    img.putalpha(Image.fromarray(np.clip(alpha, 0, 255).astype(np.uint8), "L"))
+    return img
+
+
 def _outer_effects(layer: Image.Image, sil: Image.Image, fx: "Effects", k: float) -> Image.Image:
     """Shadows and glows cast by the silhouette, composited onto ``layer`` (which is still empty)."""
     for e in fx.outer:
@@ -394,23 +436,27 @@ def _outer_effects(layer: Image.Image, sil: Image.Image, fx: "Effects", k: float
         if spread > 0:
             m = Image.fromarray(fxlib.dilate(np.asarray(m), spread), "L")
         m = _shift(m, int(round(e["dx"] * k)), int(round(e["dy"] * k)))
+        cov = np.asarray(m, dtype=np.float64)
         if e["blur"] > 0:
-            m = m.filter(ImageFilter.GaussianBlur(e["blur"] * k / 2))
+            cov = fxlib.blur_float(cov, e["blur"] * k)
         if e["knockout"]:
-            m = ImageChops.multiply(m, ImageChops.invert(sil))
-        layer = Image.alpha_composite(layer, _tint(m, e["color"], e["strength"]))
+            cov = cov * (1.0 - np.asarray(sil, dtype=np.float64) / 255.0)
+        layer = Image.alpha_composite(layer, _soft_tint(cov, e["color"], e["strength"]))
     return layer
 
 
 def _inner_effects(layer: Image.Image, shape: Image.Image, fx: "Effects", k: float) -> Image.Image:
     """Inner shadows / glows / simple bevel, limited to the shape."""
+    shape_f = np.asarray(shape, dtype=np.float64) / 255.0
     for e in fx.inner:
         m = ImageChops.invert(shape)
         m = _shift(m, int(round(e["dx"] * k)), int(round(e["dy"] * k)), fill=255)
+        cov = np.asarray(m, dtype=np.float64)
         if e["blur"] > 0:
-            m = m.filter(ImageFilter.GaussianBlur(e["blur"] * k / 2))
-        m = ImageChops.multiply(m, shape)
-        layer = Image.alpha_composite(layer, _tint(m, e["color"], e.get("strength", 1.0)))
+            # pad with "outside" so the canvas edge does not read as an edge of the shape
+            pad = int(math.ceil(e["blur"] * k * 1.6)) + 1
+            cov = fxlib.blur_float(np.pad(cov, pad, constant_values=255.0), e["blur"] * k)[pad:-pad, pad:-pad]
+        layer = Image.alpha_composite(layer, _soft_tint(cov * shape_f, e["color"], e.get("strength", 1.0)))
     return layer
 
 
@@ -450,7 +496,12 @@ def composite(dst: Image.Image, src: Image.Image, ox: int, oy: int, blend: str =
         return
     part = src.crop((x0 - ox, y0 - oy, x1 - ox, y1 - oy))
     base = dst.crop((x0, y0, x1, y1))
-    if blend == "add":
+    if blend == "erase":
+        # destination-out: the element's alpha cuts a hole in what is already on this layer
+        b = np.asarray(base, dtype=np.float64).copy()
+        b[..., 3] *= 1.0 - np.asarray(part, dtype=np.float64)[..., 3] / 255.0
+        merged = Image.fromarray((b + 0.5).astype(np.uint8), "RGBA")
+    elif blend == "add":
         b = np.asarray(base, dtype=np.float64)
         s = np.asarray(part, dtype=np.float64)
         sa = s[..., 3:4] / 255.0
@@ -592,6 +643,98 @@ class TextLayout:
                 self.line_x.append(bx)
         # visual box in px at this density
         self.box_px = (bx, self.baselines[0] - self.cap, bx + self.block_w, self.baselines[-1] + self.descent)
+        self.arc = None
+        if el.get("arc"):
+            self._layout_arc(el["arc"])
+
+    def _layout_arc(self, spec: Any) -> None:
+        """Place each glyph upright along a circle. spec: {cx, cy, radius, angle, side}. ``radius`` is
+        the baseline radius; ``angle`` (degrees, 0 = right, 90 = down) is where the anchor point of the
+        text sits; side 'outer' reads clockwise over the top, 'inner' reads anticlockwise under the
+        bottom, like the lower text on a badge."""
+        if not isinstance(spec, dict):
+            raise ValueError("arc must be an object like {cx, cy, radius, angle, side}")
+        if len(self.lines) != 1:
+            raise ValueError("text on an arc must be a single line (no newlines, no max_width wrapping)")
+        try:
+            cx, cy, radius = float(spec["cx"]), float(spec["cy"]), float(spec["radius"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("arc needs numeric cx, cy and radius") from exc
+        if radius <= 0:
+            raise ValueError("arc radius must be > 0")
+        side = str(spec.get("side", "outer")).lower()
+        if side not in ("outer", "inner"):
+            raise ValueError("arc side must be 'outer' or 'inner'")
+        angle = float(spec.get("angle", -90 if side == "outer" else 90))
+        ppu = self.ppu
+        R = radius * ppu
+        text = self.lines[0][0]
+        advances = []
+        for ch in text:
+            advances.append(float(self.font.getlength(ch)))
+        total = sum(advances) + self.spacing * ppu * max(0, len(text) - 1)
+        if total > 2 * math.pi * R * 0.98:
+            raise ValueError(f"text is longer than the circle ({total / ppu:.0f} vs {2 * math.pi * radius:.0f} units); "
+                             "use a bigger radius, smaller size or less letter_spacing")
+        if self.h == "left":
+            s0 = 0.0
+        elif self.h == "center":
+            s0 = -total / 2
+        else:
+            s0 = -total
+        sign = 1.0 if side == "outer" else -1.0
+        glyphs = []
+        pos = s0
+        pts = []
+        # vertical anchor moves the baseline radius so top/middle/bottom refer to the glyph band
+        if self.v == "top":
+            shift = -self.cap
+        elif self.v == "middle":
+            shift = -self.cap / 2
+        elif self.v == "bottom":
+            shift = self.descent
+        else:
+            shift = 0.0
+        Rb = R + shift if side == "outer" else R - shift          # glyph "up" is outward / inward
+        for ch, adv in zip(text, advances):
+            mid = pos + adv / 2
+            theta = math.radians(angle) + sign * mid / max(1e-6, Rb)
+            gx, gy = cx * ppu + Rb * math.cos(theta), cy * ppu + Rb * math.sin(theta)
+            rot = math.degrees(theta) + (90.0 if side == "outer" else -90.0)
+            glyphs.append((ch, gx, gy, rot, adv))
+            # glyph box corners (baseline-centred, up = -y before rotation)
+            ca, sa = math.cos(math.radians(rot)), math.sin(math.radians(rot))
+            for lx, ly in ((-adv / 2, -self.cap * 1.25), (adv / 2, -self.cap * 1.25),
+                           (-adv / 2, self.descent), (adv / 2, self.descent)):
+                pts.append((gx + lx * ca - ly * sa, gy + lx * sa + ly * ca))
+            pos += adv + self.spacing * ppu
+        self.arc = glyphs
+        xs, ys = [q[0] for q in pts], [q[1] for q in pts]
+        self.box_px = (min(xs), min(ys), max(xs), max(ys))
+
+    def draw_arc(self, img: Image.Image, ox: float, oy: float, stroke_px: int = 0) -> None:
+        """Draw arc-placed glyph coverage onto ``img`` (L mode) at offset (-ox, -oy)."""
+        size_px = self.size * self.ppu
+        tile = int(math.ceil(size_px * 2.4 + 4 * stroke_px)) + 4
+        lean = math.tan(math.radians(self.skew)) if self.skew else 0.0
+        for ch, gx, gy, rot, _ in self.arc:
+            if ch.isspace():
+                continue
+            t = Image.new("L", (tile, tile), 0)
+            d = ImageDraw.Draw(t)
+            kwargs: dict = {"font": self.font, "fill": 255, "anchor": "ms"}
+            if stroke_px > 0:
+                kwargs.update(stroke_width=stroke_px, stroke_fill=255)
+            d.text((tile / 2, tile / 2), ch, **kwargs)
+            if lean:
+                t = t.transform(t.size, Image.AFFINE, (1, lean, -lean * tile / 2, 0, 1, 0), resample=Image.BICUBIC)
+            if rot:
+                t = t.rotate(-rot, resample=Image.BICUBIC, center=(tile / 2, tile / 2))
+            x0 = int(round(gx - ox - tile / 2))
+            y0 = int(round(gy - oy - tile / 2))
+            box = (x0, y0, x0 + tile, y0 + tile)
+            under = img.crop(box)
+            img.paste(ImageChops.lighter(under, t), box)
 
     def _load(self) -> None:
         self.font = load_font(self.path, int(round(self.size * self.ppu)), self.var_weight)
@@ -817,8 +960,11 @@ def _inset_rect(rect: tuple, delta: float, res: float) -> list[geo.Point] | None
 # --------------------------------------------------------------------------- renderer
 
 class Renderer:
-    def __init__(self, canvas: dict, theme: dict, fonts: FontLibrary, scale: float = 1.0):
+    def __init__(self, canvas: dict, theme: dict, fonts: FontLibrary, scale: float = 1.0,
+                 lookup=None, depth: int = 0):
         self.canvas = canvas
+        self.lookup = lookup            # canvas id -> canvas dict, for instance elements
+        self.depth = depth
         self.theme = theme
         self.colors = theme.get("colors", {})
         self.fonts = fonts
@@ -846,12 +992,15 @@ class Renderer:
         st = resolve_style(el.get("style"), self.theme)
         box = self._geom_box(el, st)
         pivot = self._pivot(el, box)
-        sx = float(el.get("scale_x", el.get("scale", 1)) or 0)
-        sy = float(el.get("scale_y", el.get("scale", 1)) or 0)
+        sx, sy = _scales(el)
         if sx != 1 or sy != 1:
-            box = (pivot[0] + (box[0] - pivot[0]) * sx, pivot[1] + (box[1] - pivot[1]) * sy,
-                   pivot[0] + (box[2] - pivot[0]) * sx, pivot[1] + (box[3] - pivot[1]) * sy)
-        return geo.rotated_bbox(box, float(el.get("rotation", 0) or 0), pivot)
+            xs = sorted((pivot[0] + (box[0] - pivot[0]) * sx, pivot[0] + (box[2] - pivot[0]) * sx))
+            ys = sorted((pivot[1] + (box[1] - pivot[1]) * sy, pivot[1] + (box[3] - pivot[1]) * sy))
+            box = (xs[0], ys[0], xs[1], ys[1])
+        rot = float(el.get("rotation", 0) or 0)
+        if (sx < 0) != (sy < 0):
+            rot = -rot
+        return geo.rotated_bbox(box, rot, pivot)
 
     @staticmethod
     def _pivot(el: dict, box: Box) -> tuple[float, float]:
@@ -877,18 +1026,53 @@ class Renderer:
             box = layout.box_units()
             lean = abs(math.tan(math.radians(layout.skew))) * (box[3] - box[1]) / 2
             return (box[0] - lean, box[1], box[2] + lean, box[3])
-        if t == "image":
+        if t in BITMAP_TYPES:
             x, y = float(el.get("x", 0)), float(el.get("y", 0))
             w, h = self._image_size(el)
             return (x, y, x + w, y + h)
         raise ValueError(f"Unknown element type '{t}'")
 
+    def _source_canvas(self, el: dict) -> dict:
+        """The canvas an instance element shows (posed at its animation time, if any)."""
+        src_id = str(el.get("source", ""))
+        if not src_id:
+            raise ValueError("instance needs 'source' (the id of another canvas)")
+        if src_id == self.canvas.get("id"):
+            raise ValueError("an instance cannot show the canvas it is placed on")
+        if self.lookup is None:
+            raise ValueError("instances are not available here")
+        src = self.lookup(src_id)
+        if self.depth == 0:
+            loop = _instance_cycle(src, self.canvas.get("id"), self.lookup)
+            if loop:
+                raise ValueError("instance loop: " + " -> ".join([str(self.canvas.get("id"))] + loop)
+                                 + " (a canvas cannot end up containing itself)")
+        if self.depth >= MAX_INSTANCE_DEPTH:
+            raise ValueError(f"instances nest deeper than {MAX_INSTANCE_DEPTH} levels")
+        if el.get("animation"):
+            from .animation import apply_animation           # local import: animation imports render helpers
+            anims = src.get("animations") or {}
+            name = str(el["animation"])
+            if name not in anims:
+                known = ", ".join(sorted(anims)) or "(none)"
+                raise ValueError(f"source canvas '{src_id}' has no animation '{name}'. Animations: {known}")
+            anim = anims[name]
+            t = float(el.get("time", 0) or 0)
+            dur = float(anim.get("duration", 1) or 1)
+            if anim.get("loop", True) and dur > 0:
+                t = t % dur
+            src, _ = apply_animation(src, anim, t, self.colors)
+        return src
+
     def _image_size(self, el: dict) -> tuple[float, float]:
         w, h = el.get("width"), el.get("height")
         if w and h:
             return float(w), float(h)
-        src = self._load_image(el)
-        iw, ih = src.size
+        if el["type"] == "instance":
+            src = self._source_canvas(el)
+            iw, ih = float(src["width"]), float(src["height"])
+        else:
+            iw, ih = self._load_image(el).size
         if w:
             return float(w), float(w) * ih / iw
         if h:
@@ -940,8 +1124,12 @@ class Renderer:
                 arr[:, 0] += (mid_y - arr[:, 1]) * lean
             return arr * f - offset
 
-        def fill(polys) -> np.ndarray:
-            return raster.fill_polygons([px(p) for p in polys], bw, bh, "evenodd")
+        rule = str(el.get("fill_rule", "evenodd")).lower() if el["type"] == "path" else "evenodd"
+        if rule not in ("evenodd", "nonzero"):
+            raise ValueError("fill_rule must be 'evenodd' or 'nonzero'")
+
+        def fill(polys, how: str | None = None) -> np.ndarray:
+            return raster.fill_polygons([px(p) for p in polys], bw, bh, how or rule)
 
         def lines(items) -> np.ndarray:
             return raster.stroke_polylines(
@@ -964,7 +1152,7 @@ class Renderer:
             open_paths = [pts for pts, c in g.outline if not c]
             inside = fill(closed_paths) if closed_paths else None
 
-            def grown(d: float) -> np.ndarray:
+            def grown(d: float, join: str = "round", limit: float = 4.0) -> np.ndarray:
                 """The shape grown (d > 0) or shrunk (d < 0) by distance d."""
                 if g.kind == "rect":
                     poly = _inset_rect(g.rect, d, f) if d else g.fills[0]
@@ -979,15 +1167,31 @@ class Renderer:
                 if d == 0:
                     return inside
                 rim = lines([(pts, True, abs(d) * 2, "round") for pts in closed_paths])
-                return (inside | rim) if d > 0 else (inside & ~rim)
+                if join == "round":
+                    return (inside | rim) if d > 0 else (inside & ~rim)
+                # sharp corners: the exact round offset plus the corner wedges of the miter offset
+                sharp = fill(geo.offset_shape(closed_paths, d, join, limit), "evenodd")
+                if d > 0:
+                    return inside | rim | sharp
+                return inside & (~rim | sharp)
 
             for spec in strokes:
                 if g.kind == "poly" and not g.fills and not g.outline:
                     bands.append(np.zeros((bh, bw), dtype=np.uint8))       # collapsed shape
                     continue
-                band = grown(spec["d1"]) & ~grown(spec["d0"])
+                join = spec["join"] or ("miter" if g.kind == "poly" else "round")
+                band = (grown(spec["d1"], join, spec["miter_limit"])
+                        & ~grown(spec["d0"], join, spec["miter_limit"]))
                 if open_paths:
                     band = band | lines([(pts, False, spec["width"], "round") for pts in open_paths])
+                if spec["dash"]:
+                    # dashes run along the shape edge; each dash is a wide butt-capped strip across the band
+                    edge = [(pts, c) for pts, c in g.outline] if g.outline else [(pts, True) for pts in g.fills]
+                    reach = 4 * max(abs(spec["d0"]), abs(spec["d1"])) + 2.0 / f      # wide enough for corners
+                    pieces = []
+                    for pts, c in edge:
+                        pieces += geo.dash_polyline(pts, c, spec["dash"], spec["dash_offset"])
+                    band = band & lines([(pc, False, reach, "butt") for pc in pieces]) if pieces else band * 0
                 bands.append(band)
 
         shape_img = Image.fromarray(shape, "L")
@@ -1003,7 +1207,6 @@ class Renderer:
             shape_img = shape_img.reduce(ss)
             stroke_imgs = [m.reduce(ss) for m in stroke_imgs]
         return shape_img, stroke_imgs
-        return shape_img, stroke_img
 
     def _text_masks(self, el: dict, st: dict, region, ss: int, strokes: list[dict]):
         px0, py0, w, h = region
@@ -1018,7 +1221,10 @@ class Renderer:
         def glyphs(grow_units: float) -> Image.Image:
             img = Image.new("L", big, 0)
             grow_px = int(round(grow_units * k * ss)) if grow_units > 0 else 0
-            layout.draw(ImageDraw.Draw(img), px0 * ss, py0 * ss, grow_px)
+            if layout.arc is not None:
+                layout.draw_arc(img, px0 * ss, py0 * ss, grow_px)
+            else:
+                layout.draw(ImageDraw.Draw(img), px0 * ss, py0 * ss, grow_px)
             return img
 
         shape = glyphs(0)
@@ -1031,7 +1237,7 @@ class Renderer:
                 band = ImageChops.subtract(band, glyphs(inner))
             masks.append(band)
         bx0, by0, bx1, by1 = layout.box_px
-        if layout.skew:
+        if layout.skew and layout.arc is None:
             lean = math.tan(math.radians(layout.skew))
             mid = (by0 + by1) / 2 - py0 * ss
             matrix = (1, lean, -lean * mid, 0, 1, 0)       # output (x, y) samples input (x + lean * (y - mid), y)
@@ -1051,16 +1257,26 @@ class Renderer:
             masks = [m.reduce(ss) for m in masks]
         return shape, masks
 
+    def _instance_image(self, el: dict, tw: int, th: int) -> Image.Image:
+        src = self._source_canvas(el)
+        fit = str(el.get("fit", "stretch")).lower()
+        sx, sy = tw / float(src["width"]), th / float(src["height"])
+        scale = max(sx, sy) if fit in ("stretch", "cover") else min(sx, sy)
+        sub = Renderer(src, self.theme, self.fonts, scale, self.lookup, self.depth + 1)
+        img = sub.render(include_background=bool(el.get("background", True)))
+        self.warnings += [f"{el['id']} -> {w}" for w in sub.warnings]
+        return img
+
     def _image_layer(self, el: dict, region):
-        """Return (alpha_mask, rgba_layer) for an image element at region size."""
+        """Return (alpha_mask, rgba_layer) for an image or instance element at region size."""
         px0, py0, w, h = region
         k = self.k
-        src = self._load_image(el)
         uw, uh = self._image_size(el)
         tw, th = max(1, int(round(uw * k))), max(1, int(round(uh * k)))
+        src = self._instance_image(el, tw, th) if el["type"] == "instance" else self._load_image(el)
         fit = str(el.get("fit", "stretch")).lower()
         if fit == "stretch":
-            img = src.resize((tw, th), Image.LANCZOS)
+            img = src if src.size == (tw, th) else src.resize((tw, th), Image.LANCZOS)
         elif fit in ("contain", "cover"):
             ratio = (min if fit == "contain" else max)(tw / src.width, th / src.height)
             rs = src.resize((max(1, int(round(src.width * ratio))), max(1, int(round(src.height * ratio)))), Image.LANCZOS)
@@ -1105,30 +1321,49 @@ class Renderer:
     def render_element(self, el: dict):
         """Render one element to (layer, x, y, blend). Handles scale_x / scale_y, which grow or shrink
         the finished element (effects included) around its pivot, the way an engine scales a widget."""
-        sx = float(el.get("scale_x", el.get("scale", 1)) or 0)
-        sy = float(el.get("scale_y", el.get("scale", 1)) or 0)
+        sx, sy = _scales(el)
         if sx == 1 and sy == 1:
             return self._render_plain(el)
-        if sx <= 0 or sy <= 0:
+        if sx == 0 or sy == 0:
             return None
-        if max(sx, sy) > 16:
+        ax, ay = abs(sx), abs(sy)
+        if max(ax, ay) > 16:
             raise ValueError("scale is limited to 16")
+        fx_, fy_ = sx < 0, sy < 0
         k = self.k
-        m = max(sx, sy)
-        plain = {key: value for key, value in el.items() if key not in ("scale", "scale_x", "scale_y", "clip")}
-        sub = Renderer(self.canvas, self.theme, self.fonts, k * m)      # true vector scale, not a resized bitmap
-        result = sub._render_plain(plain, clip_region=False)
-        self.warnings += sub.warnings
+        m = max(ax, ay)
+        plain = {key: value for key, value in el.items()
+                 if key not in ("scale", "scale_x", "scale_y", "flip_x", "flip_y", "clip")}
+        if fx_ or fy_:
+            # mirror the shape, not the lighting: pre-mirror offsets and light so they come out unchanged
+            plain["style"] = _mirror_style(resolve_style(el.get("style"), self.theme), fx_, fy_)
+            if fx_ != fy_ and plain.get("rotation"):
+                plain["rotation"] = -float(plain["rotation"])
+        if m == 1:
+            sub = self
+            result = self._render_plain(plain, clip_region=False)
+        else:
+            sub = Renderer(self.canvas, self.theme, self.fonts, k * m, self.lookup, self.depth)   # true vector scale
+            result = sub._render_plain(plain, clip_region=False)
+            self.warnings += sub.warnings
         if result is None:
             return None
         layer, px0, py0, blend = result
-        if sx != sy:
-            layer = layer.resize((max(1, int(round(layer.width * sx / m))), max(1, int(round(layer.height * sy / m)))),
+        if ax != ay:
+            layer = layer.resize((max(1, int(round(layer.width * ax / m))), max(1, int(round(layer.height * ay / m)))),
                                  Image.LANCZOS)
         st = resolve_style(el.get("style"), self.theme)
         pvx, pvy = self._pivot(el, self._geom_box(plain, st))
-        ox = int(round(pvx * k - (pvx * k * m - px0) * sx / m))
-        oy = int(round(pvy * k - (pvy * k * m - py0) * sy / m))
+        lx = (pvx * k * m - px0) * ax / m           # pivot inside the (resized) layer
+        ly = (pvy * k * m - py0) * ay / m
+        if fx_:
+            layer = layer.transpose(Image.FLIP_LEFT_RIGHT)
+            lx = layer.width - lx
+        if fy_:
+            layer = layer.transpose(Image.FLIP_TOP_BOTTOM)
+            ly = layer.height - ly
+        ox = int(round(pvx * k - lx))
+        oy = int(round(pvy * k - ly))
         clip_id = el.get("clip")
         if clip_id:
             target = self._by_id.get(clip_id)
@@ -1151,7 +1386,12 @@ class Renderer:
         if t == "text":
             grow = max((sp["offset"] + sp["width"] for sp in strokes), default=0.0)
         else:
-            grow = max(0.0, max((sp["d1"] for sp in strokes), default=0.0))
+            grow = 0.0
+            for sp in strokes:
+                reach = max(0.0, sp["d1"])
+                if t in ("polygon", "path") and (sp["join"] or "miter") == "miter":
+                    reach *= sp["miter_limit"]            # sharp corners can poke out up to the miter limit
+                grow = max(grow, reach)
         gbox = (box[0] - grow, box[1] - grow, box[2] + grow, box[3] + grow)
         rot = float(el.get("rotation", 0) or 0)
         soften = max(0.0, float(st.get("blur", 0) or 0))
@@ -1175,7 +1415,7 @@ class Renderer:
             shape, smasks = self._vector_masks(el, st, region, ss, strokes)
         elif t == "text":
             shape, smasks = self._text_masks(el, st, region, ss, strokes)
-        elif t == "image":
+        elif t in BITMAP_TYPES:
             shape, color_layer = self._image_layer(el, region)
             smasks = []
         else:
@@ -1280,6 +1520,8 @@ class Renderer:
             try:
                 result = self.render_element(el)
             except ValueError as exc:
+                if str(exc).startswith("Element '"):
+                    raise
                 raise ValueError(f"Element '{el['id']}' ({el['type']}): {exc}") from exc
             if result is None:
                 continue
@@ -1360,7 +1602,10 @@ class Renderer:
                 if not props["clip"]:
                     base_alpha, base_visible = None, False
                 continue
-            plain = not props["style"] and props["opacity"] >= 1 and props["blend"] == "normal" and not props["clip"]
+            erases = any(str(resolve_style(e.get("style"), self.theme).get("blend", "")).lower() == "erase"
+                         for e in elements)
+            plain = (not props["style"] and props["opacity"] >= 1 and props["blend"] == "normal"
+                     and not props["clip"] and not erases)
             if plain and not clipped_onto:
                 # nothing special about this layer: draw straight onto the picture, so element blend
                 # modes see everything beneath them
@@ -1381,6 +1626,74 @@ class Renderer:
         return img
 
 
+def _instance_cycle(src: dict, target: Any, lookup, seen: tuple = ()) -> list[str] | None:
+    """Path of canvas ids from ``src`` back to ``target`` through instance elements, if any."""
+    sid = src.get("id")
+    if sid == target:
+        return [str(sid)]
+    if sid in seen or len(seen) > 32:
+        return None
+    for el in src.get("elements", []):
+        if el.get("type") == "instance" and el.get("source"):
+            try:
+                child = lookup(str(el["source"]))
+            except ValueError:
+                continue
+            path = _instance_cycle(child, target, lookup, seen + (sid,))
+            if path:
+                return [str(sid)] + path
+    return None
+
+
+def _scales(el: dict) -> tuple[float, float]:
+    """Signed scale of an element: scale / scale_x / scale_y, with flip_x / flip_y mirroring."""
+    sx = float(el.get("scale_x", el.get("scale", 1)) if el.get("scale_x", el.get("scale", 1)) is not None else 1)
+    sy = float(el.get("scale_y", el.get("scale", 1)) if el.get("scale_y", el.get("scale", 1)) is not None else 1)
+    if el.get("flip_x"):
+        sx = -sx
+    if el.get("flip_y"):
+        sy = -sy
+    return sx, sy
+
+
+def _mirror_style(st: dict, fx: bool, fy: bool) -> dict:
+    """Pre-mirror a style so that, after the rendered element is flipped, shadows, glows, bevels and
+    surface light still fall the way the rest of the UI is lit."""
+    st = dict(st)
+
+    for key, default_dy in (("shadow", 4.0), ("inner_shadow", 2.0)):
+        if key in st and not _is_none(st[key]):
+            items = []
+            for spec in _as_list(st[key]):
+                if spec is True:
+                    spec = {}
+                elif isinstance(spec, (str, list, tuple)):
+                    spec = {"color": spec}
+                if isinstance(spec, dict):
+                    spec = dict(spec)
+                    if fx:
+                        spec["dx"] = -float(spec.get("dx", 0) or 0)
+                    if fy:
+                        spec["dy"] = -float(spec.get("dy", default_dy))
+                items.append(spec)
+            st[key] = items
+    if fy and st.get("bevel"):
+        bevel = dict(st["bevel"]) if isinstance(st["bevel"], dict) else {}
+        bevel["highlight"], bevel["shadow"] = bevel.get("shadow", "#000000@0.35"), bevel.get("highlight", "#ffffff@0.35")
+        st["bevel"] = bevel
+    if st.get("light"):
+        light = dict(st["light"]) if isinstance(st["light"], dict) else {}
+        a = float(light.get("angle", 225))
+        if fx:
+            a = 180.0 - a
+        if fy:
+            a = -a
+        light["angle"] = a
+        st["light"] = light
+    st.pop("use", None)
+    return st
+
+
 def shift_element(el: dict, dx: float, dy: float) -> None:
     """Move an element (and its rotation pivot) by (dx, dy) in place."""
     if "points" in el and el["type"] in ("polygon", "line"):
@@ -1391,6 +1704,8 @@ def shift_element(el: dict, dx: float, dy: float) -> None:
         el["x"], el["y"] = float(el.get("x", 0)) + dx, float(el.get("y", 0)) + dy
     if el.get("origin"):
         el["origin"] = [float(el["origin"][0]) + dx, float(el["origin"][1]) + dy]
+    if isinstance(el.get("arc"), dict) and "cx" in el["arc"]:
+        el["arc"] = dict(el["arc"], cx=float(el["arc"]["cx"]) + dx, cy=float(el["arc"]["cy"]) + dy)
 
 
 # --------------------------------------------------------------------------- preview helpers

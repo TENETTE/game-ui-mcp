@@ -197,3 +197,26 @@ def roblox_module(manifest: dict) -> str:
         lines.append(f"\t{key} = {{ " + ", ".join(fields) + " },\n")
     lines.append(ROBLOX_MODULE_TAIL)
     return "".join(lines)
+
+
+def godot_styleboxes(manifest: dict, res_dir: str) -> dict[str, str]:
+    """One StyleBoxTexture .tres per 9-sliced asset (Godot 4 text resource format)."""
+    res_dir = res_dir.rstrip("/")
+    out = {}
+    for name, entry in sorted(manifest.get("assets", {}).items()):
+        files = entry.get("files") or []
+        first = next((f for f in files if f.get("scale", 1) == 1), files[0] if files else None)
+        if not first or not first.get("nine_slice"):
+            continue
+        b = first["nine_slice"]
+        out[f"{name}.stylebox.tres"] = (
+            '[gd_resource type="StyleBoxTexture" load_steps=2 format=3]\n\n'
+            f'[ext_resource type="Texture2D" path="{res_dir}/{first["file"]}" id="1_tex"]\n\n'
+            "[resource]\n"
+            'texture = ExtResource("1_tex")\n'
+            f"texture_margin_left = {float(b['left'])}\n"
+            f"texture_margin_top = {float(b['top'])}\n"
+            f"texture_margin_right = {float(b['right'])}\n"
+            f"texture_margin_bottom = {float(b['bottom'])}\n"
+        )
+    return out

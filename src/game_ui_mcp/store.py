@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import os
 import re
 from pathlib import Path
@@ -12,7 +13,7 @@ from typing import Any
 from .fonts import FontLibrary
 from .render import Renderer, shift_element
 
-ELEMENT_TYPES = ("rect", "ellipse", "polygon", "line", "path", "text", "icon", "image", "arc", "ticks")
+ELEMENT_TYPES = ("rect", "ellipse", "polygon", "line", "path", "text", "icon", "image", "arc", "ticks", "instance")
 MAX_CANVAS = 8192
 MAX_UNDO = 40
 
@@ -100,7 +101,7 @@ class Store:
 
     def _validate_background(self, canvas: dict) -> None:
         probe = dict(canvas, width=min(canvas["width"], 8), height=min(canvas["height"], 8), elements=[])
-        Renderer(probe, self.theme, self.fonts).render()
+        Renderer(probe, self.theme, self.fonts, lookup=self.get).render()
 
     def update_canvas(self, canvas: dict, **changes: Any) -> None:
         self.checkpoint(canvas)
@@ -167,7 +168,7 @@ class Store:
     # ---- elements
 
     def renderer(self, canvas: dict, scale: float = 1.0) -> Renderer:
-        return Renderer(canvas, self.theme, self.fonts, scale)
+        return Renderer(canvas, self.theme, self.fonts, scale, lookup=self.get)
 
     def find(self, canvas: dict, element_id: str) -> dict:
         for el in canvas["elements"]:
@@ -326,17 +327,111 @@ class Store:
         return new
 
     def duplicate_element(self, canvas: dict, el: dict, dx: float, dy: float, new_id: str | None,
-                          props: dict | None) -> tuple[dict, list[str]]:
-        tmp = copy.deepcopy(el)
-        tmp.pop("id")
-        self.shift(tmp, float(dx), float(dy))
-        etype = tmp.pop("type")
-        if new_id:
-            tmp["id"] = new_id
-        new_el, warnings = self.add_element(canvas, etype, tmp)
-        if props:
-            warnings = self.update_element(canvas, new_el, props, checkpoint=False)
-        return new_el, warnings
+                          props: dict | None, count: int = 1, rotate: float = 0.0,
+                          pivot: list[float] | None = None, checkpoint: bool = True) -> list[tuple[dict, list[str]]]:
+        """Make ``count`` copies. Copy i is moved by (dx*i, dy*i) and, when ``rotate`` is set, turned by
+        rotate*i degrees around ``pivot`` (default: the element's own pivot) - a radial array."""
+        count = int(count)
+        if count < 1 or count > 360:
+            raise ValueError("count must be between 1 and 360")
+        rotate = float(rotate or 0)
+        if pivot is not None:
+            try:
+                pivot_xy = (float(pivot[0]), float(pivot[1]))
+            except (TypeError, IndexError, ValueError) as exc:
+                raise ValueError("pivot must be [x, y]") from exc
+        else:
+            pivot_xy = None
+        r = self.renderer(canvas)
+        from .render import resolve_style
+        own = r._pivot(el, r._geom_box(el, resolve_style(el.get("style"), self.theme)))
+        if checkpoint:
+            self.checkpoint(canvas)
+        made: list[tuple[dict, list[str]]] = []
+        try:
+            for i in range(1, count + 1):
+                tmp = copy.deepcopy(el)
+                tmp.pop("id")
+                self.shift(tmp, float(dx) * i, float(dy) * i)
+                if rotate:
+                    angle = rotate * i
+                    px, py = pivot_xy or (own[0] + float(dx) * i, own[1] + float(dy) * i)
+                    cx, cy = own[0] + float(dx) * i, own[1] + float(dy) * i
+                    a = math.radians(angle)
+                    nx = px + (cx - px) * math.cos(a) - (cy - py) * math.sin(a)
+                    ny = py + (cx - px) * math.sin(a) + (cy - py) * math.cos(a)
+                    self.shift(tmp, nx - cx, ny - cy)
+                    tmp["rotation"] = round(float(tmp.get("rotation", 0) or 0) + angle, 4)
+                etype = tmp.pop("type")
+                if new_id:
+                    tmp["id"] = new_id if count == 1 else f"{new_id}_{i}"
+                new_el, warnings = self.add_element(canvas, etype, tmp, checkpoint=False)
+                if props:
+                    warnings = self.update_element(canvas, new_el, props, checkpoint=False)
+                made.append((new_el, warnings))
+        except Exception:
+            if checkpoint:
+                self.drop_checkpoint(canvas)
+                self.save_canvas(canvas)
+            raise
+        return made
+
+    def fit_canvas(self, canvas: dict, padding: float = 0.0, include_animations: bool = True) -> dict:
+        """Shrink or grow the canvas to what is actually painted (effects included) plus padding, and
+        move every element (and position keyframes) so nothing changes visually."""
+        import numpy as np
+        from .animation import apply_animation
+        frames = [canvas]
+        if include_animations:
+            for anim in (canvas.get("animations") or {}).values():
+                dur = float(anim.get("duration", 1) or 1)
+                for j in range(13):
+                    frames.append(apply_animation(canvas, anim, dur * j / 12, self.theme.get("colors", {}))[0])
+        pad_big = 2048
+        box = None
+        for frame in frames:
+            probe = dict(frame, width=frame["width"] + 2 * pad_big, height=frame["height"] + 2 * pad_big,
+                         elements=copy.deepcopy(frame["elements"]))
+            for e in probe["elements"]:
+                shift_element(e, pad_big, pad_big)
+            img = Renderer(probe, self.theme, self.fonts, 0.5, lookup=self.get).render(include_background=False)
+            bb = img.getchannel("A").point(lambda v: 255 if v > 2 else 0).getbbox()
+            if bb is None:
+                continue
+            fb = (bb[0] * 2 - pad_big, bb[1] * 2 - pad_big, bb[2] * 2 - pad_big, bb[3] * 2 - pad_big)
+            box = fb if box is None else (min(box[0], fb[0]), min(box[1], fb[1]), max(box[2], fb[2]), max(box[3], fb[3]))
+        if box is None:
+            raise ValueError("nothing is painted on this canvas")
+        pad = float(padding)
+        x0, y0 = math.floor(box[0] - 1 - pad), math.floor(box[1] - 1 - pad)
+        x1, y1 = math.ceil(box[2] + 1 + pad), math.ceil(box[3] + 1 + pad)
+        w, h = int(x1 - x0), int(y1 - y0)
+        if w > MAX_CANVAS or h > MAX_CANVAS:
+            raise ValueError(f"fitted canvas would be {w}x{h}, over the {MAX_CANVAS} limit")
+        dx, dy = -float(x0), -float(y0)
+        self.checkpoint(canvas)
+        for e in canvas["elements"]:
+            shift_element(e, dx, dy)
+        moved_tracks = 0
+        for anim in (canvas.get("animations") or {}).values():
+            for track in anim.get("tracks", []):
+                prop = track["property"]
+                for kf in track["keyframes"]:
+                    v = kf["value"]
+                    if prop in ("x", "cx"):
+                        kf["value"] = float(v) + dx
+                    elif prop in ("y", "cy"):
+                        kf["value"] = float(v) + dy
+                    elif prop == "origin" and isinstance(v, (list, tuple)):
+                        kf["value"] = [float(v[0]) + dx, float(v[1]) + dy]
+                    elif prop == "points" and isinstance(v, (list, tuple)):
+                        kf["value"] = [[float(q[0]) + dx, float(q[1]) + dy] for q in v]
+                    else:
+                        continue
+                    moved_tracks += 1
+        canvas["width"], canvas["height"] = w, h
+        self.save_canvas(canvas)
+        return {"width": w, "height": h, "moved_by": [round(dx, 2), round(dy, 2)], "keyframes_moved": moved_tracks}
 
     # ---- layers
 
@@ -376,7 +471,7 @@ class Store:
                  "layers": [dict(layer, clip=False, visible=True)],
                  "elements": [{"id": "p", "type": "rect", "x": 6, "y": 6, "width": 12, "height": 12,
                                "layer": layer["name"]}]}
-        Renderer(probe, self.theme, self.fonts).render()
+        Renderer(probe, self.theme, self.fonts, lookup=self.get).render()
 
     def create_layer(self, canvas: dict, name: str, settings: dict, position: Any, checkpoint: bool = True) -> dict:
         key = slugify(name, "layer")
@@ -587,7 +682,7 @@ class Store:
                                                                        "line_height", "uppercase", "italic")}
                 el = {"id": "p", "type": "rect", "x": 2, "y": 2, "width": 12, "height": 12, "style": shape_style}
                 probe["elements"] = [el]
-                Renderer(probe, self.theme, self.fonts).render()
+                Renderer(probe, self.theme, self.fonts, lookup=self.get).render()
                 if st.get("font"):
                     self.fonts.resolve(st["font"], 400)
         except Exception as exc:

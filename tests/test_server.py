@@ -941,3 +941,170 @@ def test_export_psd_keeps_the_stack(ws):
     assert tuple(body[40, 40]) == (255, 0, 0, 255)
     with pytest.raises(ValueError):
         s.export_psd("a", str(ws / "a.png"))
+
+
+# ---------------------------------------------------------------- gaps closed in the audit
+
+def test_css_names_and_hsl():
+    assert parse_color("gold") == (255, 215, 0, 255)
+    assert parse_color("hsl(0, 100%, 50%)") == (255, 0, 0, 255)
+    assert parse_color("hsla(120, 100%, 25%, 0.5)") == (0, 128, 0, 128)
+    assert parse_color("rgb(10 20 30 / 50%)") == (10, 20, 30, 128)
+    assert parse_color("green") == (0, 200, 0, 255)          # existing palette kept stable
+
+
+def test_erase_cuts_hole_only_in_its_layer(ws):
+    s.create_canvas("a", 100, 100, background="#102030")
+    s.add_rect("a", 10, 10, 80, 80, fill="#ffffff")
+    s.add_ellipse("a", 50, 50, 20, style={"blend": "erase"})
+    px = render("a", background=True)
+    assert tuple(px[50, 50][:3]) == (16, 32, 48)            # hole shows the canvas background
+    assert tuple(px[15, 15][:3]) == (255, 255, 255)
+    assert render("a")[50, 50][3] == 0                       # transparent in exports
+
+
+def test_flip_mirrors_shape_but_not_shadow(ws):
+    s.create_canvas("a", 100, 60)
+    s.add_polygon("a", points=[[10, 30], [40, 10], [40, 50]], fill="#ffffff",
+                  style={"shadow": {"dx": 6, "dy": 0, "blur": 0, "color": "#ff0000"}}, id="tri")
+    s.update_element("a", "tri", {"flip_x": True})
+    px = render("a")
+    assert px[30, 38][3] > 0 and px[30, 12][3] > 0           # still drawn, now pointing right
+    assert px[30, 44][0] == 255 and px[30, 44][3] > 200      # shadow still falls to the right of the tip
+    assert px[30, 5][3] == 0                                  # a plain bitmap mirror would put it on the left
+    box = s.get_canvas("a", details=True)
+    assert box
+
+
+def test_miter_join_and_dashed_outline(ws):
+    s.create_canvas("a", 120, 120)
+    s.add_polygon("a", cx=60, cy=60, radius=40, sides=3, fill="none",
+                  stroke={"color": "#ffffff", "width": 6, "align": "outside"}, id="m")
+    tip_sharp = render("a")[60 - 40 - 8, 60][3]
+    s.update_element("a", "m", {"stroke": {"color": "#ffffff", "width": 6, "align": "outside", "join": "round"}})
+    tip_round = render("a")[60 - 40 - 8, 60][3]
+    assert tip_sharp > 200 and tip_round < 50
+    s.create_canvas("d", 100, 60)
+    s.add_rect("d", 10, 10, 80, 40, fill="none", stroke={"color": "#fff", "width": 2, "dash": [6, 4]})
+    row = render("d")[10, 12:88, 3]
+    assert (row == 0).any() and (row > 200).any()
+
+
+def test_soft_shadow_has_no_banding(ws):
+    s.create_canvas("a", 400, 300)
+    s.add_rect("a", 150, 100, 100, 60, fill="#000000", style={"shadow": {"color": "#000000@0.5", "blur": 120, "dy": 0}})
+    row = render("a")[60, :, 3].astype(int)
+    inner = np.flatnonzero(row >= 3)
+    seg = row[inner[0]:inner[-1] + 1]
+    changes = np.flatnonzero(np.diff(seg) != 0)
+    assert np.diff(changes).max() < 16                     # was a 35 px flat band before dithered float blur
+
+
+def test_text_on_arc(ws):
+    s.create_canvas("a", 200, 200)
+    r = s.add_text("a", "CHAMPION", 0, 0, size=18, anchor="baseline-center", arc={"cx": 100, "cy": 100, "radius": 70})
+    x, y, w, h = r["bbox_xywh"]
+    assert y < 40 and y + h < 70 and 30 < x < 70                 # sits over the top of the circle
+    px = render("a")
+    assert px[100, 100][3] == 0 and px[:60].max() > 0
+    with pytest.raises(ValueError):
+        s.add_text("a", "two\nlines", 0, 0, arc={"cx": 100, "cy": 100, "radius": 70})
+    r2 = s.add_text("a", "BOTTOM", 0, 0, size=16, anchor="top-center", arc={"cx": 100, "cy": 100, "radius": 70, "side": "inner"})
+    assert r2["bbox_xywh"][1] > 160
+
+
+def test_instances_follow_source_and_refuse_cycles(ws):
+    s.create_canvas("gem", 40, 40)
+    s.add_rect("gem", 0, 0, 40, 40, fill="#ff0000", id="body")
+    s.create_canvas("hud", 200, 100)
+    s.add_instance("hud", "gem", 10, 10, id="g1")
+    s.add_instance("hud", "gem", 100, 10, width=80, id="g2")
+    px = render("hud")
+    assert tuple(px[30, 30][:3]) == (255, 0, 0) and px[85, 175][3] > 0
+    s.update_element("gem", "body", {"fill": "#00ff00"})
+    assert tuple(render("hud")[30, 30][:3]) == (0, 255, 0)
+    with pytest.raises(ValueError):
+        s.add_instance("gem", "hud", 0, 0)                       # hud already contains gem
+    with pytest.raises(ValueError):
+        s.delete_canvas("gem")
+
+
+def test_instance_animation_time(ws):
+    s.create_canvas("spin", 40, 40)
+    s.add_rect("spin", 0, 0, 20, 40, fill="#ffffff", id="bar")
+    s.create_animation("spin", "move", 1, loop=True)
+    s.set_keyframes("spin", "move", "bar", "x", [[0, 0], [1, 20]])
+    s.create_canvas("hud", 100, 40)
+    s.add_instance("hud", "spin", 0, 0, animation="move", time=0)
+    s.add_instance("hud", "spin", 50, 0, animation="move", time=0.999)
+    px = render("hud")
+    assert px[20, 5][3] > 0 and px[20, 55][3] == 0 and px[20, 85][3] > 0
+
+
+def test_add_svg_import(ws):
+    s.create_canvas("a", 100, 100)
+    svg = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
+           '<g transform="translate(2 2)"><rect x="0" y="0" width="20" height="20" fill="#ff0000" stroke="none"/></g>'
+           '<circle cx="12" cy="12" r="4"/><text>x</text></svg>')
+    r = s.add_svg("a", svg, 0, 0, 96, 96, color="#00ff00", group="logo")
+    assert len(r["ids"]) == 2 and any("text" in n for n in r["notes"])
+    px = render("a")
+    assert tuple(px[20, 20][:3]) == (255, 0, 0)
+    assert px[48, 64][1] > 200                                     # circle stroke in currentColor
+    with pytest.raises(ValueError):
+        s.add_svg("a", '<!DOCTYPE svg [<!ENTITY x "y">]><svg/>')
+
+
+def test_radial_array_duplicate(ws):
+    s.create_canvas("a", 200, 200)
+    s.add_rect("a", 96, 20, 8, 20, fill="#fff", id="tooth")
+    r = s.duplicate_element("a", "tooth", count=3, rotate=90, pivot=[100, 100], new_id="t")
+    assert r["ids"] == ["t_1", "t_2", "t_3"]
+    px = render("a")
+    assert px[100, 170][3] > 0 and px[170, 100][3] > 0 and px[100, 30][3] > 0
+    assert s.undo("a")["elements"] == ["tooth"]
+
+
+def test_fit_canvas_keeps_look(ws):
+    s.create_canvas("a", 300, 300)
+    s.add_rect("a", 100, 100, 50, 30, fill="#ffffff", style={"shadow": {"blur": 10, "dy": 4}})
+    before = render("a")
+    r = s.fit_canvas("a", padding=2)
+    after = render("a")
+    dx, dy = (int(v) for v in r["moved_by"])
+    assert r["width"] < 100 and r["height"] < 90
+    assert after[0].max() == 0 or after[0, :, 3].max() < 8
+    assert np.array_equal(before[110, 120], after[110 + dy, 120 + dx])
+
+
+def test_review_and_inspect(ws):
+    s.create_canvas("a", 200, 100)
+    s.add_rect("a", 0, 0, 200, 60, fill="#2a3550", style={"shadow": {"blur": 12, "dy": 6}})
+    s.add_text("a", "dim", 10, 10, size=20, color="#323d5a", id="dim")
+    s.add_text("a", "tiny", 10, 40, size=8, color="#ffffff", id="tiny")
+    rep = s.review_canvas("a")
+    checks = {(i["check"], tuple(i.get("ids", []))) for i in rep["issues"]}
+    assert ("contrast", ("dim",)) in checks and ("text_size", ("tiny",)) in checks
+    assert any(i["check"] == "edge" for i in rep["issues"]) and rep["ok"] is False
+    px = s.inspect_pixels("a", [[100, 30], [100, 95]])
+    assert px["pixels"][0]["rgba"] == "#2a3550ff" and px["pixels"][1]["alpha"] < 1
+
+
+def test_view_image_palette(ws, tmp_path):
+    img = Image.new("RGB", (40, 20), "#ff0000")
+    img.paste(Image.new("RGB", (20, 20), "#0000ff"), (20, 0))
+    path = tmp_path / "ref.png"
+    img.save(path)
+    out = s.view_image(str(path), palette=2)
+    info = json.loads(out[1])
+    assert {c["hex"] for c in info["palette"]} == {"#ff0000", "#0000ff"}
+
+
+def test_godot_export(ws, tmp_path):
+    s.create_canvas("panel", 120, 80)
+    s.add_rect("panel", 0, 0, 120, 80, radius=12, fill="#334155")
+    r = s.export_asset("panel", engine="godot", out_dir=str(tmp_path / "g"), nine_slice={"left": 16, "top": 16, "right": 16, "bottom": 16})
+    assert r["files"][0]["godot"]["margins_LTRB"][0] == 16
+    h = s.write_engine_helpers("godot", str(tmp_path / "g"))
+    tres = (tmp_path / "g" / "panel.stylebox.tres").read_text()
+    assert h["files"] == ["panel.stylebox.tres"] and "texture_margin_left = 16.0" in tres

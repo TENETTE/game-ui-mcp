@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-ENGINES = ("generic", "unity", "unreal", "roblox")
+ENGINES = ("generic", "unity", "unreal", "roblox", "godot")
 ROBLOX_MAX = 1024
 
 
@@ -124,6 +124,13 @@ def engine_metadata(engine: str, size: tuple[int, int], borders: dict | None, sc
         if max(w, h) > ROBLOX_MAX:
             meta["roblox"]["warning"] = (f"{w}x{h} is larger than {ROBLOX_MAX}px; Roblox downsizes uploaded images, "
                                          "which blurs UI and breaks SliceCenter. Export smaller or split the image.")
+    if engine in ("godot", "generic"):
+        meta["godot"] = {"import": {"compress/mode": "Lossless", "mipmaps/generate": False},
+                         "imageSize": [w, h]}
+        if borders:
+            # Godot 4: NinePatchRect.patch_margin_* and StyleBoxTexture.texture_margin_* (texture pixels)
+            meta["godot"]["node"] = "NinePatchRect or StyleBoxTexture"
+            meta["godot"]["margins_LTRB"] = [borders["left"], borders["top"], borders["right"], borders["bottom"]]
     return meta
 
 

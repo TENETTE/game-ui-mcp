@@ -44,8 +44,8 @@ fix with update_element -> export_asset / export_png / export_atlas.
 Coordinates are canvas units = pixels at 1x, origin top-left, y down. Elements draw in the order
 they were added (later = on top); use reorder_element to change that.
 
-Colors: "#rrggbb", "#rrggbbaa", "rgba(r,g,b,a)", names, or "$token" from the theme. Append "@0.5"
-to any color for alpha, e.g. "#ffffff@0.2", "$primary@0.6".
+Colors: "#rrggbb", "#rrggbbaa", "rgba(r,g,b,a)", "hsl(210, 80%, 55%)", any CSS color name ("gold",
+"crimson"...), or "$token" from the theme. Append "@0.5" for alpha, e.g. "#ffffff@0.2", "$primary@0.6".
 
 Fill: a color, or a gradient/pattern object:
   {"type":"linear","angle":90,"stops":[[0,"#3b82f6"],[1,"#1d4ed8"]]}   (angle 0 = left->right, 90 = top->bottom)
@@ -61,8 +61,10 @@ Fill: a color, or a gradient/pattern object:
 
 Style object (every key optional; `style` may also be a theme style name, or {"use":"name", ...overrides}):
   fill, opacity, noise: 0-1, blur: px (softens the whole element: light blooms, haze),
-  stroke {color, width, align: inside|center|outside, offset} - or a list of strokes for double outlines,
-  blend: normal|add|screen|multiply|overlay|soft-light|hard-light|color-dodge|color-burn|darken|lighten|difference,
+  stroke {color, width, align: inside|center|outside, offset, join: miter|round|bevel, miter_limit, dash: [on, off],
+    dash_offset} - or a list of strokes for double outlines. Polygons/paths default to sharp miter corners,
+  blend: normal|add|screen|multiply|overlay|soft-light|hard-light|color-dodge|color-burn|darken|lighten|difference|
+    erase (cuts a hole through what is already on the same layer: windows, notches, cut-out lettering),
   shadow {color, blur, dx, dy, spread, knockout}, glow {color, blur, strength, spread},
   inner_shadow {color, blur, dx, dy}, inner_glow {color, blur}, bevel {size, highlight, shadow},
   light {angle, altitude, size, depth, profile: round|chisel, highlight, shadow, gloss, soften} - lights the
@@ -81,6 +83,18 @@ stack back as separate images or an editable PSD.
 Angles (add_arc, add_ticks, conic): degrees, 0 = 3 o'clock, clockwise. A classic gauge sweeps 135 -> 405.
 Any element takes rotation (degrees clockwise) and origin [x, y] as the pivot (default: its centre) -
 e.g. a needle pivoting on the gauge hub. Shapes and text take skew (degrees) for slanted, italic looks.
+Any element also takes scale / scale_x / scale_y and flip_x / flip_y (mirror; lighting stays put) - set
+them with update_element or as extra keys in batch add ops. Text takes arc {cx, cy, radius} to run along
+a circle. Paths take fill_rule "nonzero" | "evenodd".
+
+Reuse and import: add_instance places another canvas as a live component (edit once, every copy follows);
+duplicate_element with count / rotate / pivot makes linear and radial arrays; add_svg imports SVG markup
+or a .svg file as editable paths (logos, icons from any set, art you write as SVG).
+
+Checking: review_canvas finds clipped shadows at the canvas edge, low text contrast, tiny text, missing
+glyphs, blurry half-pixel rects, broken layers and animations. inspect_pixels reads exact colours.
+view_image shows you a reference image from disk with its dominant palette. fit_canvas trims or grows the
+canvas to the painted area.
 
 Animation: create_animation, then set_keyframes per (target, property). Any numeric or color property can be
 keyframed (x, width, rotation, radius, end_angle, style.glow.blur, style.fill, ...) plus the helpers dx, dy
@@ -356,10 +370,27 @@ def duplicate_canvas(canvas: str, new_name: str):
 
 
 @tool
-def delete_canvas(canvas: str):
-    """Delete a canvas and its saved project file. Exported PNGs are not touched."""
+def fit_canvas(canvas: str, padding: float = 0, include_animations: bool = True):
+    """Resize the canvas to exactly what is painted (shadows and glows included) plus `padding`, moving
+    every element and position keyframe so nothing changes visually. Use it after drawing an asset with
+    generous room, so the exported PNG has no wasted transparent border and no clipped glow.
+    include_animations also keeps every animation frame inside the new bounds."""
     st = store()
     c = st.get(canvas)
+    return {"canvas": c["id"], **st.fit_canvas(c, padding, include_animations)}
+
+
+@tool
+def delete_canvas(canvas: str):
+    """Delete a canvas and its saved project file. Exported PNGs are not touched.
+    Refuses while other canvases still place it with add_instance (it names them)."""
+    st = store()
+    c = st.get(canvas)
+    users = sorted({other["id"] for other in st.canvases.values() if other is not c
+                    for e in other["elements"] if e["type"] == "instance" and e.get("source") == c["id"]})
+    if users:
+        raise ValueError(f"canvas '{c['id']}' is used as an instance on: {', '.join(users)}. "
+                         "Delete or change those instances first.")
     st.delete_canvas(c)
     return {"deleted": c["id"]}
 
@@ -667,7 +698,7 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
              line_height: float | None = None, letter_spacing: float | None = None,
              uppercase: bool | str | None = None, italic: bool | None = None, skew: float = 0,
              stroke: str | dict | None = None, style: str | dict | None = None, rotation: float = 0,
-             origin: list[float] | None = None, id: str | None = None,
+             origin: list[float] | None = None, arc: dict | None = None, id: str | None = None,
              group: str | None = None, clip: str | None = None, layer: str | None = None):
     """Add text.
 
@@ -681,6 +712,12 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
     letter_spacing: extra px between letters. uppercase: true, or "tr" for Turkish i -> İ rules.
     italic: use the family's italic (Barlow Condensed has one); other fonts are slanted automatically.
     skew: extra slant in degrees.
+    arc: set text along a circle instead of a straight line (badges, emblems, round gauges):
+      {"cx": 200, "cy": 200, "radius": 90, "angle": -90, "side": "outer"}. radius is where `anchor`'s
+      vertical part sits (baseline by default; "top-center" puts the letter tops on it); angle (deg,
+      0 = right, 90 = down) is where the horizontal anchor point lands (default -90 top / 90 bottom);
+      side "outer" reads clockwise over the top, "inner" reads left-to-right along the bottom.
+      Each letter is placed upright on the curve, not warped. x / y are ignored with arc.
     style may carry shadow / glow / opacity and text defaults (font, weight, size, letter_spacing).
     The result's bbox_xywh tells you how much room the text really takes.
     """
@@ -689,7 +726,8 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
                                      max_width=max_width, fit_width=fit_width, line_height=line_height,
                                      letter_spacing=letter_spacing, uppercase=uppercase or None,
                                      italic=italic or None, skew=skew or None, stroke=stroke, style=style,
-                                     rotation=rotation or None, origin=origin, id=id, group=group, clip=clip, layer=layer))
+                                     rotation=rotation or None, origin=origin, arc=arc, id=id, group=group,
+                                     clip=clip, layer=layer))
 
 
 @tool
@@ -724,12 +762,104 @@ def add_image(canvas: str, path: str, x: float, y: float, width: float | None = 
                                       style=style, rotation=rotation or None, id=id, group=group, clip=clip, layer=layer))
 
 
+@tool
+def add_instance(canvas: str, source: str, x: float, y: float, width: float | None = None,
+                 height: float | None = None, fit: str = "stretch", animation: str | None = None,
+                 time: float = 0, background: bool = True, tint: str | None = None,
+                 style: str | dict | None = None, rotation: float = 0, origin: list[float] | None = None,
+                 flip_x: bool = False, flip_y: bool = False, id: str | None = None, group: str | None = None,
+                 clip: str | None = None, layer: str | None = None):
+    """Place another canvas inside this one as a live, re-rendered copy (a component instance).
+
+    Build a part once on its own canvas (a gem, a slot frame, a key cap, a medal) and stamp it many times:
+    edit the source canvas and every instance follows. It is drawn as vectors at the size it is placed,
+    so it stays sharp. width/height default to the source size; give one to keep the aspect ratio.
+    fit: "stretch", "contain" or "cover". animation + time pose the source at that moment of one of its
+    animations (e.g. several spinners at different phases). background: include the source canvas
+    background. tint recolors using alpha. style adds shadow / glow / light / adjust / mask like an image.
+    flip_x / flip_y mirror it (shadows and lighting stay the way the scene is lit).
+    """
+    if fit not in ("stretch", "contain", "cover"):
+        raise ValueError("fit must be 'stretch', 'contain' or 'cover'")
+    st = store()
+    st.get(source)
+    return _add(canvas, "instance", dict(source=slugify(source), x=x, y=y, width=width, height=height,
+                                         fit=None if fit == "stretch" else fit, animation=animation,
+                                         time=time or None, background=None if background else False,
+                                         tint=tint, style=style, rotation=rotation or None, origin=origin,
+                                         flip_x=flip_x or None, flip_y=flip_y or None, id=id, group=group,
+                                         clip=clip, layer=layer))
+
+
+def _svg_elements(c: dict, svg: str, x: float, y: float, width: float | None, height: float | None,
+                  color: str, group: str | None, id_prefix: str | None, layer: str | None,
+                  detail: float) -> dict:
+    from . import svgimport
+    text = str(svg).strip()
+    if not text.startswith("<"):
+        path = Path(text).expanduser()
+        if not path.is_file():
+            raise ValueError("svg must be SVG markup starting with '<' or the path of a .svg file")
+        text = path.read_text(encoding="utf-8", errors="replace")
+    elements, notes, size = svgimport.convert(text, float(x), float(y), width, height, color, float(detail))
+    st = store()
+    grp = group or slugify(id_prefix or "svg", "svg")
+    prefix = slugify(id_prefix or grp, "svg")
+    made = []
+    taken = {e["id"] for e in c["elements"]}
+    n = 0
+    for props in elements:
+        n += 1
+        eid = f"{prefix}_{n}"
+        while eid in taken:
+            n += 1
+            eid = f"{prefix}_{n}"
+        taken.add(eid)
+        props = dict(props, id=eid, group=grp)
+        if layer:
+            props["layer"] = layer
+        el, _ = st.add_element(c, "path", props, checkpoint=False)
+        made.append(el["id"])
+    out: dict = {"group": grp, "ids": made, "placed_size": [_round(size[0]), _round(size[1])]}
+    if notes:
+        out["notes"] = notes
+    return out
+
+
+@tool
+def add_svg(canvas: str, svg: str, x: float = 0, y: float = 0, width: float | None = None,
+            height: float | None = None, color: str = "#ffffff", group: str | None = None,
+            id_prefix: str | None = None, layer: str | None = None, detail: float = 1):
+    """Import vector art from SVG markup (or a .svg file path) as editable path elements.
+
+    Use it for a logo you were given, an icon from any open icon set, or a complex silhouette you wrote as
+    SVG yourself. The art is fitted into width x height at (x, y), keeping its aspect ratio (give only one
+    to scale by it; neither = 1 SVG unit per px). color replaces currentColor (most icon sets use it).
+    Each shape becomes one `path` element in `group`, keeping its fill, stroke (width, join), opacity and
+    linear/radial gradients; transforms are applied. Afterwards restyle freely with update_element (add
+    light, bevel, gradients...). Unsupported parts (text, filters, masks, <use>, CSS classes) are listed
+    in "notes". detail > 1 flattens curves more finely.
+    """
+    st = store()
+    c = st.get(canvas)
+    st.checkpoint(c)
+    try:
+        result = _svg_elements(c, svg, x, y, width, height, color, group, id_prefix, layer, detail)
+    except Exception:
+        st.drop_checkpoint(c)
+        st.save_canvas(c)
+        raise
+    st.save_canvas(c)
+    return result
+
+
 # --------------------------------------------------------------------------- editing tools
 
 @tool
 def update_element(canvas: str, id: str, props: dict):
     """Change properties of an element. `props` uses the same names as the add_* tools
-    (x, y, width, radius, text, size, points, rotation, origin, skew, dash, group, clip, visible, ...).
+    (x, y, width, radius, text, size, points, rotation, origin, skew, dash, group, clip, visible, arc,
+    scale, scale_x, scale_y, flip_x, flip_y, fill_rule, ...).
     A "style" object is merged into the existing style key by key; set a key to null to remove it.
     Shortcuts "fill", "stroke" and "color" work here too. Example:
     {"width": 240, "style": {"glow": {"color": "$accent", "blur": 16}, "shadow": null}}"""
@@ -775,15 +905,28 @@ def delete_elements(canvas: str, ids: list[str] | None = None, group: str | None
 
 @tool
 def duplicate_element(canvas: str, id: str, dx: float = 0, dy: float = 0, new_id: str | None = None,
-                      props: dict | None = None):
+                      props: dict | None = None, count: int = 1, rotate: float = 0,
+                      pivot: list[float] | None = None):
     """Copy an element, offset by (dx, dy), optionally overriding properties (same format as
-    update_element). Use it for repeated things: inventory slots, list rows, bar segments."""
+    update_element). Use it for repeated things: inventory slots, list rows, bar segments.
+
+    count makes an array: copy i is moved by (dx*i, dy*i). rotate (degrees) turns copy i by rotate*i
+    around pivot [x, y] - a radial array (gear teeth, sun rays, dial markers, a ring of slots):
+    duplicate_element(id="tooth", count=11, rotate=30, pivot=[200, 200]). With count > 1 and new_id,
+    ids are "<new_id>_1", "<new_id>_2", ...
+    """
     st = store()
     c = st.get(canvas)
     src = st.find(c, id)
     patch = _prepare_update(dict(src), _maybe_json(props)) if props else None
-    el, warnings = st.duplicate_element(c, src, dx, dy, new_id, patch)
-    return _summary(st, c, el, warnings)
+    made = st.duplicate_element(c, src, dx, dy, new_id, patch, count=count, rotate=rotate, pivot=_maybe_json(pivot))
+    if len(made) == 1:
+        return _summary(st, c, made[0][0], made[0][1])
+    warnings = sorted({w for _, ws in made for w in ws})
+    out: dict = {"ids": [e["id"] for e, _ in made], "count": len(made)}
+    if warnings:
+        out["warnings"] = warnings
+    return out
 
 
 @tool
@@ -888,7 +1031,9 @@ def batch(canvas: str, operations: list[dict]):
 
     Each operation is {"op": "<tool name>", ...the same arguments that tool takes, without canvas}.
     Supported ops: add_rect, add_ellipse, add_line, add_polygon, add_path, add_arc, add_ticks, add_text,
-    add_icon, add_image, create_layer, update_layer, set_layer, create_animation, set_keyframes, update_element, delete_elements, move_elements, reorder_element, duplicate_element.
+    add_icon, add_image, add_instance, add_svg, create_layer, update_layer, set_layer, create_animation,
+    set_keyframes, update_element, delete_elements, move_elements, reorder_element, duplicate_element.
+    Add ops also accept any extra element property directly (flip_x, scale, skew, fill_rule, visible...).
     Give elements explicit "id"s so later operations (clip, update, reorder) can refer to them.
     The batch is atomic: if any operation fails nothing is changed, and the error names the failing op.
     """
@@ -959,18 +1104,26 @@ def batch(canvas: str, operations: list[dict]):
                     results.append({"reordered": op_args["id"]})
                 elif op == "duplicate_element":
                     src = st.find(c, op_args["id"])
-                    tmp = dict(src)
-                    patch = _prepare_update(tmp, op_args["props"]) if op_args.get("props") else None
-                    clone = json.loads(json.dumps(src))
-                    clone.pop("id")
-                    st.shift(clone, float(op_args.get("dx", 0)), float(op_args.get("dy", 0)))
-                    etype = clone.pop("type")
-                    if op_args.get("new_id"):
-                        clone["id"] = op_args["new_id"]
-                    el, warnings = st.add_element(c, etype, clone, checkpoint=False)
-                    if patch:
-                        warnings = st.update_element(c, el, patch, checkpoint=False)
+                    patch = _prepare_update(dict(src), op_args["props"]) if op_args.get("props") else None
+                    made = st.duplicate_element(c, src, float(op_args.get("dx", 0)), float(op_args.get("dy", 0)),
+                                                op_args.get("new_id"), patch, count=op_args.get("count", 1),
+                                                rotate=op_args.get("rotate", 0), pivot=op_args.get("pivot"),
+                                                checkpoint=False)
+                    if len(made) == 1:
+                        results.append(_summary(st, c, made[0][0], made[0][1]))
+                    else:
+                        results.append({"ids": [e["id"] for e, _ in made]})
+                elif op == "add_instance":
+                    st.get(op_args["source"])
+                    op_args["source"] = slugify(op_args["source"])
+                    el, warnings = st.add_element(c, "instance", _prepare("instance", op_args), checkpoint=False)
                     results.append(_summary(st, c, el, warnings))
+                elif op == "add_svg":
+                    results.append(_svg_elements(c, op_args["svg"], op_args.get("x", 0), op_args.get("y", 0),
+                                                 op_args.get("width"), op_args.get("height"),
+                                                 op_args.get("color", "#ffffff"), op_args.get("group"),
+                                                 op_args.get("id_prefix"), op_args.get("layer"),
+                                                 op_args.get("detail", 1)))
                 else:
                     raise ValueError(f"unknown op '{op}'")
             except KeyError as exc:
@@ -1489,6 +1642,248 @@ def contact_sheet(canvases: list[str] | None = None, columns: int = 4, cell: int
 
 # --------------------------------------------------------------------------- export tools
 
+# --------------------------------------------------------------------------- self-check tools
+
+def _luminance(rgb) -> float:
+    def ch(v: float) -> float:
+        v = v / 255.0
+        return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+    r, g, b = rgb[:3]
+    return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
+
+
+def _contrast(a, b) -> float:
+    la, lb = _luminance(a), _luminance(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _over(rgba, under=(0, 0, 0)) -> tuple[float, float, float]:
+    a = rgba[3] / 255.0
+    return tuple(rgba[i] * a + under[i] * (1 - a) for i in range(3))
+
+
+@tool
+def review_canvas(canvas: str, min_contrast: float = 4.5, min_text_size: float = 12,
+                  backdrop_color: str = "#000000"):
+    """Automatic quality check - run it before exporting, next to looking at `preview` yourself.
+
+    Reports: paint cut off at the canvas edge (shadow/glow/outline clipped), elements outside the canvas,
+    text with low contrast against what is really behind it (WCAG ratio; min_contrast 4.5 for small text,
+    3 is acceptable for big bold labels), text smaller than min_text_size, missing font glyphs,
+    rectangles on fractional pixels (soft, blurry edges), invisible or fully transparent elements,
+    empty / hidden layers, clipped layers with nothing to clip to, animation tracks whose target is gone,
+    and instances whose source is missing. backdrop_color: what transparent areas sit on in the game.
+    """
+    import numpy as np
+    from .colors import parse_color as _pc
+    st = store()
+    c = st.get(canvas)
+    colors = st.theme.get("colors", {})
+    under = _pc(backdrop_color, colors)[:3]
+    issues: list[dict] = []
+
+    def add(kind: str, msg: str, ids: list[str] | None = None, severity: str = "warn") -> None:
+        item: dict = {"severity": severity, "check": kind, "message": msg}
+        if ids:
+            item["ids"] = ids
+        issues.append(item)
+
+    r = st.renderer(c)
+    try:
+        full = r.render(include_background=False)
+    except ValueError as exc:
+        add("render", str(exc), severity="error")
+        return {"canvas": c["id"], "ok": False, "issues": issues}
+    for w in sorted(set(r.warnings)):
+        add("glyphs" if "glyph" in w else "render", w)
+    a = np.asarray(full.getchannel("A"))
+    edges = {"top": a[0, :], "bottom": a[-1, :], "left": a[:, 0], "right": a[:, -1]}
+    cut = [side for side, row in edges.items() if (row > 8).mean() > 0.002]
+    bg_set = c.get("background") not in (None, "none", "transparent")
+    if cut and not bg_set:
+        touch = []
+        for el in c["elements"]:
+            if not el.get("visible", True):
+                continue
+            x0, y0, x1, y1 = r.element_box(el)
+            if x0 < 1 or y0 < 1 or x1 > c["width"] - 1 or y1 > c["height"] - 1:
+                touch.append(el["id"])
+        add("edge", f"paint reaches the canvas edge ({', '.join(cut)}): a shadow, glow or outline is probably "
+                    "cut off in the exported PNG. Make the canvas bigger, move the art inward, or run fit_canvas "
+                    "with some padding (unless the asset is meant to be full-bleed).", touch or None)
+
+    names = {l["name"] for l in c.get("layers", [])}
+    texts = []
+    for el in c["elements"]:
+        eid = el["id"]
+        if not el.get("visible", True):
+            add("hidden", "element is hidden (visible: false)", [eid], "info")
+            continue
+        try:
+            x0, y0, x1, y1 = r.element_box(el)
+        except ValueError as exc:
+            add("render", f"{eid}: {exc}", [eid], "error")
+            continue
+        if x1 <= 0 or y1 <= 0 or x0 >= c["width"] or y0 >= c["height"]:
+            add("offcanvas", "element is entirely outside the canvas", [eid])
+        style = el.get("style")
+        if isinstance(style, dict) and float(style.get("opacity", 1) or 0) <= 0.01 and "opacity" in style:
+            add("transparent", "element has opacity 0", [eid], "info")
+        if el["type"] == "rect" and not el.get("rotation"):
+            vals = [float(el.get(k, 0)) for k in ("x", "y", "width", "height")]
+            if any(abs(v - round(v)) > 1e-6 for v in vals):
+                add("subpixel", "rectangle is not on whole pixels, so its edges render soft "
+                                f"({', '.join(f'{v:g}' for v in vals)})", [eid], "info")
+        if el["type"] == "instance":
+            try:
+                st.get(str(el.get("source")))
+            except ValueError:
+                add("instance", f"instance source '{el.get('source')}' does not exist", [eid], "error")
+        if el["type"] == "text":
+            texts.append(el)
+        if el.get("layer") and el["layer"] not in names:
+            add("layer", f"element points at a missing layer '{el['layer']}' (drawn on base)", [eid])
+
+    # text size + contrast against what is actually behind each text
+    cs = min(1.0, 900.0 / max(c["width"], c["height"]))
+    with_all = None
+    for el in texts:
+        eid = el["id"]
+        tst = resolve_style(el.get("style"), st.theme)
+        size = el.get("size") or tst.get("size") or 24
+        if float(size) < min_text_size:
+            add("text_size", f"text size {float(size):g}px is below {min_text_size:g}px; hard to read in game", [eid])
+        try:
+            if with_all is None:
+                with_all = np.asarray(st.renderer(c, cs).render(), dtype=np.float64)
+            hidden = dict(c, elements=[e for e in c["elements"] if e is not el])
+            without = np.asarray(st.renderer(hidden, cs).render(), dtype=np.float64)
+            bx = r.element_box(el)
+        except ValueError:
+            continue
+        H, W = with_all.shape[:2]
+        x0, y0 = max(0, int(bx[0] * cs)), max(0, int(bx[1] * cs))
+        x1, y1 = min(W, int(bx[2] * cs) + 1), min(H, int(bx[3] * cs) + 1)
+        if x1 - x0 < 2 or y1 - y0 < 2:
+            continue
+        a_box, b_box = with_all[y0:y1, x0:x1], without[y0:y1, x0:x1]
+        diff = np.abs(a_box - b_box).sum(axis=-1)
+        if diff.max() < 3:
+            continue                                # the text changes nothing visible: invisible text
+        lit = diff > diff.max() * 0.25
+        core = diff >= np.quantile(diff[lit], 0.6) if lit.sum() > 8 else diff >= diff.max() * 0.7
+        fg = [float(v) for v in a_box[core].mean(axis=0)]
+        # background = what sits right around the letters, not the whole (possibly huge) text box
+        from .effects import dilate
+        near = dilate(lit.astype(np.uint8) * 255, max(2.0, float(size) * cs * 0.35)) > 0
+        around = near & ~lit
+        pool = b_box[around] if around.sum() > 8 else b_box.reshape(-1, 4)
+        bg = [float(v) for v in pool.mean(axis=0)]
+        ratio = _contrast(_over(fg, under), _over(bg, under))
+        if ratio < min_contrast:
+            add("contrast", f"text contrast {ratio:.2f}:1 is below {min_contrast:g}:1 (text ~{_hex(fg)} on "
+                            f"~{_hex(bg)}). Lighten/darken one side or add a dark outline / shadow.", [eid])
+
+    layers = c.get("layers", [])
+    for i, layer in enumerate(layers):
+        members = [e for e in c["elements"] if e.get("layer") == layer["name"]]
+        if not members:
+            add("layer", f"layer '{layer['name']}' is empty", None, "info")
+        if not layer.get("visible", True):
+            add("layer", f"layer '{layer['name']}' is hidden", None, "info")
+        if layer.get("clip"):
+            has_base = i > 0 or any(e.get("layer") not in names for e in c["elements"])
+            if not has_base:
+                add("layer", f"layer '{layer['name']}' clips to the layer below, but there is nothing below it")
+    for name, anim in (c.get("animations") or {}).items():
+        _, warns = anim_mod.apply_animation(c, anim, 0, st.theme.get("colors", {}))
+        for w in warns:
+            add("animation", f"animation '{name}': {w}")
+        if not anim.get("tracks"):
+            add("animation", f"animation '{name}' has no tracks", None, "info")
+    order = {"error": 0, "warn": 1, "info": 2}
+    issues.sort(key=lambda i: order[i["severity"]])
+    return {"canvas": c["id"], "ok": not any(i["severity"] != "info" for i in issues),
+            "issues": issues or [{"severity": "info", "check": "all", "message": "no problems found"}]}
+
+
+def _hex(rgba) -> str:
+    return "#" + "".join(f"{max(0, min(255, int(round(v)))):02x}" for v in rgba[:3])
+
+
+@tool
+def inspect_pixels(canvas: str, points: list[list[float]], scale: float = 1, include_background: bool = True):
+    """Read exact rendered colours at canvas points [[x, y], ...] (canvas units). Returns RGBA hex per point,
+    and the WCAG contrast ratio between the first two points (e.g. a text pixel and the panel behind it).
+    Use it to verify things the eye can miss in a scaled preview: is the bar really the theme colour, is the
+    hole really transparent, is a highlight blown out to pure white."""
+    st = store()
+    c = st.get(canvas)
+    pts = _maybe_json(points)
+    if not isinstance(pts, list) or not pts or len(pts) > 64:
+        raise ValueError("points must be a list of 1-64 [x, y] pairs")
+    scale = max(0.25, min(8.0, float(scale)))
+    img = st.renderer(c, scale).render(include_background=include_background)
+    out = []
+    samples = []
+    for pt in pts:
+        x, y = float(pt[0]), float(pt[1])
+        px, py = int(x * scale), int(y * scale)
+        if not (0 <= px < img.width and 0 <= py < img.height):
+            out.append({"point": [x, y], "error": "outside the canvas"})
+            continue
+        rgba = img.getpixel((px, py))
+        samples.append(rgba)
+        out.append({"point": [x, y], "rgba": "#" + "".join(f"{v:02x}" for v in rgba), "alpha": round(rgba[3] / 255, 3)})
+    result: dict = {"canvas": c["id"], "pixels": out}
+    if len(samples) >= 2:
+        result["contrast_first_two"] = round(_contrast(_over(samples[0]), _over(samples[1])), 2)
+    return result
+
+
+@tool
+def view_image(path: str, max_size: int = 1024, palette: int = 8):
+    """Look at an image file on this computer: a reference screenshot of the game, a mood board, a logo,
+    or a PNG you exported. Returns the picture plus its dominant colours (hex, share of pixels, darkest
+    to lightest) so you can match a reference's palette with set_theme instead of guessing."""
+    src = Path(path).expanduser()
+    if not src.is_file():
+        raise ValueError(f"Image file not found: {src}")
+    try:
+        img = PILImage.open(src)
+        img.load()
+    except Exception as exc:
+        raise ValueError(f"Could not open {src.name} as an image: {exc}") from exc
+    info: dict = {"file": str(src), "size": list(img.size), "mode": img.mode}
+    rgba = img.convert("RGBA")
+    max_size = max(64, min(2048, int(max_size)))
+    view = rgba.copy()
+    view.thumbnail((max_size, max_size), PILImage.LANCZOS)
+    small = rgba.copy()
+    small.thumbnail((256, 256))
+    import numpy as np
+    arr = np.asarray(small).reshape(-1, 4)
+    opaque = arr[arr[:, 3] > 128][:, :3]
+    if len(opaque) and palette > 0:
+        q = PILImage.fromarray(opaque.reshape(1, -1, 3).astype(np.uint8), "RGB").quantize(
+            colors=max(1, min(16, int(palette))), method=PILImage.Quantize.MEDIANCUT)
+        pal = q.getpalette()
+        counts = sorted(q.getcolors() or [], reverse=True)
+        total = sum(n for n, _ in counts) or 1
+        cols = []
+        for n, idx in counts:
+            rgb = pal[idx * 3: idx * 3 + 3]
+            cols.append({"hex": "#" + "".join(f"{v:02x}" for v in rgb), "share": round(n / total, 3),
+                         "lum": round(_luminance(rgb), 3)})
+        cols.sort(key=lambda d: d["lum"])
+        info["palette"] = [{"hex": d["hex"], "share": d["share"]} for d in cols]
+    if rgba.getchannel("A").getextrema()[0] < 255:
+        info["has_transparency"] = True
+        view = PILImage.alpha_composite(backdrop(view.size, "checker", {}), view)
+    return [Image(data=_png_bytes(view.convert("RGB")), format="png"), json.dumps(info)]
+
+
 def _paint_axes(spec: Any) -> tuple[bool, bool]:
     """Whether a fill/stroke paint changes along x / along y (gradients only)."""
     if not isinstance(spec, dict):
@@ -1762,12 +2157,20 @@ def export_psd(canvas: str, path: str | None = None, scale: float = 1, include_b
         stack_layers.append({"name": "background", "image": st.renderer(bg_only, scale).render(), "opacity": 1,
                              "blend": "normal", "clip": False, "visible": True})
     has_base = False
+    psd_notes: list[str] = []
     for layer, elements in r.stack():
         props = r.layer_props(layer) if layer else {"name": "base", "opacity": 1.0, "blend": "normal", "clip": False,
                                                      "visible": True}
         image, _ = r.layer_image(layer, elements, None, bake_opacity=False)
-        stack_layers.append({"name": props["name"], "image": image, "opacity": props["opacity"], "blend": props["blend"],
-                             "clip": props["clip"] and has_base, "visible": props["visible"]})
+        visible = props["visible"]
+        if props["blend"] == "erase":
+            # Photoshop has no "erase" layer mode: keep the shape as a hidden layer to turn into a mask by hand
+            visible = False
+            psd_notes.append(f"layer '{props['name']}' uses blend 'erase', which PSD cannot store: it is saved hidden "
+                             "(use it as a layer mask in your editor). The merged preview inside the PSD is correct.")
+        stack_layers.append({"name": props["name"], "image": image, "opacity": props["opacity"],
+                             "blend": "normal" if props["blend"] == "erase" else props["blend"],
+                             "clip": props["clip"] and has_base, "visible": visible})
         has_base = True
     if not stack_layers:
         raise ValueError("The canvas is empty")
@@ -1779,6 +2182,8 @@ def export_psd(canvas: str, path: str | None = None, scale: float = 1, include_b
                                               **({} if l["visible"] else {"visible": False})} for l in stack_layers]}
     if r.warnings:
         result["warnings"] = sorted(set(r.warnings))
+    if psd_notes:
+        result["notes"] = psd_notes
     return result
 
 
@@ -1788,14 +2193,14 @@ def export_asset(canvas: str, engine: str = "generic", out_dir: str | None = Non
                  trim: bool = False, padding: int = 0):
     """Export a canvas as an engine-ready UI asset: PNG + "<name>.gameui.json" metadata + manifest entry.
 
-    engine: "unity", "unreal", "roblox" or "generic" (metadata for all three).
+    engine: "unity", "unreal", "roblox", "godot" or "generic" (metadata for all of them).
     out_dir: target folder, e.g. "<UnityProject>/Assets/UI/Generated"; default is the workspace exports folder.
     nine_slice: omit for fixed-size images (icons, logos). "auto" detects the stretchable centre, or give
       {"left": 24, "top": 24, "right": 24, "bottom": 24} in canvas px. Use it for panels, buttons, bars,
       tooltips - anything the engine should resize without distorting corners.
     minimize: shrink the stretchable centre to a few px so the texture stays tiny (9-slice only).
     The result contains the exact numbers per engine: Unity sprite border (L,B,R,T), Unreal brush
-    Margin (L,T,R,B as fractions), Roblox SliceCenter. Run write_engine_helpers once per project folder
+    Margin (L,T,R,B as fractions), Roblox SliceCenter, Godot patch / texture margins (L,T,R,B px). Run write_engine_helpers once per project folder
     to get the import scripts that apply them automatically.
     """
     st = store()
@@ -1918,7 +2323,7 @@ def export_atlas(canvases: list[str], path: str | None = None, scale: float = 1,
 
 @tool
 def write_engine_helpers(engine: str, out_dir: str, roblox_ids: dict | None = None,
-                         unreal_content_path: str = "/Game/UI/Generated"):
+                         unreal_content_path: str = "/Game/UI/Generated", godot_res_path: str = "res://ui/generated"):
     """Write the engine-side helper that applies exported metadata automatically.
 
     unity:  GameUiImporter.cs - out_dir must be an "Editor" folder inside Assets. It imports every PNG that
@@ -1928,6 +2333,8 @@ def write_engine_helpers(engine: str, out_dir: str, roblox_ids: dict | None = No
     roblox: GameUiAssets.luau - a ModuleScript built from game_ui_manifest.json in out_dir, with
             GameUi.apply(imageLabel, "asset_name"). After uploading the PNGs in Studio pass
             roblox_ids={"asset_name": 1234567890} to fill in the asset ids.
+    godot:  one <asset>.stylebox.tres (StyleBoxTexture with texture margins) per 9-sliced asset in out_dir;
+            godot_res_path is where that folder lives inside the Godot project.
     """
     engine = engine.lower()
     folder = Path(out_dir).expanduser()
@@ -1962,7 +2369,20 @@ def write_engine_helpers(engine: str, out_dir: str, roblox_ids: dict | None = No
         missing = [a for a, e in manifest["assets"].items() if not e.get("roblox_id")]
         return {"file": str(target), "assets_without_id": missing,
                 "next": "Upload the PNGs in Roblox Studio, then call this again with roblox_ids to fill them in."}
-    raise ValueError("engine must be 'unity', 'unreal' or 'roblox'")
+    if engine == "godot":
+        if not manifest_path.is_file():
+            raise ValueError(f"No game_ui_manifest.json in {folder}. Run export_asset(engine='godot', out_dir=...) first.")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        written = []
+        for fname, text in engines.godot_styleboxes(manifest, godot_res_path).items():
+            (folder / fname).write_text(text, encoding="utf-8")
+            written.append(fname)
+        return {"folder": str(folder), "files": written,
+                "next": (f"Put this folder at {godot_res_path} in the Godot project. Each .stylebox.tres is a "
+                         "StyleBoxTexture with the 9-slice margins set: assign it to a Panel/Button theme override. "
+                         "For a NinePatchRect use the margins_LTRB numbers from the .gameui.json files.")
+                if written else "No 9-sliced assets in the manifest; plain PNGs need no helper in Godot."}
+    raise ValueError("engine must be 'unity', 'unreal', 'roblox' or 'godot'")
 
 
 def main() -> None:

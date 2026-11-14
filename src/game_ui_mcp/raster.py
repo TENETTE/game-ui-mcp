@@ -46,6 +46,7 @@ def fill_polygons(polys: list[np.ndarray], w: int, h: int, rule: str = "evenodd"
     """Fill closed polygons (each an (N, 2) float array in pixel coordinates). Returns uint8 0/255.
 
     rule="evenodd": overlapping subpaths cut holes. rule="union": everything covered by any polygon.
+    rule="nonzero": SVG's default winding rule (holes only where a subpath runs the other way).
     """
     polys = [np.asarray(p, dtype=np.float64) for p in polys if len(p) >= 3]
     if not polys:
@@ -62,7 +63,7 @@ def fill_polygons(polys: list[np.ndarray], w: int, h: int, rule: str = "evenodd"
             mults.append(np.full(len(p), 1 if area >= 0 else -1, dtype=np.int16))
     mult = np.concatenate(mults) if rule == "union" else None
     acc = _accumulate(np.concatenate(xs0), np.concatenate(ys0), np.concatenate(xs1), np.concatenate(ys1), mult, w, h)
-    inside = (acc & 1).astype(bool) if rule == "evenodd" else (acc != 0)
+    inside = (acc & 1).astype(bool) if rule == "evenodd" else (acc != 0)        # "nonzero" / "union"
     return inside.astype(np.uint8) * 255
 
 

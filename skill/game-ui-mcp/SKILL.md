@@ -1,6 +1,6 @@
 ---
 name: game-ui-mcp
-description: Oyun UI'ı (menü, HUD, buton, panel, bar, gösterge, ikon) çizerken ve canlandırırken game-ui-mcp server'ının temel gereçlerini kullanır: katmanlar, ışık ve gölgeleme, stilize ve gerçekçi tarz, keyframe animasyon; Unity, Unreal, Roblox ve Assetto Corsa için PNG, 9-slice, katman, PSD ve animasyon çıktısı.
+description: Oyun UI'ı (menü, HUD, buton, panel, bar, gösterge, ikon, amblem) çizerken ve canlandırırken game-ui-mcp server'ının temel gereçlerini kullanır: katmanlar, ışık ve gölgeleme, bileşen ve diziler, stilize ve gerçekçi tarz, keyframe animasyon, öz denetim; Unity, Unreal, Roblox, Godot ve Assetto Corsa için PNG, 9-slice, katman, PSD ve animasyon çıktısı.
 ---
 
 # game-ui-mcp ile oyun UI'ı çizmek
@@ -11,11 +11,11 @@ Tool'lar listede yoksa (`create_canvas`, `preview` görünmüyorsa) server bağl
 
 ## Çalışma sırası
 
-1. **Brief.** Motor (Unity / Unreal / Roblox / Assetto Corsa app'i), platform, tür, hangi parçalar lazım ve **stil ailesi**: gerçekçi mi (yarış, simülasyon, AAA) yoksa stilize mi (cartoon, arcade, sci-fi, fantastik). İkisinin kuralları farklı; "Stil ailesi" bölümüne göre ilerle. Eksikse en fazla 2-3 soru sor; kullanıcı "sen karar ver" dediyse karar ver ve ne seçtiğini yaz.
+1. **Brief.** Motor (Unity / Unreal / Roblox / Godot / Assetto Corsa app'i), platform, tür, hangi parçalar lazım ve **stil ailesi**: gerçekçi mi (yarış, simülasyon, AAA) yoksa stilize mi (cartoon, arcade, sci-fi, fantastik). İkisinin kuralları farklı; "Stil ailesi" bölümüne göre ilerle. Eksikse en fazla 2-3 soru sor; kullanıcı "sen karar ver" dediyse karar ver ve ne seçtiğini yaz.
 2. **Tema.** İlk iş `set_theme`. Renkleri ve tekrar eden stilleri orada tanımla, sonra her yerde `$token` ve stil adı kullan. Tek tek hex yazma: kit tutarsızlaşır.
 3. **Canvas.** Her asset ayrı canvas, asset'in gerçek boyutunda. Ekran tasarımı ise 1920x1080 tek canvas (mockup).
 4. **Çiz.** Kat kat: taban → gölge → ışık → detay → yazı, her geçiş ayrı katmanda (`create_layer`; "Katmanlar" ve "Işık ve gölgeleme" bölümleri). `batch` ile, elemanlara açık `id` vererek; tek tek `add_*` çağrısı yavaş.
-5. **Bak.** `preview` çağır ve resme gerçekten bak. Sorun bul, `update_element` ile düzelt, tekrar bak. En az bir tur düzeltme yapmadan export etme.
+5. **Bak.** `preview` çağır ve resme gerçekten bak, sonra `review_canvas` çalıştır (kesilen gölge, düşük kontrast, küçük yazı, eksik glif, bulanık yarım piksel kenar gibi gözden kaçanları sayıyla bulur). Sorun bul, `update_element` ile düzelt, tekrar bak. En az bir tur düzeltme yapmadan export etme.
 6. **Durumlar.** Buton gibi parçalarda `duplicate_canvas` ile hover / pressed / disabled üret.
 7. **Hareket.** Gerekiyorsa `create_animation` + `set_keyframes` ile canlandır, `preview_animation` film şeridine bak ("Animasyon" bölümü).
 8. **Tutarlılık.** `contact_sheet` ile bütün kiti yan yana gör.
@@ -38,6 +38,8 @@ Tool'lar listede yoksa (`create_canvas`, `preview` görünmüyorsa) server bağl
 ```
 
 Palet kuralı: 1 zemin, 1-2 yüzey tonu, 1 ana renk, 1 vurgu, yazı + soluk yazı, durum renkleri (tehlike, başarı, altın). Daha fazlası dağınık görünür. Türkçe metinde `uppercase: "tr"` kullan (i → İ doğru çıkar).
+
+Renk yazarken `hsl(ton, doygunluk%, açıklık%)` en kolayı: aynı tonun koyu ve açık hallerini (`hsl(42, 90%, 58%)` ve `hsl(42, 80%, 30%)`) açıklığı değiştirerek tutarlı üretirsin. CSS adları da geçer (`gold`, `crimson`). Kullanıcı bir referans ekran görüntüsü verdiyse `view_image(path)` ile bak; dönen baskın renk listesinden temayı kur, tahmin etme.
 
 Font seçimi (`list_fonts`): Inter (temiz, modern AAA menü), Barlow Condensed (motorsport, gerçekçi HUD; gerçek italiği var), Bebas Neue (uzun başlık harfleri), Michroma (geniş gösterge paneli yazısı), JetBrains Mono (sabit genişlikli rakam: süre, telemetri), Rajdhani / Orbitron (sci-fi, teknoloji), Cinzel (fantastik, ortaçağ), Fredoka (yuvarlak, casual), Bangers (çizgi roman, arcade). Bir kitte en fazla 2 aile (gerçekçi tarzda tipik ikili: Barlow Condensed + JetBrains Mono). Orbitron'da Ğ/ğ yok; tool uyarı verirse fontu değiştir.
 
@@ -207,6 +209,19 @@ Canvas 320×96. Yazı `anchor: "center"` ile gövdenin tam ortasına: dikey orta
 
 **HUD mockup:** 1920×1080 canvas, arka plan olarak koyu gradient (gerçekçi tarzda üstüne `blur` verilmiş sis elipsi ve radial vinyet). Parçaları güvenli alan içinde tut (kenarlardan ≥ 32 px). `preview(background="game")` ile oyun sahnesi üstünde okunuyor mu bak.
 
+## Bileşen, dizi, delik, SVG
+
+Aynı şeyi elle tekrar çizme; şu gereçler işi hem hızlandırır hem tutarlı tutar:
+
+- **Bileşen (`add_instance`):** tekrar eden bir parçayı (mücevher, slot çerçevesi, tuş, madalya) kendi canvas'ında bir kez çiz, sonra başka canvas'lara `add_instance(source=...)` ile koy. Kaynağı değiştirince bütün kopyalar değişir; her yerleştirildiği boyutta vektör olarak yeniden çizilir, bulanıklaşmaz. `animation` + `time` ile kaynağın animasyonunun belli bir anını gösterir (farklı fazlarda dönen yükleme göstergeleri). Kopyaya ayrıca gölge, glow, `light`, `adjust` verilebilir. Bir canvas kendini (dolaylı da olsa) içeremez.
+- **Dizi (`duplicate_element`):** `count` ile doğrusal dizi (envanter satırı: `dx=72, count=7`); `rotate` + `pivot` ile dairesel dizi (dişli dişi, perçin, kadran işareti, slot halkası: `count=23, rotate=15, pivot=[merkez]`). Tek elemanı doğru çiz, sonra çoğalt.
+- **Delik (`style.blend: "erase"`):** aynı katmanda altta ne varsa keser: panelde pencere, kartta çentik, yıldızın ortasında halka, oyma yazı. Kesilecek şeyle kesen şekli kendi katmanına koy; o zaman delik yalnızca o katmanı keser, katman stili (gölge, kontur) deliğin kenarına da uygulanır.
+- **Aynalama (`flip_x` / `flip_y`):** sol ve sağ ok, simetrik kanatlar, karşılıklı sekmeler için ikinci yarıyı çizme; kopyala ve aynala. Gölge ve ışık yönü aynalanmaz, sahnenin ışığıyla tutarlı kalır.
+- **Yay üstü yazı (`add_text(arc={cx, cy, radius, side})`):** amblem, rozet, yuvarlak gösterge yazıları. `side: "outer"` üstten saat yönünde, `"inner"` alttan soldan sağa okunur. `anchor`'ın dikey kısmı yarıçapa neyin oturacağını seçer: `"middle-center"` harflerin ortasını bandın ortasına koyar.
+- **SVG (`add_svg`):** kullanıcının logosu, açık ikon setlerinden bir ikon ya da karmaşık bir silüeti SVG olarak yazmak (kanat, kalkan, araba silüeti) için. Her şekil ayrı `path` olur, sonra `update_element` ile ışık, bevel, gradient verirsin. `currentColor` yerine `color` geçer. Metin, filtre ve maske gelmez; `notes` atlananları söyler.
+- **Kontur köşeleri:** çokgen ve path konturları varsayılan olarak keskin (`join: "miter"`); yumuşak istiyorsan `"round"`, sivri uçlar fazla uzuyorsa `"bevel"` ya da küçük `miter_limit`. Kesikli kontur için `stroke.dash: [açık, boşluk]` (seçim çerçevesi, boş slot, hedef alanı).
+- **Kenar payı (`fit_canvas`):** asset'i bol yerli bir canvas'ta çiz, bitince `fit_canvas(padding=2)`: canvas gölge ve glow dahil boyanan alana göre daralır, hiçbir şey kesilmez.
+
 ## Animasyon
 
 Hazır animasyon yok: hangi özelliğin ne zaman, hangi değere, hangi ivmeyle gideceğini `create_animation` + `set_keyframes` ile sen yazarsın. Neredeyse her şey keyframe'lenir: konum (`dx`, `dy`), boyut (`scale`, `scale_x`, `scale_y`, `width`, `height`), `rotation`, `opacity`, renk ve gradient (`style.fill`), efekt (`style.glow.blur`, `style.shadow.dy`), yay (`end_angle`), kesik çizgi akışı (`dash_offset`), yazı ve görünürlük (`text`, `visible`: adım adım değişir).
@@ -261,11 +276,11 @@ Motorun köşeleri bozmadan esnetebilmesi için merkezin tek düze olması gerek
 
 ## Kontrol turu (her asset için)
 
-`preview` resmine bakarken sırayla:
+Önce `review_canvas` çalıştır ve her `warn` maddesini düzelt (bilerek yaptıysan nedenini kullanıcıya söyle). Sonra `preview` resmine bakarken sırayla:
 
-1. Kesilen gölge ya da glow var mı? (kenara yapışmış koyu bant) → canvas'ı büyüt ya da efekti küçült.
+1. Kesilen gölge ya da glow var mı? (kenara yapışmış koyu bant) → canvas'ı büyüt, efekti küçült ya da `fit_canvas`.
 2. Yazı kutuya sığıyor mu, ortada mı? `add_text` sonucundaki `bbox_xywh` ile gövde boyutunu karşılaştır; taşarsa `fit_width` ya da küçük `size`.
-3. Kontrast: yazı zemin üstünde net mi? HUD için `background="game"` ile dene; gerekirse yazıya koyu `stroke` (2-3 px) ya da `shadow` ekle.
+3. Kontrast: yazı zemin üstünde net mi? `review_canvas` oranı verir (küçük yazı için 4.5:1, büyük kalın başlık için 3:1). HUD için `background="game"` ile dene; gerekirse yazıya koyu `stroke` (2-3 px) ya da `shadow` ekle. Bir rengin gerçekte ne çıktığından emin değilsen `inspect_pixels`.
 4. Hizalama: aynı sıradaki parçalar aynı çizgide mi, boşluklar eşit mi? `align_elements` ile düzelt, elle tahmin etme.
 5. Detay: `preview(region=[x,y,w,h], zoom=4)` ile köşelere ve ince çizgilere yakından bak.
 6. Nerede ne olduğu karıştıysa `preview(show_ids=true)`.
@@ -290,6 +305,8 @@ Bir şey beklediğin gibi çıkmadıysa `get_canvas(details=true)` ile gerçek d
 **Unity:** `write_engine_helpers("unity", "<Proje>/Assets/Editor")` → `export_asset(engine="unity", out_dir="<Proje>/Assets/UI/Generated")`. Importer her PNG'yi Sprite yapar ve 9-slice border'ı (L, B, R, T) ayarlar. uGUI'de `Image.type = Sliced`; UI Toolkit'te USS `-unity-slice-left/top/right/bottom` aynı sayılarla. Yazı TextMeshPro ile.
 
 **Unreal:** `export_asset(engine="unreal", out_dir=<klasör>)` → `write_engine_helpers("unreal", <klasör>)` → editörde Python ile `import_game_ui.py` çalıştırılır. Texture'lar UI ayarlarıyla gelir; her brush için `Draw As: Box` ve `Margin` (L, T, R, B, 0-1 arası) log'a yazılır. Widget tarafında `UImage` / `UButton` brush'larına bu değerleri gir.
+
+**Godot 4:** `export_asset(engine="godot", out_dir=<proje>/ui/generated)` → `write_engine_helpers("godot", <aynı klasör>, godot_res_path="res://ui/generated")`. Her 9-slice asset için `<ad>.stylebox.tres` (StyleBoxTexture, texture margin'leri ayarlı) yazılır; Panel / Button tema override'ına verilir. `NinePatchRect` için `.gameui.json` içindeki `margins_LTRB` değerlerini `patch_margin_*` alanlarına gir. Yazı `Label` ile.
 
 **Katmanlı çıktı:** `export_layers` canvas'ı katman katman verir (her katman kendi stili, opaklığı ve kırpmasıyla ayrı PNG + konumları içeren `<ad>.layout.json`). Tabana clip'li gölge ve ışık katmanları varsayılan olarak tabanın görseline gömülür, çünkü motor multiply / screen ya da kırpma uygulayamaz; ayrı ayrı istenirse `merge_clipped: false`. Görsel düzenleyicide devam edilecekse `export_psd`: ad, opaklık, karışım modu ve clip korunur (Photoshop, Photopea, Krita, GIMP), katman stilleri piksele gömülür.
 
@@ -316,5 +333,7 @@ Motor helper dosyaları bu server'da derlenip denenmedi; kullanıcı ilk kullan�
 - Gölge şekillerini elle tabana sığdırmaya uğraşmak (clip katmanı kullan) ya da aynı konturu ve gölgeyi her elemana ayrı ayrı vermek (katman stili kullan).
 - Her şeyi tek katmana çizip sonra parça parça çıktı istemek.
 - Animasyonu film şeridine bakmadan export etmek; her şeye bounce / elastic vermek; motorun tween'leyebileceği basit hareketi sprite sheet'e gömmek (gereksiz doku).
-- Aynı şeyi 6 kere elle çizmek: `duplicate_element` ve `align_elements(distribute=...)` kullan.
+- Aynı şeyi 6 kere elle çizmek: `duplicate_element` (`count`, `rotate`, `pivot`), tekrar eden karmaşık parçalar için `add_instance`, aralık için `align_elements(distribute=...)`.
+- Simetrik parçanın iki yarısını ayrı ayrı çizmek (`flip_x` var) ya da delik açmak için zemin renginde şekil koymak (zemin değişince ortaya çıkar; `blend: "erase"` kullan).
+- `review_canvas` uyarılarını okumadan export etmek.
 - Karakter portresi, illüstrasyon gibi şeyleri şekillerle çizmeye çalışmak. Onlar bu aracın işi değil: yer tutucu bir çerçeve çiz, kullanıcı görseli verirse `add_image` ile yerleştir.

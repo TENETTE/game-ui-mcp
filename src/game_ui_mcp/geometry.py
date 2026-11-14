@@ -359,3 +359,87 @@ def rotated_bbox(box: tuple[float, float, float, float], degrees: float,
         xs.append(cx + dx * c - dy * s)
         ys.append(cy + dx * s + dy * c)
     return (min(xs), min(ys), max(xs), max(ys))
+
+
+def signed_area(pts: list[Point]) -> float:
+    a = 0.0
+    n = len(pts)
+    for i in range(n):
+        x0, y0 = pts[i]
+        x1, y1 = pts[(i + 1) % n]
+        a += x0 * y1 - x1 * y0
+    return a / 2.0
+
+
+def point_in_polygon(x: float, y: float, pts: list[Point]) -> bool:
+    inside = False
+    n = len(pts)
+    j = n - 1
+    for i in range(n):
+        xi, yi = pts[i]
+        xj, yj = pts[j]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
+def _clean_ring(pts: list[Point]) -> list[Point]:
+    out: list[Point] = []
+    for p in pts:
+        if not out or math.hypot(p[0] - out[-1][0], p[1] - out[-1][1]) > 1e-9:
+            out.append((float(p[0]), float(p[1])))
+    if len(out) > 1 and math.hypot(out[0][0] - out[-1][0], out[0][1] - out[-1][1]) <= 1e-9:
+        out.pop()
+    return out
+
+
+def offset_ring(pts: list[Point], d: float, outward_sign: float, join: str = "miter",
+                miter_limit: float = 4.0) -> list[Point]:
+    """Offset a closed ring by ``d`` (positive = away from the filled side) with sharp (miter) or
+    bevel corners. ``outward_sign`` is +1 or -1 and says which edge normal points out of the shape.
+    Corners whose miter would be longer than ``miter_limit`` * |d| are bevelled."""
+    ring = _clean_ring(pts)
+    n = len(ring)
+    if n < 3 or d == 0:
+        return ring
+    normals = []
+    for i in range(n):
+        x0, y0 = ring[i]
+        x1, y1 = ring[(i + 1) % n]
+        ex, ey = x1 - x0, y1 - y0
+        ln = math.hypot(ex, ey) or 1.0
+        normals.append((outward_sign * ey / ln, -outward_sign * ex / ln))
+    out: list[Point] = []
+    for i in range(n):
+        n1 = normals[i - 1]
+        n2 = normals[i]
+        vx, vy = ring[i]
+        dot = n1[0] * n2[0] + n1[1] * n2[1]
+        if dot > 1 - 1e-9:
+            out.append((vx + d * n2[0], vy + d * n2[1]))
+            continue
+        factor = math.sqrt(2.0 / max(1e-9, 1.0 + dot))       # miter length / |d|
+        if join == "bevel" or factor > miter_limit or 1.0 + dot < 1e-6:
+            out.append((vx + d * n1[0], vy + d * n1[1]))
+            out.append((vx + d * n2[0], vy + d * n2[1]))
+        else:
+            sx, sy = n1[0] + n2[0], n1[1] + n2[1]
+            out.append((vx + d * sx / (1.0 + dot), vy + d * sy / (1.0 + dot)))
+    return out
+
+
+def offset_shape(rings: list[list[Point]], d: float, join: str = "miter", miter_limit: float = 4.0) -> list[list[Point]]:
+    """Offset every ring of an even-odd filled shape: outlines grow by d, holes shrink by d."""
+    cleaned = [_clean_ring(r) for r in rings]
+    out = []
+    for i, ring in enumerate(cleaned):
+        if len(ring) < 3:
+            continue
+        depth = sum(1 for j, other in enumerate(cleaned)
+                    if j != i and len(other) >= 3 and point_in_polygon(ring[0][0], ring[0][1], other))
+        sign = 1.0 if signed_area(ring) > 0 else -1.0
+        if depth % 2:
+            sign = -sign                                   # a hole: "outward" is into the hole
+        out.append(offset_ring(ring, d, sign, join, miter_limit))
+    return out
