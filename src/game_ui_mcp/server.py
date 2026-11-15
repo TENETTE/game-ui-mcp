@@ -1575,6 +1575,9 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
       "frames"      numbered PNG files in a folder.
       "gif" / "apng" / "webp"   one animated file to look at or share (GIF: 256 colors, hard edges on
                     transparency; APNG and WebP keep full quality and alpha).
+      "lottie"      Lottie JSON for apps, the web (lottie-web), and Lottie players in Unity / Unreal / Godot.
+                    Moving, rotating, scaling and fading parts stay real Lottie animation; parts whose
+                    colour / glow / shape animates become one picture per frame (the result says which).
     fps: sampling rate (default: the animation's own). scale: resolution multiplier.
     background: "dark", "light", "checker", "game" or a color to put behind the frames. Without it, sprite
       sheets and frames are transparent; animated files show the canvas background if it has one (a GIF
@@ -1588,9 +1591,24 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
     st.require_glyphs(c, None)
     key, anim = st.get_animation(c, animation)
     fmt = format.lower()
-    if fmt not in ("json", "spritesheet", "frames", "gif", "apng", "webp"):
-        raise ValueError("format must be json, spritesheet, frames, gif, apng or webp")
+    if fmt not in ("json", "spritesheet", "frames", "gif", "apng", "webp", "lottie"):
+        raise ValueError("format must be json, spritesheet, frames, gif, apng, webp or lottie")
     base_name = f"{c['id']}_{key}"
+    if fmt == "lottie":
+        from . import lottie
+        if not 0.1 <= float(scale) <= 8:
+            raise ValueError("scale must be between 0.1 and 8")
+        out = Path(path).expanduser() if path else st.exports_dir / "animations" / f"{base_name}.lottie.json"
+        if not out.is_absolute():
+            out = st.exports_dir / out
+        if out.suffix.lower() != ".json":
+            raise ValueError("lottie export path must end with .json")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        doc, report = lottie.build(st, c, anim, base_name, fps, float(scale), bool(background) or bool(c.get("background")))
+        out.write_text(json.dumps(doc, separators=(",", ":")), encoding="utf-8")
+        return {"file": str(out), "frames": doc["op"], "fps": doc["fr"], "size": [doc["w"], doc["h"]],
+                "animated_by_transform": report["transform"], "baked_per_frame": report["frames"],
+                "static": report["static"], "bytes": out.stat().st_size}
     if fmt == "json":
         out = Path(path).expanduser() if path else st.exports_dir / "animations" / f"{base_name}.anim.json"
         if not out.is_absolute():
