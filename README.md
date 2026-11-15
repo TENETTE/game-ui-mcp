@@ -73,28 +73,28 @@ Without a working CUDA device the `[gpu]` build quietly falls back to the CPU wi
 
 ## What it can do
 
-- **Shapes:** rects (round, cut or smoothed "squircle" corners, skew), ellipses, polygons and stars, lines, arcs, gauge ticks, SVG paths and SVG import, exact boolean union / subtract / intersect / exclude, components (instances of other canvases), linear and circular arrays
+- **Shapes:** rects (round, cut or smoothed "squircle" corners, skew), ellipses, polygons and stars, lines, arcs, gauge ticks, SVG paths and SVG import, exact boolean union / subtract / intersect / exclude, flatten / offset / outline stroke, components (instances of other canvases), linear and circular arrays
 - **Style:** solid, linear / radial / conic gradients (OKLab option), patterns, fill stacks, your own per-pixel shader formulas, inside / center / outside / dashed / single-side strokes, shadows, glows, inner effects, bevel, directional 3D lighting, background blur (frosted glass), 13 blend modes, layers with clipping
 - **Text:** 10 bundled fonts plus system fonts; Arabic, Hebrew, Indic, Thai and CJK shaped with HarfBuzz; text on arcs; ellipsis truncation; underline / strikethrough; missing-glyph checks that refuse broken exports
-- **Design system:** colour tokens, named styles, variable modes (light / dark / team colours), interaction states, templates from data rows, string tables with pseudo-localisation, named version history
+- **Design system:** colour tokens, generated palettes with contrast checks, kit-wide colour / font replace, named styles, variable modes (light / dark / team colours), interaction states, templates from data rows, string tables with pseudo-localisation, named version history
 - **Layout:** row / column / grid auto layout with wrap and hug, pinning to screen edges, device presets with safe areas, multi-resolution preview, colour-blindness simulation
 - **Animation:** keyframes with 30+ eases on any property, filmstrip preview, GIF / APNG / WebP / sprite sheet / frames, or tween JSON for the engine
 - **Hand-off:** PNG / WebP / JPG / ICO, density presets, layered PNG / SVG, PSD, atlases, bitmap fonts, design tokens (CSS, USS, C#, GDScript, Luau), clickable HTML prototypes, engine scenes and import helpers
 
 Full feature list, style reference, layers, animation and engine tables: **[docs/GUIDE.md](docs/GUIDE.md)** (Turkish).
 
-## Tools (74)
+## Tools (78)
 
 | Group | Tools |
 | --- | --- |
 | Canvas | `create_canvas`, `list_canvases`, `get_canvas`, `update_canvas`, `duplicate_canvas`, `delete_canvas`, `fit_canvas`, `resize_canvas`, `canvas_version` |
 | Layers | `create_layer`, `update_layer`, `delete_layer`, `set_layer` |
 | Drawing | `add_rect`, `add_ellipse`, `add_line`, `add_polygon`, `add_path`, `add_arc`, `add_ticks`, `add_text`, `add_image`, `add_instance`, `add_svg` |
-| Editing | `update_element`, `delete_elements`, `duplicate_element`, `boolean_elements`, `move_elements`, `reorder_element`, `align_elements`, `arrange_elements`, `scatter`, `copy_elements`, `set_pin`, `batch`, `undo`, `redo` |
+| Editing | `update_element`, `delete_elements`, `duplicate_element`, `boolean_elements`, `path_ops`, `restyle`, `move_elements`, `reorder_element`, `align_elements`, `arrange_elements`, `scatter`, `copy_elements`, `set_pin`, `batch`, `undo`, `redo` |
 | States, data, language | `set_state`, `delete_state`, `generate_from_template`, `set_strings`, `get_strings` |
 | Checks | `review_canvas`, `inspect_pixels`, `view_image`, `preview_nine_slice` |
 | Animation | `create_animation`, `set_keyframes`, `delete_keyframes`, `get_animations`, `delete_animation`, `preview_animation`, `export_animation` |
-| Theme and info | `set_theme`, `get_theme`, `list_fonts`, `measure_text` |
+| Theme and info | `set_theme`, `get_theme`, `make_palette`, `list_fonts`, `measure_text`, `guide` |
 | Preview | `preview`, `preview_resolutions`, `contact_sheet` |
 | Export | `export_png`, `export_svg`, `export_asset`, `export_layers`, `export_psd`, `export_atlas`, `export_bitmap_font`, `write_engine_helpers` |
 | Hand-off | `export_spec`, `export_theme`, `set_link`, `export_prototype`, `export_screen` |
@@ -117,7 +117,7 @@ Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 - It does not generate characters, illustrations or photos; place existing art with `add_image`.
 - Engine-side files are generated and format-tested but not yet opened inside Unity, Unreal, Godot or Roblox.
-- The 74 tool definitions take about 25k tokens; clients that load tools on demand (Claude Code) pay much less.
+- The 78 tool definitions take about 25k tokens; clients that load tools on demand (Claude Code) pay much less.
 
 Full list: [docs/GUIDE.md](docs/GUIDE.md#sınırlar).
 

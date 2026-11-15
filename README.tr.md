@@ -68,7 +68,7 @@ JSON config'te: `"args": ["--from", "game-ui-mcp[gpu] @ git+https://github.com/T
 
 - **Çizim:** dikdörtgen (Figma tarzı yumuşak "squircle" köşe dahil), elips, çokgen, yay, kadran çizgisi, SVG path ve SVG içe aktarma, boolean (birleştir / çıkar / kesiştir / dışla), başka canvas'ı bileşen olarak kullanma
 - **Stil:** gradient, doku, üst üste dolgu yığını, arka plan bulanıklığı (buzlu cam), tek kenara kontur, gölge, glow, bevel, yönlü ışık, 13 karışım modlu katmanlar, AI'ın kendi yazdığı piksel formülleri (shader dolgusu)
-- **Tasarım sistemi:** renk token'ları, isimli stiller, açık / koyu / takım renkleri gibi modlar (Figma variables), satır atlayan otomatik yerleşim, isimli sürüm geçmişi
+- **Tasarım sistemi:** kontrast kontrollü renk paleti üretme, tüm kitte renk / font değiştirme, renk token'ları, isimli stiller, açık / koyu / takım renkleri gibi modlar (Figma variables), satır atlayan otomatik yerleşim, isimli sürüm geçmişi
 - **Yazı:** 10 gömülü font + sistem fontları, "..." ile kırpma, altı / üstü çizili yazı; Arapça, İbranice, Hintçe, Tayca, Çince, Japonca, Korece doğru şekillenir
 - **Ekranlar:** hazır cihaz boyutları ve güvenli alanlar, kenara sabitleme, çok çözünürlük önizleme, renk körlüğü simülasyonu
 - **Durum ve veri:** hover / pressed / disabled, tek şablondan onlarca kart, dil tabloları ve sahte (pseudo) dillerle taşma testi
@@ -77,18 +77,18 @@ JSON config'te: `"args": ["--from", "game-ui-mcp[gpu] @ git+https://github.com/T
 
 Ayrıntılı özellik listesi, stil nesnesi, katmanlar, animasyon ve motor tabloları: **[docs/GUIDE.md](docs/GUIDE.md)**
 
-## Tool'lar (74)
+## Tool'lar (78)
 
 | Grup | Tool'lar |
 | --- | --- |
 | Canvas | `create_canvas`, `list_canvases`, `get_canvas`, `update_canvas`, `duplicate_canvas`, `delete_canvas`, `fit_canvas`, `resize_canvas`, `canvas_version` |
 | Katman | `create_layer`, `update_layer`, `delete_layer`, `set_layer` |
 | Çizim | `add_rect`, `add_ellipse`, `add_line`, `add_polygon`, `add_path`, `add_arc`, `add_ticks`, `add_text`, `add_image`, `add_instance`, `add_svg` |
-| Düzenleme | `update_element`, `delete_elements`, `duplicate_element`, `boolean_elements`, `move_elements`, `reorder_element`, `align_elements`, `arrange_elements`, `scatter`, `copy_elements`, `set_pin`, `batch`, `undo`, `redo` |
+| Düzenleme | `update_element`, `delete_elements`, `duplicate_element`, `boolean_elements`, `path_ops`, `restyle`, `move_elements`, `reorder_element`, `align_elements`, `arrange_elements`, `scatter`, `copy_elements`, `set_pin`, `batch`, `undo`, `redo` |
 | Durum, veri, dil | `set_state`, `delete_state`, `generate_from_template`, `set_strings`, `get_strings` |
 | Denetim | `review_canvas`, `inspect_pixels`, `view_image`, `preview_nine_slice` |
 | Animasyon | `create_animation`, `set_keyframes`, `delete_keyframes`, `get_animations`, `delete_animation`, `preview_animation`, `export_animation` |
-| Tema ve bilgi | `set_theme`, `get_theme`, `list_fonts`, `measure_text` |
+| Tema ve bilgi | `set_theme`, `get_theme`, `make_palette`, `list_fonts`, `measure_text`, `guide` |
 | Önizleme | `preview`, `preview_resolutions`, `contact_sheet` |
 | Dışa aktarma | `export_png`, `export_svg`, `export_asset`, `export_layers`, `export_psd`, `export_atlas`, `export_bitmap_font`, `write_engine_helpers` |
 | Teslim | `export_spec`, `export_theme`, `set_link`, `export_prototype`, `export_screen` |
@@ -109,7 +109,7 @@ Canvas'lar, tema ve dışa aktarmalar `~/GameUI` klasöründe durur (oturum kapa
 
 - Karakter, illüstrasyon, fotoğraf üretmez; hazır görseli `add_image` ile yerleştirebilirsin.
 - Motor tarafı dosyalar üretiliyor ve biçimleri test ediliyor, ama Unity / Unreal / Godot / Roblox içinde henüz denenmedi.
-- 74 tool'un tanımı yaklaşık 25 bin token; tool'ları gerektikçe yükleyen istemcilerde (Claude Code) bu maliyet düşer.
+- 78 tool'un tanımı yaklaşık 25 bin token; tool'ları gerektikçe yükleyen istemcilerde (Claude Code) bu maliyet düşer.
 
 Tam liste: [docs/GUIDE.md](docs/GUIDE.md#sınırlar).
 

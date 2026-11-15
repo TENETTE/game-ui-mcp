@@ -38,100 +38,28 @@ from .render import TextLayout, backdrop, composite as _composite, resolve_style
 from .store import Store, slugify
 
 INSTRUCTIONS = """\
-Draw game UI assets (panels, buttons, bars, icons, HUD pieces, full screen mockups) as layered vector
-elements on canvases, look at them with `preview`, then export PNGs for Unity / Unreal / Roblox.
-Everything is local and deterministic: no image generation model is involved.
+Draw game and app UI (panels, buttons, bars, icons, HUDs, whole screens) as layered vector elements on
+canvases, look at them with `preview`, fix them, then export for Unity / Unreal / Godot / Roblox / Figma.
+Local and deterministic: no image model. There are no ready-made components or icons: build everything
+from these primitives (icons with add_path / add_svg) and judge the result yourself.
 
-Workflow: set_theme (colors + reusable styles) -> create_canvas -> add_* / batch -> preview ->
-fix with update_element -> export_asset / export_png / export_atlas.
+Workflow: set_theme (colour tokens, named styles, modes) -> create_canvas -> batch / add_* -> preview ->
+review_canvas -> fix with update_element -> export (export_asset, export_png, export_svg, export_layers...).
+Always call preview after a group of changes and actually look at the image before exporting.
 
-Coordinates are canvas units = pixels at 1x, origin top-left, y down. Elements draw in the order
-they were added (later = on top); use reorder_element to change that.
+Coordinates: canvas units = pixels at 1x, origin top-left, y down; later elements draw on top
+(reorder_element changes that). Colours: "#rrggbb", "#rrggbbaa", "rgba()", "hsl()", CSS names or "$token"
+from the theme; append "@0.5" for alpha ("$primary@0.6").
+Fill: a colour, a gradient {"type":"linear","angle":90,"stops":[[0,"#3b82f6"],[1,"#1d4ed8"]]} (also radial,
+conic), a pattern (stripes, dots, grid, hex, carbon, brushed, clouds), an image, a "shader" formula you
+write, or a list of fills stacked bottom to top.
+Style keys: fill, stroke {color, width, align, dash, sides}, shadow, glow, inner_shadow, inner_glow, bevel,
+light (3D lighting), blur, backdrop_blur (frosted glass), mask, adjust, opacity, blend, noise.
 
-Colors: "#rrggbb", "#rrggbbaa", "rgba(r,g,b,a)", "hsl(210, 80%, 55%)", any CSS color name ("gold",
-"crimson"...), or "$token" from the theme. Append "@0.5" for alpha, e.g. "#ffffff@0.2", "$primary@0.6".
-
-Fill: a color, or a gradient/pattern object:
-  {"type":"linear","angle":90,"stops":[[0,"#3b82f6"],[1,"#1d4ed8"]]}   (angle 0 = left->right, 90 = top->bottom)
-  {"type":"radial","cx":0.5,"cy":0.5,"r":0.5,"stops":[...]}            (cx/cy/r relative to the element box)
-  {"type":"conic","from":135,"to":405,"stops":[...]}                   (sweep around the box centre; angles as in add_arc)
-  {"type":"stripes"|"dots"|"grid","color":"#fff@0.08","color2":"transparent","size":8,"angle":45}
-  {"type":"carbon","color":"#2a2d33","color2":"#0d0e10","size":4}      (carbon-fibre weave)
-  {"type":"brushed","color":"#9aa3ad","color2":"#5c646e","angle":0,"amount":0.5}   (brushed metal)
-  {"type":"hex","color":"#fff@0.1","size":16,"line_width":1}           (honeycomb lines)
-  {"type":"clouds","color":"#fff@0.3","color2":"transparent","size":48,"octaves":4,"seed":1,"contrast":1.5}
-  {"type":"image","path":"C:/textures/metal.png","fit":"cover"|"stretch"|"tile","scale":1}   (your own texture)
-  Gradients take "space":"oklab" for vivid, even blends between distant hues (default "srgb").
-  A list of fills stacks them bottom to top (Figma fill stack): [gradient, {"type":"stripes",...}, "#fff@0.1"].
-  {"type":"shader","code":"...","params":{...}} - your own per-pixel formula when no preset fits (plasma,
-    energy, hologram scanlines, marble, wood, rust, ripples, scales, cracks, warped patterns...). Write plain
-    statements that end by assigning r, g, b (0..1) and optionally a. Inputs: x, y (units from the box's
-    top-left), u, v (0..1 across the box), w, h (box size), px (pixels per unit), pi. Functions: sin cos tan
-    asin acos atan atan2 sqrt abs exp log pow floor ceil round fract mod min max sign clamp mix step
-    smoothstep length hypot where, noise(x,y[,seed]) (0..1 smooth), fbm(x,y,octaves[,seed]) (fractal),
-    voronoi(x,y[,seed]) (distance to nearest cell point), rand(x,y[,seed]). No if/loops: use where().
-    params: numbers become names; colour strings ("$primary", "#ff8800") become name_r name_g name_b name_a.
-    Animate any param with set_keyframes, property "style.fill.params.<name>" (e.g. a time param t).
-    Example (energy core): {"type":"shader","params":{"c":"#38bdf8","t":0},"code":
-      "d = length(u-0.5, v-0.5)*2; n = fbm(x/30+t, y/30, 4); k = clamp(1-d+n*0.4); r = c_r*k+k*k*0.6; g = c_g*k+k*k*0.6; b = c_b*k; a = smoothstep(1, 0.7, d)"}
-
-Style object (every key optional; `style` may also be a theme style name, or {"use":"name", ...overrides}):
-  fill, opacity, noise: 0-1, blur: px (softens the whole element: light blooms, haze),
-  stroke {color, width, align: inside|center|outside, offset, join: miter|round|bevel, miter_limit, dash: [on, off],
-    dash_offset} - or a list of strokes for double outlines. Polygons/paths default to sharp miter corners,
-  blend: normal|add|screen|multiply|overlay|soft-light|hard-light|color-dodge|color-burn|darken|lighten|difference|
-    erase (cuts a hole through what is already on the same layer: windows, notches, cut-out lettering),
-  shadow {color, blur, dx, dy, spread, knockout}, glow {color, blur, strength, spread},
-  inner_shadow {color, blur, dx, dy}, inner_glow {color, blur}, bevel {size, highlight, shadow},
-  light {angle, altitude, size, depth, profile: round|chisel, highlight, shadow, gloss, soften} - lights the
-    shape as a raised 3D surface (angle = where the light comes from; 225 = top-left),
-  mask: a fill spec whose alpha fades the element out (e.g. a linear gradient from opaque to "#000@0"),
-  adjust {brightness, contrast, saturation: -1..1, hue: degrees, tint: color, invert}.
-  shadow / glow / inner_shadow / inner_glow also accept a list for stacked effects.
-
-Shapes like a design tool: boolean_elements merges / subtracts / intersects / excludes filled shapes into one
-exact vector outline (strokes and shadows follow the cut; prefer it to blend "erase" for holes); add_rect
-smoothing 0..1 gives Figma-style smoothed "squircle" corners; arrange_elements(wrap=true) flows items onto new
-lines; set_theme(modes={...}, mode=...) switches every $token between light / dark / team / seasonal sets.
-export_svg writes an editable vector SVG for Figma, Penpot, Illustrator and the web.
-style.backdrop_blur: px blurs whatever is already drawn beneath the shape (frosted glass panels; give
-  its shadow "knockout": true so the shadow does not show through the glass);
-stroke.sides ["top", "bottom"...] strokes only some edges of a rect (tab underlines, dividers);
-add_text max_lines + max_width truncates with "...", decoration "underline" | "strikethrough";
-canvas_version saves / restores named versions of a canvas.
-
-Layers (create_layer): a canvas is a stack of layers, bottom to top; new elements go to the active layer.
-A layer has its own opacity, blend mode and style - layer styles (shadow, glow, stroke, light, blur, adjust,
-mask...) apply to everything on the layer as one merged shape. clip=true confines a layer to the pixels of
-the layer below: that is how you paint shading and highlights freely on top of a base shape (dark soft
-shapes on a multiply layer, light ones on a screen or overlay layer). export_layers / export_psd give the
-stack back as separate images or an editable PSD.
-
-Angles (add_arc, add_ticks, conic): degrees, 0 = 3 o'clock, clockwise. A classic gauge sweeps 135 -> 405.
-Any element takes rotation (degrees clockwise) and origin [x, y] as the pivot (default: its centre) -
-e.g. a needle pivoting on the gauge hub. Shapes and text take skew (degrees) for slanted, italic looks.
-Any element also takes scale / scale_x / scale_y and flip_x / flip_y (mirror; lighting stays put) - set
-them with update_element or as extra keys in batch add ops. Text takes arc {cx, cy, radius} to run along
-a circle. Paths take fill_rule "nonzero" | "evenodd".
-
-Reuse and import: add_instance places another canvas as a live component (edit once, every copy follows);
-duplicate_element with count / rotate / pivot makes linear and radial arrays; add_svg imports SVG markup
-or a .svg file as editable paths (logos, icons from any set, art you write as SVG).
-
-Checking: review_canvas finds clipped shadows at the canvas edge, low text contrast, tiny text, missing
-glyphs, blurry half-pixel rects, broken layers and animations. inspect_pixels reads exact colours.
-view_image shows you a reference image from disk with its dominant palette. fit_canvas trims or grows the
-canvas to the painted area.
-
-Animation: create_animation, then set_keyframes per (target, property). Any numeric or color property can be
-keyframed (x, width, rotation, radius, end_angle, style.glow.blur, style.fill, ...) plus the helpers dx, dy
-(move), scale / scale_x / scale_y (around the pivot) and opacity. Check motion with preview_animation (a
-filmstrip of frames) and export with export_animation (sprite sheet, frames, GIF/APNG/WebP, or keyframe JSON).
-
-There are no ready-made components or icons (no "button", "panel" or icon library): build everything from
-these primitives - icons included, with add_path / add_svg -
-and judge the result yourself. Always call `preview` after a group of changes and actually inspect the
-image before exporting.
+Full reference: call guide(topic) before using a feature you have not used yet in this session.
+Topics: fills, shader, style, design (boolean shapes, smoothed corners, modes, wrap, glass, truncation,
+versions, palettes, restyle, path ops), layers, geometry (angles, rotation, skew, scale, flip), text,
+reuse (instances, arrays, SVG import), review, animation, export.
 """
 
 mcp = _Server("game-ui-mcp", instructions=INSTRUCTIONS)
@@ -168,7 +96,8 @@ def tool(fn):
         return result
 
     name = fn.__name__
-    read_only = name.startswith(("get_", "list_", "preview", "view_", "inspect_", "measure_")) or name == "review_canvas"
+    read_only = name.startswith(("get_", "list_", "preview", "view_", "inspect_", "measure_")) or name in (
+        "review_canvas", "guide")
     # clients use these hints to skip approval for look-only tools and to warn before deletes
     if ToolAnnotations is None:
         mcp.tool()(wrapper)
@@ -1957,6 +1886,8 @@ def review_canvas(canvas: str, min_contrast: float = 4.5, min_text_size: float =
     rectangles on fractional pixels (soft, blurry edges), invisible or fully transparent elements,
     empty / hidden layers, clipped layers with nothing to clip to, animation tracks whose target is gone,
     and instances whose source is missing. backdrop_color: what transparent areas sit on in the game.
+    Design lint (info): edges that almost line up, too many corner radii / stroke widths / text sizes,
+    hard-coded colours where the theme has tokens.
     Also: text that overflows the shape it sits in (the smallest shape drawn under it that holds its
     anchor point, or the element named in the text's "container" prop) and important UI inside the
     canvas safe_area margins (notch, home bar, TV overscan).
@@ -2147,6 +2078,10 @@ def review_canvas(canvas: str, min_contrast: float = 4.5, min_text_size: float =
         if offenders:
             add("safe_area", "elements reach into the safe-area margin (notch, rounded corners, home bar or TV "
                              "overscan) - keep text and buttons inside; backgrounds may bleed", offenders[:20])
+
+    from .lint import design_lint
+    for kind, msg, ids in design_lint(r, c, st.theme):
+        add(kind, msg, ids, "info")
 
     layers = c.get("layers", [])
     for i, layer in enumerate(layers):
@@ -2931,6 +2866,7 @@ def write_engine_helpers(engine: str, out_dir: str, roblox_ids: dict | None = No
 
 from .tools_workflow import *  # noqa: E402,F401,F403  (registers the workflow tools)
 from .tools_delivery import *  # noqa: E402,F401,F403  (registers the hand-off tools)
+from .tools_design import *  # noqa: E402,F401,F403  (registers guide, palettes, restyle, path ops)
 
 
 def main() -> None:

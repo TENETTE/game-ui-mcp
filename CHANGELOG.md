@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0 - 2026-11-15
+
+- Server instructions cut to ~1.8k characters: clients truncate long instructions (Claude Code near 4k),
+  which hid half the reference. The full reference now comes from the read-only `guide(topic)` tool.
+- `make_palette`: OKLCH colour scales (50-950) with WCAG text contrast per step and accent hues.
+- `restyle`: replace a colour or font across every canvas and theme style, or set props by filter.
+- `path_ops`: flatten, offset (grow / shrink) and outline stroke, turning shapes and lines into paths.
+- `review_canvas` design lint: near-miss alignment, radius / stroke / text-size sprawl, hard-coded colours.
+
 ## 0.6.0 - 2026-11-15
 
 - SVG export keeps more as vector: stripes / dots / grid fills become SVG patterns, single-side strokes

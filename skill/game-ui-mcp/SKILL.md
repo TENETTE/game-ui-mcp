@@ -12,7 +12,7 @@ Tool'lar listede yoksa (`create_canvas`, `preview` görünmüyorsa) server bağl
 ## Çalışma sırası
 
 1. **Brief.** Motor (Unity / Unreal / Roblox / Godot / Assetto Corsa app'i), platform, tür, hangi parçalar lazım ve **stil ailesi**: gerçekçi mi (yarış, simülasyon, AAA) yoksa stilize mi (cartoon, arcade, sci-fi, fantastik). İkisinin kuralları farklı; "Stil ailesi" bölümüne göre ilerle. Eksikse en fazla 2-3 soru sor; kullanıcı "sen karar ver" dediyse karar ver ve ne seçtiğini yaz.
-2. **Tema.** İlk iş `set_theme`. Renkleri ve tekrar eden stilleri orada tanımla, sonra her yerde `$token` ve stil adı kullan. Tek tek hex yazma: kit tutarsızlaşır. Açık / koyu ya da takım renkleri gerekecekse baştan `modes` ile kur.
+2. **Tema.** İlk iş `set_theme`. Tek bir ana renkten başlıyorsan `make_palette(base, apply=true)` 50-950 tonlarını okunabilirlik oranlarıyla birlikte kurar; yazı rengini `text_on` listesine göre seç. Renkleri ve tekrar eden stilleri orada tanımla, sonra her yerde `$token` ve stil adı kullan. Tek tek hex yazma: kit tutarsızlaşır. Açık / koyu ya da takım renkleri gerekecekse baştan `modes` ile kur.
 3. **Canvas.** Her asset ayrı canvas, asset'in gerçek boyutunda. Ekran tasarımı ise 1920x1080 tek canvas (mockup).
 4. **Çiz.** Kat kat: taban → gölge → ışık → detay → yazı, her geçiş ayrı katmanda (`create_layer`; "Katmanlar" ve "Işık ve gölgeleme" bölümleri). `batch` ile, elemanlara açık `id` vererek; tek tek `add_*` çağrısı yavaş.
 5. **Bak.** `preview` çağır ve resme gerçekten bak, sonra `review_canvas` çalıştır (kesilen gölge, düşük kontrast, küçük yazı, eksik glif, bulanık yarım piksel kenar gibi gözden kaçanları sayıyla bulur). Sorun bul, `update_element` ile düzelt, tekrar bak. En az bir tur düzeltme yapmadan export etme.
@@ -223,6 +223,8 @@ Aynı şeyi elle tekrar çizme; şu gereçler işi hem hızlandırır hem tutarl
 - **Tek kenar kontur (`stroke.sides: ["bottom"]`):** seçili sekmenin alt çizgisi, liste ayraçları, başlık altı çizgisi; ayrı ince dikdörtgen çizme.
 - **Kırpılan yazı (`max_width` + `max_lines`):** oyuncu adı, eşya adı, sohbet önizlemesi taşmasın, "..." ile bitsin. İndirimli eski fiyat için `decoration: "strikethrough"`.
 - **Sürüm (`canvas_version`):** büyük bir değişiklikten önce `save` et; iki alternatif tasarımı karşılaştırmak için ikisini de kaydet, `restore` ile geri dön.
+- **Yol işlemleri (`path_ops`):** `offset` ile şeklin içten / dıştan eşit kopyası (iç panel, eşit kalınlıkta çerçeve), `outline_stroke` ile konturu ya da çizgiyi dolgulu şekle çevir (gradient, glow, boolean alabilsin), `flatten` ile her şeyi tek path yap.
+- **Toplu değişiklik (`restyle`):** kullanıcı "maviyi mor yap" ya da "fontu değiştir" derse elementleri tek tek güncelleme; `restyle(replace_colors={...})` bütün canvas'larda ve tema stillerinde yapar. Önce `dry_run=true` ile neyin değişeceğine bak.
 - **Akan yerleşim (`arrange_elements(wrap=true)`):** envanter slotları, etiketler, yetenek ikonları kutuya sığmayınca alt satıra geçer.
 - **Delik (`style.blend: "erase"`):** aynı katmanda altta ne varsa keser: panelde pencere, kartta çentik, yıldızın ortasında halka, oyma yazı. Kesilecek şeyle kesen şekli kendi katmanına koy; o zaman delik yalnızca o katmanı keser, katman stili (gölge, kontur) deliğin kenarına da uygulanır.
 - **Aynalama (`flip_x` / `flip_y`):** sol ve sağ ok, simetrik kanatlar, karşılıklı sekmeler için ikinci yarıyı çizme; kopyala ve aynala. Gölge ve ışık yönü aynalanmaz, sahnenin ışığıyla tutarlı kalır.
@@ -305,6 +307,10 @@ Hazır dolgular (gradient, stripes, carbon, brushed, clouds...) istediğin gör�
 - Canlı yazıyı motora verirken (`export_screen`, `export_spec`) dönen `notes` / `engine_text_notes` maddelerini kullanıcıya aktar: TextMeshPro Arapçayı şekillendirmez, Unreal'da Full Shaping gerekir, Godot'ta metin sunucusu verisi export'a eklenmeli.
 
 ## Kontrol turu (her asset için)
+
+`review_canvas` tasarım hatalarını da `info` olarak söyler: neredeyse hizalı kenarlar, fazla çeşit köşe yarıçapı / kontur kalınlığı / yazı boyu, token yerine elle yazılmış renkler. Bunları düzelt; kit çok daha derli toplu görünür.
+
+Bir özelliği bu oturumda ilk kez kullanacaksan önce `guide(topic)` çağır; server talimatları istemcide kısaltılabiliyor, tam referans orada.
 
 Önce `review_canvas` çalıştır ve her `warn` maddesini düzelt (bilerek yaptıysan nedenini kullanıcıya söyle). Sonra `preview` resmine bakarken sırayla:
 

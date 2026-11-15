@@ -51,11 +51,11 @@ Başka bir klasör için `GAME_UI_MCP_DIR` ortam değişkenini ayarla (config'te
 | Canvas | `create_canvas`, `list_canvases`, `get_canvas`, `update_canvas`, `duplicate_canvas`, `delete_canvas`, `fit_canvas`, `resize_canvas`, `canvas_version` |
 | Katman | `create_layer`, `update_layer`, `delete_layer`, `set_layer` |
 | Çizim | `add_rect`, `add_ellipse`, `add_line`, `add_polygon`, `add_path`, `add_arc`, `add_ticks`, `add_text`, `add_image`, `add_instance`, `add_svg` |
-| Düzenleme | `update_element`, `delete_elements`, `duplicate_element`, `boolean_elements`, `move_elements`, `reorder_element`, `align_elements`, `arrange_elements`, `scatter`, `copy_elements`, `set_pin`, `batch`, `undo`, `redo` |
+| Düzenleme | `update_element`, `delete_elements`, `duplicate_element`, `boolean_elements`, `path_ops`, `restyle`, `move_elements`, `reorder_element`, `align_elements`, `arrange_elements`, `scatter`, `copy_elements`, `set_pin`, `batch`, `undo`, `redo` |
 | Durum, veri, dil | `set_state`, `delete_state`, `generate_from_template`, `set_strings`, `get_strings` |
 | Denetim | `review_canvas`, `inspect_pixels`, `view_image`, `preview_nine_slice` |
 | Animasyon | `create_animation`, `set_keyframes`, `delete_keyframes`, `get_animations`, `delete_animation`, `preview_animation`, `export_animation` |
-| Tema ve bilgi | `set_theme`, `get_theme`, `list_fonts`, `measure_text` |
+| Tema ve bilgi | `set_theme`, `get_theme`, `make_palette`, `list_fonts`, `measure_text`, `guide` |
 | Önizleme | `preview`, `preview_resolutions`, `contact_sheet` |
 | Dışa aktarma | `export_png`, `export_svg`, `export_asset`, `export_layers`, `export_psd`, `export_atlas`, `export_bitmap_font`, `write_engine_helpers` |
 | Teslim | `export_spec`, `export_theme`, `set_link`, `export_prototype`, `export_screen` |
@@ -140,7 +140,7 @@ Roblox'ta görselleri Studio'ya kendin yüklemen gerekir (server internete çık
 - Motor tarafındaki dosyalar (C#, Unreal Python, Luau, Godot `.tres` / `.tscn`, Unity UXML / USS) bu repoda yalnızca üretiliyor ve biçimleri kontrol ediliyor; Unity, Unreal, Roblox Studio ve Godot içinde henüz açılıp denenmedi. Tıklanabilir prototip ise gerçek bir tarayıcıda (headless Chrome) denendi.
 - `export_screen` Unreal için sahne üretmez (UMG dosyası dışarıdan yazılamıyor); Unreal'da parçalar + `.screen.json` kullanılır. Roblox'ta özel font yüklenemediği için yazılar en yakın hazır Roblox fontuyla eşleştirilir. Gradient'li yazı motora ilk rengiyle gider (`bake_text` ile görsel olarak gömülebilir).
 - Pixel-art modu yazıyı da keskinleştirir ama gömülü fontlar piksel font değildir; gerçek piksel yazı için `fonts/` klasörüne bir piksel font koy.
-- 74 tool var; MCP istemcisi hepsinin tanımını modele yükler (yaklaşık 25 bin token).
+- 78 tool var; MCP istemcisi hepsinin tanımını modele yükler (yaklaşık 25 bin token).
 - `backdrop_blur` yalnızca aynı canvas'ta altta çizilmiş şeyleri bulanıklaştırır (oyundaki gerçek sahneyi değil; motorda buzlu cam için `BackgroundBlur` gibi motor özelliği gerekir). Stilli, clip'li ya da yarı saydam bir katmandaysa yalnızca o katmanın içindekileri görür. `scale_x` / `flip` verilmiş elemanlarda bulanık alan ölçeklenmemiş şekle göre kesilir.
 - `stroke.sides` yalnızca dikdörtgenlerde çalışır; SVG'ye resim olarak gider.
 - `export_svg`: shader / desen dolgusu, `light`, iç gölge, bulanıklık, özel karışım modları, clip'li ya da stilli katmanlar, görseller ve yay üstü yazı SVG'ye o elemanın resmi olarak gömülür; `erase` SVG'de karşılığı olmadığı için atlanır (delik için `boolean_elements` kullan). Dış konturlar SVG'de dolgunun altına çizilir; yarı saydam dolguda konturun iç yarısı görünür.
