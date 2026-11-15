@@ -16,18 +16,18 @@ from typing import Any
 from PIL import Image as PILImage
 from PIL import ImageDraw, ImageFont
 
-try:  # MCP Python SDK 2.x
+try:
     from mcp.server.mcpserver import Image, MCPServer as _Server
     from mcp.server.mcpserver.exceptions import ToolError
-except ImportError:  # MCP Python SDK 1.x
+except ImportError:
     from mcp.server.fastmcp import FastMCP as _Server, Image
     try:
         from mcp.server.fastmcp.exceptions import ToolError
-    except ImportError:  # very old 1.x
+    except ImportError:
         ToolError = RuntimeError
 try:
     from mcp.types import ToolAnnotations
-except ImportError:  # SDK before tool annotations
+except ImportError:
     ToolAnnotations = None
 
 from . import animation as anim_mod
@@ -87,7 +87,7 @@ def tool(fn):
         except (ValueError, TypeError, OSError) as exc:
             raise ToolError(f"{fn.__name__}: {exc}\nFix that argument and call {fn.__name__} again "
                             "(do not repeat the identical call).") from exc
-        except Exception as exc:        # the SDK would hide this text, leaving the model with nothing to act on
+        except Exception as exc:
             raise ToolError(f"{fn.__name__}: unexpected {type(exc).__name__}: {exc}. This is likely a game-ui-mcp "
                             "bug, not your input. Do not repeat the identical call: change the value that "
                             "triggers it, split the step into smaller calls, or take another route.") from exc
@@ -98,7 +98,6 @@ def tool(fn):
     name = fn.__name__
     read_only = name.startswith(("get_", "list_", "preview", "view_", "inspect_", "measure_", "find_")) or name in (
         "review_canvas", "guide")
-    # clients use these hints to skip approval for look-only tools and to warn before deletes
     if ToolAnnotations is None:
         mcp.tool()(wrapper)
     else:
@@ -122,7 +121,6 @@ def set_store(new_store: Store | None) -> None:
     _store = new_store
 
 
-# --------------------------------------------------------------------------- helpers
 
 def _maybe_json(value: Any) -> Any:
     if isinstance(value, str):
@@ -240,7 +238,6 @@ def _scale_suffix(scale: float) -> str:
     return f"_{text}x"
 
 
-# --------------------------------------------------------------------------- canvas tools
 
 @tool
 def create_canvas(name: str, width: int | None = None, height: int | None = None,
@@ -465,7 +462,6 @@ def delete_canvas(canvas: str):
     return {"deleted": c["id"]}
 
 
-# --------------------------------------------------------------------------- layer tools
 
 def _layer_settings(opacity, blend, clip, visible, style) -> dict:
     out: dict = {}
@@ -552,7 +548,6 @@ def set_layer(canvas: str, layer: str, ids: list[str] | None = None, group: str 
     return {"layer": name or "base", "moved": [e["id"] for e in elements], "layers_bottom_to_top": _layer_list(c)}
 
 
-# --------------------------------------------------------------------------- drawing tools
 
 @tool
 def add_rect(canvas: str, x: float, y: float, width: float, height: float, radius: float | list[float] = 0,
@@ -955,7 +950,6 @@ def add_svg(canvas: str, svg: str, x: float = 0, y: float = 0, width: float | No
     return result
 
 
-# --------------------------------------------------------------------------- editing tools
 
 @tool
 def update_element(canvas: str, id: str, props: dict):
@@ -1353,7 +1347,6 @@ def canvas_version(canvas: str, action: str = "list", name: str | None = None, n
     raise ValueError("action must be 'save', 'list', 'diff', 'restore' or 'delete'")
 
 
-# --------------------------------------------------------------------------- animation tools
 
 def _set_keyframes(c: dict, args: dict, checkpoint: bool = True) -> dict:
     st = store()
@@ -1626,7 +1619,6 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
     rate = float(fps or anim.get("fps", 30))
     only = {e["id"] for e in st.select(c, ids, group)} if (ids or group) else None
     own_bg = c.get("background") if fmt in ("gif", "apng", "webp") and not background else None
-    # animated preview files show the canvas as designed, background included
     images, warnings = _poses(c, anim, times, float(scale), include_background=bool(own_bg), only=only)
     result: dict = {"animation": key, "frames": len(images), "fps": rate, "duration": anim["duration"],
                     "loop": bool(anim.get("loop"))}
@@ -1708,7 +1700,6 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
     return result
 
 
-# --------------------------------------------------------------------------- theme / info tools
 
 @tool
 def set_theme(colors: dict | None = None, styles: dict | None = None, replace: bool = False,
@@ -1783,7 +1774,6 @@ def measure_text(text: str, size: float = 24, font: str | None = None, weight: i
             "lines": [{"text": line, "width": _round(w / 4.0)} for line, w in layout.lines]}
 
 
-# --------------------------------------------------------------------------- preview tools
 
 def _label_font(size: int = 12):
     try:
@@ -1942,9 +1932,7 @@ def contact_sheet(canvases: list[str] | None = None, columns: int = 4, cell: int
     return [Image(data=_png_bytes(sheet.convert("RGB")), format="png"), json.dumps(info)]
 
 
-# --------------------------------------------------------------------------- export tools
 
-# --------------------------------------------------------------------------- self-check tools
 
 def _luminance(rgb) -> float:
     def ch(v: float) -> float:
@@ -2000,7 +1988,7 @@ def review_canvas(canvas: str, min_contrast: float = 4.5, min_text_size: float =
         issues.append(item)
 
     r = st.renderer(c, state=state, language=language)
-    c = r.canvas                                  # the state-applied copy when a state is given
+    c = r.canvas
     try:
         full = r.render(include_background=False)
     except ValueError as exc:
@@ -2056,7 +2044,6 @@ def review_canvas(canvas: str, min_contrast: float = 4.5, min_text_size: float =
         if el.get("layer") and el["layer"] not in names:
             add("layer", f"element points at a missing layer '{el['layer']}' (drawn on base)", [eid])
 
-    # text size + contrast against what is actually behind each text
     cs = min(1.0, 900.0 / max(c["width"], c["height"]))
     with_all = None
     boxes = {}
@@ -2065,8 +2052,7 @@ def review_canvas(canvas: str, min_contrast: float = 4.5, min_text_size: float =
             boxes[e["id"]] = r.element_box(e)
         except ValueError:
             pass
-    # The background of a text only needs the elements near it, not a full re-render per text.
-    reach = 64.0            # shortcut: assumes shadows / glows reach < 64 units; widen if huge glows matter
+    reach = 64.0
 
     def nearby(eid: str) -> set[str]:
         a = boxes[eid]
@@ -2096,11 +2082,10 @@ def review_canvas(canvas: str, min_contrast: float = 4.5, min_text_size: float =
         a_box, b_box = with_all[y0:y1, x0:x1], without[y0:y1, x0:x1]
         diff = np.abs(a_box - b_box).sum(axis=-1)
         if diff.max() < 3:
-            continue                                # the text changes nothing visible: invisible text
+            continue
         lit = diff > diff.max() * 0.25
         core = diff >= np.quantile(diff[lit], 0.6) if lit.sum() > 8 else diff >= diff.max() * 0.7
         fg = [float(v) for v in a_box[core].mean(axis=0)]
-        # background = what sits right around the letters, not the whole (possibly huge) text box
         from .effects import dilate
         near = dilate(lit.astype(np.uint8) * 255, max(2.0, float(size) * cs * 0.35)) > 0
         around = near & ~lit
@@ -2111,7 +2096,6 @@ def review_canvas(canvas: str, min_contrast: float = 4.5, min_text_size: float =
             add("contrast", f"text contrast {ratio:.2f}:1 is below {min_contrast:g}:1 (text ~{_hex(fg)} on "
                             f"~{_hex(bg)}). Lighten/darken one side or add a dark outline / shadow.", [eid])
 
-    # text overflowing the shape it sits on
     order = {e["id"]: i for i, e in enumerate(c["elements"])}
     for el in texts:
         if el.get("arc"):
@@ -2149,7 +2133,6 @@ def review_canvas(canvas: str, min_contrast: float = 4.5, min_text_size: float =
             add("overflow", f"text overflows '{holder['id']}' by {over:.0f}px{where}: use fit_width / max_width, "
                             "a smaller size, or a wider shape", [el["id"], holder["id"]])
 
-    # important UI inside the safe-area margins
     if c.get("safe_area"):
         l, t, rr_, b = (float(v) for v in c["safe_area"])
         W, H = float(c["width"]), float(c["height"])
@@ -2162,7 +2145,7 @@ def review_canvas(canvas: str, min_contrast: float = 4.5, min_text_size: float =
             except ValueError:
                 continue
             if bx[2] - bx[0] >= W * 0.9 or bx[3] - bx[1] >= H * 0.9:
-                continue                          # backgrounds and full-width bars may bleed
+                continue
             if bx[0] < l - 0.5 or bx[1] < t - 0.5 or bx[2] > W - rr_ + 0.5 or bx[3] > H - b + 0.5:
                 offenders.append(el["id"])
         if offenders:
@@ -2442,7 +2425,7 @@ def export_png(canvas: str, path: str | None = None, scales: list[float] | None 
     st.require_glyphs(c, language)
     fmt = str(format).lower().lstrip(".")
     if fmt == "png" and path and Path(path).suffix.lower() in (".webp", ".jpg", ".jpeg", ".ico"):
-        fmt = Path(path).suffix.lower().lstrip(".")          # the file name says which format
+        fmt = Path(path).suffix.lower().lstrip(".")
     if fmt == "jpeg":
         fmt = "jpg"
     if fmt not in ("png", "webp", "jpg", "ico"):
@@ -2585,7 +2568,7 @@ def export_layers(canvas: str, out_dir: str | None = None, name: str | None = No
             raise ValueError("scale must be between 0.1 and 8")
     warnings: list[str] = []
     notes: list[str] = []
-    pieces: list[dict] = []          # {"name", "render": scale -> RGBA, "meta": {...}}
+    pieces: list[dict] = []
 
     if mode == "group":
         order: list[str] = []
@@ -2664,7 +2647,7 @@ def export_layers(canvas: str, out_dir: str | None = None, name: str | None = No
             raise ValueError(f"Nothing to export. Layers: {', '.join(names) or '(none)'}")
 
     if fmt == "svg":
-        scale_list = [max(scale_list)]           # one file: embed at the sharpest requested scale
+        scale_list = [max(scale_list)]
     svg_parts: list[str] = []
     out_layers = []
     for piece in pieces:
@@ -2742,7 +2725,6 @@ def export_psd(canvas: str, path: str | None = None, scale: float = 1, include_b
         image, _ = r.layer_image(layer, elements, None, bake_opacity=False)
         visible = props["visible"]
         if props["blend"] == "erase":
-            # Photoshop has no "erase" layer mode: keep the shape as a hidden layer to turn into a mask by hand
             visible = False
             psd_notes.append(f"layer '{props['name']}' uses blend 'erase', which PSD cannot store: it is saved hidden "
                              "(use it as a layer mask in your editor). The merged preview inside the PSD is correct.")
@@ -2897,7 +2879,6 @@ def export_asset(canvas: str, engine: str = "generic", out_dir: str | None = Non
         record["states"] = {sname: f"{asset}_{sname}" for sname in wanted_states}
     ex.update_manifest(folder, asset, record)
     for sname in wanted_states or []:
-        # each state image is its own manifest asset so engines (Roblox) can hold an id per image
         sname_asset = f"{asset}_{sname}"
         try:
             prev_s = json.loads(manifest.read_text(encoding="utf-8")).get("assets", {}).get(sname_asset, {})
@@ -2964,7 +2945,6 @@ def write_engine_helpers(engine: str, out_dir: str, roblox_ids: dict | None = No
             godot_res_path is where that folder lives inside the Godot project.
     """
     engine = engine.lower()
-    # these values are written into scripts the user runs in the editor, so only plain path characters
     if not re.fullmatch(r"/[A-Za-z0-9_/]+", unreal_content_path or ""):
         raise ValueError("unreal_content_path must be a content path like /Game/UI/Generated "
                          "(letters, digits, _ and / only)")

@@ -31,7 +31,7 @@ def test_progressive_backdrop_blur_ramps(ws):
     stripes()
     s.add_rect("c", 0, 0, 200, 100, style={"fill": "#ffffff@0.01", "backdrop_blur": {"radius": 20, "angle": 90}})
     a = img()[..., 0]
-    assert np.ptp(a[3, 20:120]) > 150 and np.ptp(a[96, 20:120]) < 60            # sharp top, soft bottom
+    assert np.ptp(a[3, 20:120]) > 150 and np.ptp(a[96, 20:120]) < 60
 
 
 def test_glass_bends_and_lights_the_backdrop(ws):
@@ -41,14 +41,14 @@ def test_glass_bends_and_lights_the_backdrop(ws):
     after = img()
     edge = np.abs(after[22:30, 45:155, 0] - before[22:30, 45:155, 0]).mean()
     middle = np.abs(after[48:52, 95:105, 0] - before[48:52, 95:105, 0]).mean()
-    assert edge > middle + 10                                                    # bending happens at the rim
+    assert edge > middle + 10
 
 
 def test_noise_modes_texture_and_fill_blend(ws):
     s.create_canvas("c", 60, 60)
     s.add_rect("c", 0, 0, 60, 60, id="r", style={"fill": "#808080", "noise": {"mode": "multi", "amount": 0.5}})
     px = img()
-    assert np.ptp(px[..., 0] - px[..., 2]) > 40                                  # colour (not grey) grain
+    assert np.ptp(px[..., 0] - px[..., 2]) > 40
     with pytest.raises(ValueError, match="noise.mode"):
         s.update_element("c", "r", {"style": {"noise": {"mode": "rainbow"}}})
     s.update_element("c", "r", {"style": {"noise": None, "fill": ["#ff0000", {"color": "#808080", "blend": "multiply"}]}})
@@ -56,7 +56,7 @@ def test_noise_modes_texture_and_fill_blend(ws):
     s.create_canvas("t", 60, 60)
     s.add_rect("t", 10, 10, 40, 40, id="rough", style={"fill": "#000000", "texture": {"amount": 3, "size": 4}})
     edge = img("t")[8:13, 10:50, 3]
-    assert 0 < (edge > 128).mean() < 1                                           # edge no longer straight
+    assert 0 < (edge > 128).mean() < 1
 
 
 def test_luminance_mask_and_clip(ws):
@@ -70,7 +70,7 @@ def test_luminance_mask_and_clip(ws):
     s.update_element("c", "a", {"visible": False})
     s.add_rect("c", 0, 0, 100, 20, id="b", fill="#00ff00", clip="m")
     s.update_element("c", "b", {"clip_mode": "luminance"})
-    g = img()[10, :, 3]                                      # alpha follows the mask's brightness
+    g = img()[10, :, 3]
     assert g[2] > 230 and g[97] < 30
 
 

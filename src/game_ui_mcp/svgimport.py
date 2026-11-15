@@ -17,7 +17,7 @@ from typing import Any
 
 from . import geometry as geo
 
-Matrix = tuple[float, float, float, float, float, float]          # a b c d e f  (SVG order)
+Matrix = tuple[float, float, float, float, float, float]
 IDENT: Matrix = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
 SHAPES = {"path", "rect", "circle", "ellipse", "line", "polyline", "polygon"}
 CONTAINERS = {"svg", "g", "a", "switch"}
@@ -222,7 +222,6 @@ def convert(svg_text: str, x: float, y: float, width: float | None, height: floa
     notes: set[str] = set()
     grads = _gradients(root)
 
-    # first pass collects raw geometry in SVG user space so we can size when there is no viewBox
     items: list[tuple[str, dict, dict, Matrix]] = []
 
     def walk(node: ET.Element, inherited: dict, m: Matrix, opacity: float) -> None:
@@ -280,7 +279,6 @@ def convert(svg_text: str, x: float, y: float, width: float | None, height: floa
         full = mul(place, m)
         det = abs(full[0] * full[3] - full[1] * full[2])
         lin = math.sqrt(det) if det > 0 else s
-        # flatten curves finely enough for the size they will actually be drawn at
         subs = _shape_paths(tag, a, max(0.05, 4.0 * lin * max(0.25, detail)))
         if not subs:
             continue
@@ -295,7 +293,6 @@ def convert(svg_text: str, x: float, y: float, width: float | None, height: floa
         stroke = _paint(stroke_val, op * _length(style.get("stroke-opacity"), 1.0),
                         current_color if stroke_val == "currentColor" else current, grads, notes)
         if not any(closed for _, closed in paths) and len(paths) and fill not in (None, "none") and stroke in (None, "none"):
-            # an open path with only a fill: SVG fills it as if closed
             paths = [(pts, True) for pts, _ in paths]
         st: dict[str, Any] = {"fill": fill if fill is not None else "none"}
         if stroke not in (None, "none"):

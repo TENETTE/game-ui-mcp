@@ -28,7 +28,7 @@ def test_gpu_shader_matches_cpu(monkeypatch):
     on_gpu = shader.evaluate({"code": CODE}, size, box, 1.0, {})
     _cpu(monkeypatch)
     on_cpu = shader.evaluate({"code": CODE}, size, box, 1.0, {})
-    assert np.abs(on_gpu - on_cpu).max() < 1e-3                     # float rounding only
+    assert np.abs(on_gpu - on_cpu).max() < 1e-3
 
 
 @pytest.mark.skipif(not gpu.available(), reason="no CUDA GPU / CuPy (install the [gpu] extra)")
@@ -44,4 +44,4 @@ def test_gpu_blur_matches_cpu(monkeypatch):
 @pytest.mark.skipif(not gpu.available(), reason="no CUDA GPU / CuPy (install the [gpu] extra)")
 def test_gpu_raises_the_shader_work_limit():
     heavy = ";".join(f"q{i} = voronoi(x/9 + {i}, y/9)" for i in range(30)) + "; r = q1; g = 0; b = 0"
-    shader.evaluate({"code": heavy}, (1024, 1024), (0, 0, 1024, 1024), 1.0, {})      # too heavy for the CPU
+    shader.evaluate({"code": heavy}, (1024, 1024), (0, 0, 1024, 1024), 1.0, {})

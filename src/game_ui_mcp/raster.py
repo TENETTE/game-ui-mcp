@@ -63,7 +63,7 @@ def fill_polygons(polys: list[np.ndarray], w: int, h: int, rule: str = "evenodd"
             mults.append(np.full(len(p), 1 if area >= 0 else -1, dtype=np.int16))
     mult = np.concatenate(mults) if rule == "union" else None
     acc = _accumulate(np.concatenate(xs0), np.concatenate(ys0), np.concatenate(xs1), np.concatenate(ys1), mult, w, h)
-    inside = (acc & 1).astype(bool) if rule == "evenodd" else (acc != 0)        # "nonzero" / "union"
+    inside = (acc & 1).astype(bool) if rule == "evenodd" else (acc != 0)
     return inside.astype(np.uint8) * 255
 
 
@@ -103,7 +103,6 @@ def stroke_polylines(items: list[tuple[np.ndarray, bool, float, bool]], w: int, 
             circle = np.stack([np.cos(ang), np.sin(ang)], axis=1) * r
             push(p[:, None, :] + circle[None, :, :])
         elif ok.any() and len(a) > 1:
-            # flat (butt) ends: bevel the inner joints with wedges so nothing pokes past the two ends
             joint, n_in, n_out = b[:-1], n[:-1], n[1:]
             push(np.stack([joint, joint + n_in, joint + n_out], axis=1))
             push(np.stack([joint, joint - n_in, joint - n_out], axis=1))

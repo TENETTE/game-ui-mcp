@@ -25,7 +25,6 @@ def render(canvas: str, scale: float = 1.0, background: bool = False) -> np.ndar
     return np.asarray(st.renderer(st.get(canvas), scale).render(include_background=background))
 
 
-# ---------------------------------------------------------------- units
 
 def test_parse_color_forms():
     assert parse_color("#fff") == (255, 255, 255, 255)
@@ -63,7 +62,6 @@ def test_anchor_parsing():
         parse_anchor("sideways")
 
 
-# ---------------------------------------------------------------- drawing
 
 def test_rect_pixels_and_transparency(ws):
     s.create_canvas("a", 40, 40)
@@ -71,7 +69,7 @@ def test_rect_pixels_and_transparency(ws):
     px = render("a")
     assert tuple(px[20, 20]) == (255, 0, 0, 255)
     assert px[2, 2][3] == 0
-    assert tuple(px[10, 10]) == (255, 0, 0, 255)   # sharp corner is filled
+    assert tuple(px[10, 10]) == (255, 0, 0, 255)
     assert px[9, 9][3] == 0
 
 
@@ -79,10 +77,10 @@ def test_rounded_rect_is_antialiased(ws):
     s.create_canvas("a", 40, 40)
     s.add_rect("a", 4, 4, 32, 32, radius=12, fill="#ffffff")
     px = render("a")
-    assert px[4, 4][3] == 0                       # corner cut away
+    assert px[4, 4][3] == 0
     assert px[20, 20][3] == 255
     alphas = set(px[..., 3].flatten().tolist())
-    assert any(0 < a < 255 for a in alphas)       # soft edge pixels exist
+    assert any(0 < a < 255 for a in alphas)
 
 
 def test_stroke_alignment(ws):
@@ -107,7 +105,7 @@ def test_shadow_extends_outside_shape(ws):
     s.create_canvas("a", 80, 80)
     s.add_rect("a", 20, 20, 40, 30, fill="#ffffff", style={"shadow": {"color": "#000000", "blur": 8, "dy": 8}})
     px = render("a")
-    assert px[58, 40][3] > 0 and px[58, 40][0] < 40     # below the rect: dark shadow
+    assert px[58, 40][3] > 0 and px[58, 40][0] < 40
     assert px[5, 5][3] == 0
 
 
@@ -128,7 +126,7 @@ def test_text_anchor_center_and_measure(ws):
     px = render("a")
     ys, xs = np.nonzero(px[..., 3] > 128)
     assert abs((xs.min() + xs.max()) / 2 - 100) < 2.5
-    assert abs((ys.min() + ys.max()) / 2 - 30) < 2.5        # optically centred on cap height
+    assert abs((ys.min() + ys.max()) / 2 - 30) < 2.5
     m = s.measure_text("PLAY", size=28, weight="bold")
     assert abs(m["width"] - w) < 1.0
 
@@ -164,7 +162,7 @@ def test_rotation_keeps_shape_area(ws):
     px = render("a")
     after = (px[..., 3] > 128).sum()
     assert abs(int(before) - int(after)) < 60
-    assert px[30, 100][3] == 255 and px[100, 30][3] == 0     # now vertical
+    assert px[30, 100][3] == 255 and px[100, 30][3] == 0
 
 
 def test_scale_2x_doubles_resolution(ws):
@@ -173,7 +171,6 @@ def test_scale_2x_doubles_resolution(ws):
     assert render("a", 2.0).shape[:2] == (60, 100)
 
 
-# ---------------------------------------------------------------- editing
 
 def test_errors_do_not_leave_garbage(ws):
     s.create_canvas("a", 50, 50)
@@ -204,7 +201,7 @@ def test_update_duplicate_move_reorder_undo(ws):
     s.add_rect("a", 10, 10, 30, 30, style="slot", id="s1")
     s.update_element("a", "s1", {"style": {"glow": {"color": "#fff", "blur": 4}}})
     props = s.get_canvas("a", details=True)["elements"][0]["props"]
-    assert props["style"]["use"] == "slot" and "glow" in props["style"]   # named base is kept
+    assert props["style"]["use"] == "slot" and "glow" in props["style"]
     d = s.duplicate_element("a", "s1", dx=40, new_id="s2", props={"fill": "#00ff00"})
     assert d["bbox_xywh"][0] == 50
     assert tuple(render("a")[25, 65][:3]) == (0, 255, 0)
@@ -249,7 +246,6 @@ def test_persistence_between_sessions(ws):
     assert s.get_theme()["colors"]["k"] == "#123456"
 
 
-# ---------------------------------------------------------------- preview / export
 
 def test_preview_returns_png(ws):
     s.create_canvas("a", 64, 64)
@@ -282,7 +278,7 @@ def test_nine_slice_auto_and_metadata(ws):
     f = out["files"][0]
     b = f["nine_slice"]
     assert 16 <= b["left"] <= 19 and 16 <= b["top"] <= 19 and b["left"] == b["right"]
-    assert f["width"] == b["left"] + b["right"] + 4 and f["height"] == b["top"] + b["bottom"] + 4   # minimised
+    assert f["width"] == b["left"] + b["right"] + 4 and f["height"] == b["top"] + b["bottom"] + 4
     assert f["unity"]["spriteBorder_LBRT"] == [b["left"], b["bottom"], b["right"], b["top"]]
     assert f["roblox"]["SliceCenter"] == [b["left"], b["top"], f["width"] - b["right"], f["height"] - b["bottom"]]
     assert abs(f["unreal"]["margin_LTRB"][0] - b["left"] / f["width"]) < 1e-4
@@ -297,7 +293,7 @@ def test_nine_slice_reports_gradient_axis(ws):
     s.add_rect("btn", 0, 0, 120, 40, radius=8, fill={"type": "linear", "angle": 90, "stops": ["#ffffff", "#000000"]})
     out = s.export_asset("btn", out_dir=str(ws / "out"), nine_slice="auto")
     assert "horizontally" in out["notes"][0]
-    assert out["files"][0]["height"] == 40          # vertical axis left untouched
+    assert out["files"][0]["height"] == 40
     with pytest.raises(ValueError):
         s.export_asset("btn", out_dir=str(ws / "out"), nine_slice={"left": 80, "top": 4, "right": 80, "bottom": 4})
 
@@ -329,7 +325,7 @@ def test_atlas_and_engine_helpers(ws):
     for i, a in enumerate(boxes):
         assert a[2] <= atlas.width and a[3] <= atlas.height
         for b in boxes[i + 1:]:
-            assert a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1]      # no overlap
+            assert a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1]
 
     out_dir = ws / "rb"
     s.create_canvas("panel", 64, 64)
@@ -338,7 +334,7 @@ def test_atlas_and_engine_helpers(ws):
     res = s.write_engine_helpers("roblox", str(out_dir), roblox_ids={"panel": 123456})
     lua = Path(res["file"]).read_text()
     assert 'id = "rbxassetid://123456"' in lua and "Rect.new(" in lua and res["assets_without_id"] == []
-    s.export_asset("panel", engine="roblox", out_dir=str(out_dir), nine_slice="auto")       # re-export keeps the id
+    s.export_asset("panel", engine="roblox", out_dir=str(out_dir), nine_slice="auto")
     assert json.loads((out_dir / "game_ui_manifest.json").read_text())["assets"]["panel"]["roblox_id"] == "123456"
 
     unity = s.write_engine_helpers("unity", str(ws / "Assets" / "Editor"))
@@ -357,7 +353,7 @@ def test_image_element_roundtrip(ws):
     s.add_image("dst", path, 10, 10, width=40, radius=20)
     px = render("dst")
     assert tuple(px[30, 30]) == (0, 255, 0, 255)
-    assert px[11, 11][3] == 0                         # rounded corner removed
+    assert px[11, 11][3] == 0
     with pytest.raises(ValueError):
         s.add_image("dst", str(ws / "nope.png"), 0, 0)
 
@@ -367,8 +363,8 @@ def test_slow_gradient_is_not_mistaken_for_a_stretchable_centre(ws):
     s.add_rect("g", 0, 0, 200, 200, radius=10,
                fill={"type": "linear", "angle": 90, "stops": ["#202030", "#1a1a28"]})
     out = s.export_asset("g", out_dir=str(ws / "out"), nine_slice="auto")
-    assert out["files"][0]["height"] == 200            # rows were not collapsed
-    assert out["files"][0]["width"] < 200              # columns still are
+    assert out["files"][0]["height"] == 200
+    assert out["files"][0]["width"] < 200
     assert "horizontally" in out["notes"][0]
 
 
@@ -379,16 +375,15 @@ def test_pixel_aligned_shapes_do_not_bleed(ws):
     assert int((alpha > 0).sum()) == 200 and int((alpha == 255).sum()) == 200
 
 
-# ---------------------------------------------------------------- realistic / gauge features
 
 def test_arc_covers_only_its_sweep(ws):
     s.create_canvas("a", 200, 200)
-    s.add_arc("a", 100, 100, 80, 180, 360, thickness=10, color="#ffffff")     # top half ring
+    s.add_arc("a", 100, 100, 80, 180, 360, thickness=10, color="#ffffff")
     alpha = render("a")[..., 3]
-    assert alpha[20, 100] == 255                 # 12 o'clock is on the band
-    assert alpha[180, 100] == 0                  # 6 o'clock is not
-    assert alpha[100, 100] == 0                  # centre is empty
-    assert alpha[102, 20] == 0 and alpha[98, 20] == 255      # flat end exactly at the start angle
+    assert alpha[20, 100] == 255
+    assert alpha[180, 100] == 0
+    assert alpha[100, 100] == 0
+    assert alpha[102, 20] == 0 and alpha[98, 20] == 255
 
 
 def test_dashed_butt_line_leaves_clean_gaps(ws):
@@ -405,11 +400,11 @@ def test_ticks_with_labels_form_one_group(ws):
     assert out["group"] == "spd"
     assert out["created"] == ["spd_minor", "spd_major", "spd_label0", "spd_label1", "spd_label2"]
     alpha = render("a")[..., 3]
-    assert alpha[35, 150] == 255                 # the middle major tick points straight up
+    assert alpha[35, 150] == 255
     assert alpha[150, 150] == 0
     with pytest.raises(ValueError):
         s.add_ticks("a", 150, 150, 120, 135, 405, count=9, major_every=4, labels=["only", "two"])
-    assert len(s.get_canvas("a")["elements"]) == 5            # failed call left nothing behind
+    assert len(s.get_canvas("a")["elements"]) == 5
     s.move_elements("a", 10, 0, group="spd")
     assert s.get_canvas("a", ids=["spd_label1"])["elements"][0]["bbox_xywh"][0] > 150
 
@@ -418,7 +413,7 @@ def test_rotation_around_origin_pivot(ws):
     s.create_canvas("a", 200, 200)
     s.add_rect("a", 100, 98, 80, 4, fill="#ff0000", origin=[100, 100], rotation=90, id="needle")
     alpha = render("a")[..., 3]
-    assert alpha[150, 100] == 255                # now points down from the pivot
+    assert alpha[150, 100] == 255
     assert alpha[100, 150] == 0
     box = s.get_canvas("a")["elements"][0]["bbox_xywh"]
     assert abs(box[0] - 98) < 0.6 and abs(box[1] - 100) < 0.6 and abs(box[3] - 80) < 0.6
@@ -429,7 +424,7 @@ def test_skew_makes_a_parallelogram(ws):
     s.add_rect("a", 50, 20, 100, 60, fill="#ffffff", skew=20)
     alpha = render("a")[..., 3]
     top, bottom = np.nonzero(alpha[22] == 255)[0], np.nonzero(alpha[78] == 255)[0]
-    assert top.min() > bottom.min() + 15 and top.max() > bottom.max() + 15      # top edge shifted right
+    assert top.min() > bottom.min() + 15 and top.max() > bottom.max() + 15
     assert abs(len(top) - len(bottom)) <= 1
 
 
@@ -437,9 +432,9 @@ def test_conic_gradient_and_textures(ws):
     s.create_canvas("a", 100, 100)
     s.add_rect("a", 0, 0, 100, 100, fill={"type": "conic", "stops": [[0, "#000000"], [1, "#ffffff"]], "dither": False})
     px = render("a")
-    assert px[50, 90][0] < 20 or px[50, 90][0] > 235          # seam sits at 3 o'clock
-    assert abs(int(px[90, 50][0]) - 64) < 8                   # 6 o'clock = a quarter of the way round
-    assert abs(int(px[50, 10][0]) - 128) < 8                  # 9 o'clock = half way
+    assert px[50, 90][0] < 20 or px[50, 90][0] > 235
+    assert abs(int(px[90, 50][0]) - 64) < 8
+    assert abs(int(px[50, 10][0]) - 128) < 8
     for kind in ("carbon", "brushed"):
         s.create_canvas(kind, 64, 64)
         s.add_rect(kind, 0, 0, 64, 64, fill={"type": kind, "color": "#888888", "color2": "#222222"})
@@ -453,14 +448,14 @@ def test_italic_real_and_faux(ws):
     faux = s.add_text("a", "187", 10, 60, size=40, font="Inter", weight=700, italic=True)
     upright = s.measure_text("187", size=40, font="Inter", weight=700)
     assert "warnings" not in real
-    assert faux["bbox_xywh"][2] > upright["width"] + 2        # slanted box is wider
+    assert faux["bbox_xywh"][2] > upright["width"] + 2
 
 
 def test_blur_and_blend_modes(ws):
     s.create_canvas("a", 100, 100, "#808080")
     s.add_rect("a", 40, 40, 20, 20, fill="#ffffff", style={"blur": 12})
     px = render("a", background=True)
-    assert px[50, 50][0] > px[50, 64][0] > 0x80 and px[50, 50][0] < 255       # light spreads past the shape, softened
+    assert px[50, 50][0] > px[50, 64][0] > 0x80 and px[50, 50][0] < 255
     for mode, expected in (("multiply", 0x40), ("screen", 0xC0)):
         s.create_canvas(mode, 10, 10, "#808080")
         s.add_rect(mode, 0, 0, 10, 10, fill="#808080", style={"blend": mode})
@@ -478,7 +473,7 @@ def test_export_layers_writes_parts_and_layout(ws):
     layers = {layer["name"]: layer for layer in out["layers"]}
     assert set(layers) == {"dial", "needle", "base"}
     assert layers["needle"]["origin"] == [100, 100]
-    assert layers["needle"]["x"] == 98 and layers["needle"]["width"] == 74        # trimmed with 2px padding
+    assert layers["needle"]["x"] == 98 and layers["needle"]["width"] == 74
     needle = Image.open(ws / "layers" / layers["needle"]["file"])
     assert needle.size == (74, 8)
     layout = json.loads(Path(out["layout"]).read_text())
@@ -501,16 +496,15 @@ def test_batch_supports_arc_and_ticks(ws):
 def test_conic_on_partial_arc_is_centred_on_the_circle(ws):
     conic = {"type": "conic", "from": 180, "to": 360, "stops": [[0, "#000000"], [1, "#ffffff"]], "dither": False}
     s.create_canvas("a", 200, 200)
-    s.add_arc("a", 100, 100, 80, 180, 225, thickness=20, color=conic, id="arc")       # first quarter of the sweep
+    s.add_arc("a", 100, 100, 80, 180, 225, thickness=20, color=conic, id="arc")
     start = render("a")[100 - 14, 100 - 79]
-    assert start[3] == 255 and start[0] < 40           # near the start of the sweep: still dark
+    assert start[3] == 255 and start[0] < 40
     s.update_element("a", "arc", {"end_angle": 360})
     px = render("a")
-    assert abs(int(px[100 - 14, 100 - 79][0]) - int(start[0])) <= 2     # same colour whatever the sweep length
-    assert abs(int(px[20, 100][0]) - 128) < 8                           # 12 o'clock is half way
+    assert abs(int(px[100 - 14, 100 - 79][0]) - int(start[0])) <= 2
+    assert abs(int(px[20, 100][0]) - 128) < 8
 
 
-# ---------------------------------------------------------------- animation
 
 from game_ui_mcp import animation as am
 
@@ -521,9 +515,9 @@ def test_easing_endpoints_and_shapes():
             name = f"{style}-{direction}"
             assert abs(am.ease(name, 0)) < 1e-9 and abs(am.ease(name, 1) - 1) < 1e-9, name
     assert am.ease("quad-in", 0.5) == 0.25 and am.ease("quad-out", 0.5) == 0.75
-    assert am.ease("back-out", 0.6) > 1                         # overshoots
+    assert am.ease("back-out", 0.6) > 1
     assert am.ease("step", 0.99) == 0 and am.ease("step", 1) == 1
-    assert abs(am.ease([0, 0, 1, 1], 0.3) - 0.3) < 1e-6          # linear cubic-bezier
+    assert abs(am.ease([0, 0, 1, 1], 0.3) - 0.3) < 1e-6
     assert am.ease_name("OutBack") == "back-out" and am.ease_name("InOutQuad") == "quad-in-out"
     assert am.ease_name("ease-out") == "cubic-out" and am.ease_name("in-expo") == "expo-in"
     assert am.engine_ease("expo-out") == {"roblox": {"EasingStyle": "Exponential", "EasingDirection": "Out"},
@@ -536,7 +530,7 @@ def test_value_interpolation():
     assert am.lerp_value(10, 20, 0.25, {}) == 12.5
     assert am.lerp_value([0, 10], [10, 30], 0.5, {}) == [5, 20]
     assert am.lerp_value("#000000", "#ffffff", 0.5, {}, True) == "#808080"
-    assert am.lerp_value("#ff0000@0", "#ff0000", 0.5, {}, True) == "#ff000080"      # fade keeps the hue
+    assert am.lerp_value("#ff0000@0", "#ff0000", 0.5, {}, True) == "#ff000080"
     assert am.lerp_value("a", "b", 0.5, {}) == "a" and am.lerp_value("a", "b", 1, {}) == "b"
     grad = am.lerp_value({"type": "linear", "angle": 0, "stops": [[0, "#000000"], [1, "#000000"]]},
                          {"type": "linear", "angle": 90, "stops": [[0, "#ffffff"], [1, "#000000"]]}, 0.5, {}, True)
@@ -560,16 +554,16 @@ def test_keyframes_move_scale_and_fade(ws):
 
     assert frame(0)[50, 30][3] == 255 and frame(0)[50, 80][3] == 0
     half = frame(0.5)
-    assert half[50, 80][3] == 191 and half[50, 30][3] == 0          # moved 50 px, 75% opaque
+    assert half[50, 80][3] == 191 and half[50, 30][3] == 0
     assert frame(1)[50, 130][3] == 128
-    assert render("a")[50, 30][3] == 255                             # the canvas itself is untouched
+    assert render("a")[50, 30][3] == 255
 
     s.create_animation("a", "pop", 0.5)
     s.set_keyframes("a", "pop", "box", "scale", [[0, 1], [0.5, 2, "linear"]])
     _, pop = st.get_animation(c, "pop")
     posed, _ = am.apply_animation(c, pop, 0.5, {})
     alpha = np.asarray(st.renderer(posed).render())[..., 3]
-    assert int((alpha == 255).sum()) == 1600                         # 40x40, grown around its own centre
+    assert int((alpha == 255).sum()) == 1600
     assert alpha[31, 11] == 255 and alpha[69, 49] == 255 and alpha[50, 9] == 0
 
 
@@ -584,7 +578,7 @@ def test_group_target_pivot_and_offset(ws):
     st = s.store()
     posed, _ = am.apply_animation(st.get("a"), st.get_animation(st.get("a"), "spin")[1], 1.5, {})
     alpha = np.asarray(st.renderer(posed).render())[..., 3]
-    assert alpha[140, 100] == 255 and alpha[100, 140] == 0           # swung down around the pivot
+    assert alpha[140, 100] == 255 and alpha[100, 140] == 0
 
 
 def test_animation_validation_and_cleanup(ws):
@@ -596,21 +590,21 @@ def test_animation_validation_and_cleanup(ws):
     with pytest.raises(ValueError):
         s.set_keyframes("a", "x", "ghost", "dx", [[0, 0], [1, 5]])
     with pytest.raises(ValueError):
-        s.set_keyframes("a", "x", "r", "dx", [[0, 0], [2, 5]])              # past the end
+        s.set_keyframes("a", "x", "r", "dx", [[0, 0], [2, 5]])
     with pytest.raises(ValueError):
         s.set_keyframes("a", "x", "r", "style.fill", [[0, "#fff"], [1, "#notacolor"]])
     with pytest.raises(ValueError):
         s.set_keyframes("a", "x", "r", "dx", [[0, 0], [1, 5, "wobble"]])
     assert s.get_animations("a")["animations"][0]["tracks"] == []
-    s.set_keyframes("a", "x", "r", "width", [[0, 0], [1, 20]])               # collapsing to zero is allowed
+    s.set_keyframes("a", "x", "r", "width", [[0, 0], [1, 20]])
     s.set_keyframes("a", "x", "r", "dx", [[0, 0], [1, 5]])
     assert s.delete_keyframes("a", "x", target="r", property="dx")["tracks_left"] == 1
     with pytest.raises(ValueError):
-        s.create_animation("a", "x", 0.5)                                    # shorter than its keyframes
+        s.create_animation("a", "x", 0.5)
     s.duplicate_canvas("a", "b")
-    assert len(s.get_animations("b", "x")["tracks"]) == 1                    # animations are copied
+    assert len(s.get_animations("b", "x")["tracks"]) == 1
     s.delete_elements("a", ids=["r"])
-    assert s.get_animations("a", "x")["tracks"] == []                        # dead tracks are pruned
+    assert s.get_animations("a", "x")["tracks"] == []
     assert s.delete_animation("a", "x")["animations_left"] == []
 
 
@@ -626,7 +620,7 @@ def test_preview_and_export_animation(ws):
     sheet = s.export_animation("a", "bounce", format="spritesheet", path=str(ws / "o" / "b.png"))
     fw, fh = sheet["frame_size"]
     assert sheet["frames"] == 5 and sheet["columns"] == 3
-    assert fh == 16 and 44 <= fw <= 48                 # trimmed to the area the dot sweeps at the sampled times
+    assert fh == 16 and 44 <= fw <= 48
     data = json.loads(Path(sheet["json"]).read_text())
     assert data["offset"] == [8.0, 24.0] and data["loop"] is True and data["fps"] == 10
     assert Image.open(sheet["file"]).size == (fw * 3, 32)
@@ -637,7 +631,7 @@ def test_preview_and_export_animation(ws):
     for fmt, ext in (("gif", "gif"), ("apng", "png"), ("webp", "webp")):
         out = s.export_animation("a", "bounce", format=fmt, path=str(ws / "o" / f"b_anim.{ext}"))
         im = Image.open(out["file"])
-        assert getattr(im, "n_frames", 1) in (4, 5), fmt      # writers may merge two identical neighbours
+        assert getattr(im, "n_frames", 1) in (4, 5), fmt
 
     js = s.export_animation("a", "bounce", format="json", path=str(ws / "o" / "b.anim.json"))
     desc = json.loads(Path(js["file"]).read_text())
@@ -659,7 +653,6 @@ def test_batch_animation_ops_and_undo(ws):
     assert s.undo("a")["undone"] and s.get_animations("a")["animations"] == []
 
 
-# ---------------------------------------------------------------- quality tools: strokes, light, masks, fills
 
 from game_ui_mcp import effects as fxlib
 
@@ -668,7 +661,7 @@ def test_round_dilation_and_float_blur():
     dot = np.zeros((21, 21), dtype=np.uint8)
     dot[10, 10] = 255
     grown = fxlib.dilate(dot, 3)
-    assert int((grown == 255).sum()) == 29                    # every pixel within 3 px: a disc, not a square
+    assert int((grown == 255).sum()) == 29
     assert grown[10, 13] == 255 and grown[13, 13] == 0 and np.array_equal(grown, grown.T)
     assert np.array_equal(fxlib.erode(fxlib.dilate(dot, 2), 2), dot)
     field = np.zeros((40, 40))
@@ -684,9 +677,9 @@ def test_multiple_strokes_with_offset(ws):
                        {"color": "#00ff00", "width": 3, "align": "outside", "offset": 6}])
     px = render("a")
     assert tuple(px[50, 50][:3]) == (0, 0, 255)
-    assert tuple(px[50, 28]) == (255, 0, 0, 255)               # 0-4 px outside: red
-    assert px[50, 25][3] == 0                                  # 4-6 px: the gap
-    assert tuple(px[50, 22]) == (0, 255, 0, 255)               # 6-9 px: green
+    assert tuple(px[50, 28]) == (255, 0, 0, 255)
+    assert px[50, 25][3] == 0
+    assert tuple(px[50, 22]) == (0, 255, 0, 255)
     assert px[50, 19][3] == 0
     assert s.get_canvas("a")["elements"][0]["bbox_xywh"] == [30, 30, 40, 40]
 
@@ -703,11 +696,11 @@ def test_text_double_outline(ws):
 def test_light_shades_towards_and_away_from_the_source(ws):
     s.create_canvas("a", 120, 120)
     s.add_rect("a", 20, 20, 80, 80, radius=10, fill="#808080",
-               style={"light": {"angle": 225, "size": 8, "depth": 1.5}})        # light from the top-left
+               style={"light": {"angle": 225, "size": 8, "depth": 1.5}})
     px = render("a").astype(int)
-    assert px[60, 23][0] > 0x80 + 20 and px[23, 60][0] > 0x80 + 20              # left and top edges catch light
-    assert px[60, 97][0] < 0x80 - 20 and px[97, 60][0] < 0x80 - 20              # right and bottom fall away
-    assert abs(px[60, 60][0] - 0x80) <= 2                                        # the flat middle is untouched
+    assert px[60, 23][0] > 0x80 + 20 and px[23, 60][0] > 0x80 + 20
+    assert px[60, 97][0] < 0x80 - 20 and px[97, 60][0] < 0x80 - 20
+    assert abs(px[60, 60][0] - 0x80) <= 2
     assert px[60, 60][3] == 255 and px[5, 5][3] == 0
     with pytest.raises(ValueError):
         s.add_rect("a", 0, 0, 10, 10, style={"light": {"profile": "wavy"}})
@@ -738,10 +731,10 @@ def test_gradient_spaces_and_new_fills(ws):
     mids = {}
     for space in ("srgb", "linear", "oklab"):
         first, mids[space], last = mid(space)
-        assert first[2] > 240 and first[0] < 30 and last[0] > 240 and last[2] < 30      # both ends keep their colour
+        assert first[2] > 240 and first[0] < 30 and last[0] > 240 and last[2] < 30
     srgb_mid, oklab_mid = mids["srgb"].astype(int), mids["oklab"].astype(int)
-    assert abs(int(srgb_mid[0]) - int(srgb_mid[2])) < 12                                 # sRGB passes through grey
-    assert max(oklab_mid[:3]) - min(oklab_mid[:3]) > 60                                  # OKLab keeps colour
+    assert abs(int(srgb_mid[0]) - int(srgb_mid[2])) < 12
+    assert max(oklab_mid[:3]) - min(oklab_mid[:3]) > 60
     for kind in ("hex", "clouds"):
         s.create_canvas(kind, 64, 64)
         s.add_rect(kind, 0, 0, 64, 64, fill={"type": kind, "color": "#ffffff", "color2": "#000000", "size": 16})
@@ -763,7 +756,7 @@ def test_image_fill_cover_and_tile(ws):
     s.update_element("a", "e", {"fill": {"type": "image", "path": path, "fit": "tile"}})
     row = render("a")[10, 6:34, :3]
     reds = int((row[:, 0] > 200).sum())
-    assert 10 <= reds <= 18                                    # the 4px texture repeats: about half red
+    assert 10 <= reds <= 18
     with pytest.raises(ValueError):
         s.add_rect("a", 0, 0, 5, 5, fill={"type": "image", "path": str(ws / "missing.png")})
 
@@ -782,16 +775,15 @@ def test_extra_blend_modes(ws):
         assert abs(got - want) <= 2, mode
 
 
-# ---------------------------------------------------------------- layers
 
 def test_layers_stack_and_active_layer(ws):
     s.create_canvas("a", 60, 60)
-    s.add_rect("a", 0, 0, 60, 60, fill="#ff0000", id="early")              # before any layer: goes to base
+    s.add_rect("a", 0, 0, 60, 60, fill="#ff0000", id="early")
     out = s.create_layer("a", "top")
     assert out["active_layer"] == "top"
     s.add_rect("a", 10, 10, 40, 40, fill="#00ff00", id="g")
     s.create_layer("a", "under", position="below:top")
-    s.add_rect("a", 0, 0, 60, 60, fill="#0000ff", id="b")                  # added last but on a lower layer
+    s.add_rect("a", 0, 0, 60, 60, fill="#0000ff", id="b")
     info = s.get_canvas("a")
     assert [l["layer"] for l in info["layers_bottom_to_top"]] == ["base", "under", "top"]
     assert info["active_layer"] == "under"
@@ -808,7 +800,7 @@ def test_layers_stack_and_active_layer(ws):
         s.add_rect("a", 0, 0, 5, 5, layer="nope")
     with pytest.raises(ValueError):
         s.create_layer("a", "bad", blend="sparkle")
-    assert len(s.get_canvas("a")["layers_bottom_to_top"]) == 2             # failed calls added nothing
+    assert len(s.get_canvas("a")["layers_bottom_to_top"]) == 2
 
 
 def test_layer_opacity_treats_the_layer_as_one_image(ws):
@@ -817,7 +809,7 @@ def test_layer_opacity_treats_the_layer_as_one_image(ws):
     s.add_rect("a", 0, 0, 40, 30, fill="#ffffff")
     s.add_rect("a", 20, 0, 40, 30, fill="#ffffff")
     alpha = render("a")[15, :, 3]
-    assert alpha[10] == 128 and alpha[30] == 128 and alpha[50] == 128      # the overlap is not doubled
+    assert alpha[10] == 128 and alpha[30] == 128 and alpha[50] == 128
 
 
 def test_clipped_layer_paints_only_inside_its_base(ws):
@@ -825,13 +817,13 @@ def test_clipped_layer_paints_only_inside_its_base(ws):
     s.create_layer("a", "body")
     s.add_ellipse("a", 50, 50, 30, fill="#808080")
     s.create_layer("a", "shade", clip=True, blend="multiply")
-    s.add_rect("a", 50, 0, 50, 100, fill="#808080")                        # darkens the right half only
+    s.add_rect("a", 50, 0, 50, 100, fill="#808080")
     px = render("a")
     assert tuple(px[50, 35]) == (128, 128, 128, 255)
     assert abs(int(px[50, 65][0]) - 64) <= 1 and px[50, 65][3] == 255
-    assert px[50, 90][3] == 0 and px[10, 90][3] == 0                       # nothing spills outside the body
+    assert px[50, 90][3] == 0 and px[10, 90][3] == 0
     s.update_layer("a", "body", visible=False)
-    assert render("a")[..., 3].max() == 0                                  # hiding the base hides what clips to it
+    assert render("a")[..., 3].max() == 0
     s.update_layer("a", "body", visible=True)
     image, info = s.preview("a", layers=["shade"])
     assert image.data[:4] == b"\x89PNG"
@@ -843,7 +835,7 @@ def test_layer_style_outlines_the_merged_shape(ws):
     s.add_ellipse("a", 45, 40, 25, fill="#ffffff")
     s.add_ellipse("a", 75, 40, 25, fill="#ffffff")
     px = render("a")
-    assert tuple(px[40, 60][:3]) == (255, 255, 255)                        # where the circles overlap: no outline
+    assert tuple(px[40, 60][:3]) == (255, 255, 255)
     assert tuple(px[40, 18][:3]) == (255, 0, 0) and tuple(px[40, 102][:3]) == (255, 0, 0)
     assert px[40, 14][3] == 0
     s.update_layer("a", "blob", style={"stroke": None, "shadow": {"color": "#000000", "blur": 0, "dx": 6, "dy": 0}})
@@ -902,13 +894,13 @@ def test_export_layers_by_layer(ws):
     body = merged["layers"][0]
     assert body["merged"] == ["shade"] and body["x"] == 18 and body["width"] == 64
     img = np.asarray(Image.open(ws / "m" / body["file"]))
-    assert abs(int(img[32, 45][0]) - 64) <= 1 and img[32, 15][0] == 128          # shading is baked into the body
+    assert abs(int(img[32, 45][0]) - 64) <= 1 and img[32, 15][0] == 128
     assert merged["layers"][1]["origin"] == [10, 10]
     split = s.export_layers("a", out_dir=str(ws / "s"), merge_clipped=False, trim=False)
     assert [l["name"] for l in split["layers"]] == ["body", "shade", "badge"]
     assert split["layers"][1]["blend"] == "multiply" and "multiply" in split["notes"][0]
     shade = np.asarray(Image.open(ws / "s" / split["layers"][1]["file"]))
-    assert shade[50, 65][3] == 255 and shade[50, 90][3] == 0                    # exported already clipped
+    assert shade[50, 65][3] == 255 and shade[50, 90][3] == 0
     groups = s.export_layers("a", out_dir=str(ws / "g"), by="group")
     assert groups["split_by"] == "group"
     with pytest.raises(ValueError):
@@ -918,7 +910,7 @@ def test_export_layers_by_layer(ws):
 def test_export_psd_keeps_the_stack(ws):
     psd_tools = pytest.importorskip("psd_tools")
     s.create_canvas("a", 80, 60, "#202020")
-    s.add_rect("a", 0, 0, 20, 20, fill="#ffffff")                               # implicit base layer
+    s.add_rect("a", 0, 0, 20, 20, fill="#ffffff")
     s.create_layer("a", "Gövde")
     s.add_ellipse("a", 40, 30, 20, fill="#ff0000")
     s.create_layer("a", "shade", clip=True, blend="multiply", opacity=0.5)
@@ -934,21 +926,20 @@ def test_export_psd_keeps_the_stack(ws):
     assert not psd[4].visible and psd[2].bbox == (40, 20, 120, 100)
     stored = np.asarray(psd.topil().convert("RGBA")).astype(int)
     ours = render("a", 2.0, background=True).astype(int)
-    assert np.abs(stored - ours).max() <= 1                                     # the flattened preview matches
+    assert np.abs(stored - ours).max() <= 1
     body = np.asarray(psd[2].topil().convert("RGBA"))
     assert tuple(body[40, 40]) == (255, 0, 0, 255)
     with pytest.raises(ValueError):
         s.export_psd("a", str(ws / "a.png"))
 
 
-# ---------------------------------------------------------------- gaps closed in the audit
 
 def test_css_names_and_hsl():
     assert parse_color("gold") == (255, 215, 0, 255)
     assert parse_color("hsl(0, 100%, 50%)") == (255, 0, 0, 255)
     assert parse_color("hsla(120, 100%, 25%, 0.5)") == (0, 128, 0, 128)
     assert parse_color("rgb(10 20 30 / 50%)") == (10, 20, 30, 128)
-    assert parse_color("green") == (0, 200, 0, 255)          # existing palette kept stable
+    assert parse_color("green") == (0, 200, 0, 255)
 
 
 def test_erase_cuts_hole_only_in_its_layer(ws):
@@ -956,9 +947,9 @@ def test_erase_cuts_hole_only_in_its_layer(ws):
     s.add_rect("a", 10, 10, 80, 80, fill="#ffffff")
     s.add_ellipse("a", 50, 50, 20, style={"blend": "erase"})
     px = render("a", background=True)
-    assert tuple(px[50, 50][:3]) == (16, 32, 48)            # hole shows the canvas background
+    assert tuple(px[50, 50][:3]) == (16, 32, 48)
     assert tuple(px[15, 15][:3]) == (255, 255, 255)
-    assert render("a")[50, 50][3] == 0                       # transparent in exports
+    assert render("a")[50, 50][3] == 0
 
 
 def test_flip_mirrors_shape_but_not_shadow(ws):
@@ -967,9 +958,9 @@ def test_flip_mirrors_shape_but_not_shadow(ws):
                   style={"shadow": {"dx": 6, "dy": 0, "blur": 0, "color": "#ff0000"}}, id="tri")
     s.update_element("a", "tri", {"flip_x": True})
     px = render("a")
-    assert px[30, 38][3] > 0 and px[30, 12][3] > 0           # still drawn, now pointing right
-    assert px[30, 44][0] == 255 and px[30, 44][3] > 200      # shadow still falls to the right of the tip
-    assert px[30, 5][3] == 0                                  # a plain bitmap mirror would put it on the left
+    assert px[30, 38][3] > 0 and px[30, 12][3] > 0
+    assert px[30, 44][0] == 255 and px[30, 44][3] > 200
+    assert px[30, 5][3] == 0
     box = s.get_canvas("a", details=True)
     assert box
 
@@ -995,14 +986,14 @@ def test_soft_shadow_has_no_banding(ws):
     inner = np.flatnonzero(row >= 3)
     seg = row[inner[0]:inner[-1] + 1]
     changes = np.flatnonzero(np.diff(seg) != 0)
-    assert np.diff(changes).max() < 16                     # was a 35 px flat band before dithered float blur
+    assert np.diff(changes).max() < 16
 
 
 def test_text_on_arc(ws):
     s.create_canvas("a", 200, 200)
     r = s.add_text("a", "CHAMPION", 0, 0, size=18, anchor="baseline-center", arc={"cx": 100, "cy": 100, "radius": 70})
     x, y, w, h = r["bbox_xywh"]
-    assert y < 40 and y + h < 70 and 30 < x < 70                 # sits over the top of the circle
+    assert y < 40 and y + h < 70 and 30 < x < 70
     px = render("a")
     assert px[100, 100][3] == 0 and px[:60].max() > 0
     with pytest.raises(ValueError):
@@ -1022,7 +1013,7 @@ def test_instances_follow_source_and_refuse_cycles(ws):
     s.update_element("gem", "body", {"fill": "#00ff00"})
     assert tuple(render("hud")[30, 30][:3]) == (0, 255, 0)
     with pytest.raises(ValueError):
-        s.add_instance("gem", "hud", 0, 0)                       # hud already contains gem
+        s.add_instance("gem", "hud", 0, 0)
     with pytest.raises(ValueError):
         s.delete_canvas("gem")
 
@@ -1048,7 +1039,7 @@ def test_add_svg_import(ws):
     assert len(r["ids"]) == 2 and any("text" in n for n in r["notes"])
     px = render("a")
     assert tuple(px[20, 20][:3]) == (255, 0, 0)
-    assert px[48, 64][1] > 200                                     # circle stroke in currentColor
+    assert px[48, 64][1] > 200
     with pytest.raises(ValueError):
         s.add_svg("a", '<!DOCTYPE svg [<!ENTITY x "y">]><svg/>')
 
@@ -1108,7 +1099,6 @@ def test_godot_export(ws, tmp_path):
     assert h["files"] == ["panel.stylebox.tres"] and "texture_margin_left = 16.0" in tres
 
 
-# ---------------------------------------------------------------- game / app designer workflow
 
 def test_presets_safe_area_and_guides(ws):
     r = s.create_canvas("m", preset="iphone")
@@ -1130,7 +1120,7 @@ def test_colour_vision_simulation_changes_red_green():
     out = np.asarray(simulate(img, "deuteranopia")).astype(int)
     before = abs(220 - 40) + abs(40 - 180)
     after = abs(out[0, 0, 0] - out[0, 1, 0]) + abs(out[0, 0, 1] - out[0, 1, 1])
-    assert after < before / 2                                  # red and green collapse together
+    assert after < before / 2
     gray = np.asarray(simulate(img, "grayscale"))
     assert gray[0, 0, 0] == gray[0, 0, 1] == gray[0, 0, 2]
 
@@ -1163,7 +1153,7 @@ def test_states_render_and_export(ws, tmp_path):
     st = s.store()
     c = st.get("btn")
     assert tuple(np.asarray(st.renderer(c, state="hover").render())[20, 50][:3]) == (0, 255, 0)
-    assert tuple(np.asarray(st.renderer(c).render())[20, 50][:3]) == (0, 0, 255)       # normal untouched
+    assert tuple(np.asarray(st.renderer(c).render())[20, 50][:3]) == (0, 0, 255)
     out = s.export_asset("btn", engine="generic", out_dir=str(tmp_path / "o"), states="all")
     f = out["files"][0]
     assert set(f["states"]) == {"hover", "pressed"}
@@ -1195,7 +1185,7 @@ def test_strings_vars_pseudo_and_overflow(ws):
     assert not any(i["check"] == "overflow" for i in s.review_canvas("b")["issues"])
     rep = s.review_canvas("b", language="de")
     assert any(i["check"] == "overflow" and i["ids"] == ["label", "face"] for i in rep["issues"])
-    s.update_canvas("b", vars={"play": "GO"})                   # canvas vars win over string tables
+    s.update_canvas("b", vars={"play": "GO"})
     assert st.renderer(st.get("b"), language="de").text_of(st.get("b")["elements"][1]) == "GO"
     assert s.get_strings()["languages"] == {"de": 1, "en": 1}
 
@@ -1237,7 +1227,7 @@ def test_arrange_row_grid_and_hug(ws):
     assert out["container"]["bbox_xywh"] == [5, 5, 160, 50]
     b = {e["id"]: e["bbox_xywh"] for e in s.get_canvas("a")["elements"]}
     assert b["r0"][0] == 15 and b["r1"][0] == 60 and b["r2"][0] == 125
-    assert b["r0"][1] == 20 and b["r2"][1] == 15                   # centred across the row
+    assert b["r0"][1] == 20 and b["r2"][1] == 15
     s.arrange_elements("a", "grid", ids=["r0", "r1", "r2"], columns=2, origin=[100, 100], gap=4)
     b = {e["id"]: e["bbox_xywh"] for e in s.get_canvas("a")["elements"]}
     assert b["r2"][1] > b["r0"][1] and abs(b["r2"][0] + b["r2"][2] / 2 - (b["r0"][0] + b["r0"][2] / 2)) < 0.01
@@ -1254,7 +1244,7 @@ def test_scatter_is_seeded_and_animated(ws):
     s.undo("a")
     s.scatter("a", "dot", 30, [0, 0, 200, 200], seed=5, scale=[0.5, 2], opacity=[0.2, 1], min_distance=8)
     assert [e["bbox_xywh"] for e in s.get_canvas("a")["elements"]] == first
-    assert len(s.get_animations("a", "twinkle")["tracks"]) == 0      # undone with the scatter
+    assert len(s.get_animations("a", "twinkle")["tracks"]) == 0
 
 
 def test_stagger_copy_redo(ws):
@@ -1283,7 +1273,7 @@ def test_pixel_art_mode(ws, tmp_path):
     assert alphas <= {0, 255}
     colours = {tuple(v) for v in px[px[..., 3] == 255][:, :3]}
     assert colours <= {(255, 0, 0), (255, 255, 255), (0, 0, 0)}
-    assert (px[0:4, 0:4] == px[0, 0]).all() and (px[32:36, 32:36] == px[32, 32]).all()   # whole-pixel blocks
+    assert (px[0:4, 0:4] == px[0, 0]).all() and (px[32:36, 32:36] == px[32, 32]).all()
 
 
 def test_export_formats_icon_sizes(ws, tmp_path):
@@ -1363,7 +1353,7 @@ def test_export_screen_engines(ws, tmp_path):
     tscn = (tmp_path / "g" / "hud.tscn").read_text()
     assert tscn.startswith("[gd_scene") and 'type="NinePatchRect"' in tscn and 'text = "HP"' in tscn
     assert "anchor_left = 1.0000" in tscn and "anchor_right = 1.0000" in tscn
-    assert Image.open(tmp_path / "g" / "bar.png").width < 50                # stretched piece was minimised
+    assert Image.open(tmp_path / "g" / "bar.png").width < 50
     rb = s.export_screen("hud", "roblox", out_dir=str(tmp_path / "r"))
     lua = (tmp_path / "r" / rb["files"][1]).read_text()
     assert 'Instance.new("TextLabel")' in lua and "UDim2.new(1, -70.0" in lua and "ScaleType.Slice" in lua

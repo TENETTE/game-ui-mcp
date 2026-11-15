@@ -27,7 +27,6 @@ ui.set_theme(
     },
 )
 
-# --- button (cut corners, gradient, glow, clipped shine + stripes)
 ui.create_canvas("btn_primary", 320, 96)
 ui.batch("btn_primary", [
     {"op": "add_rect", "id": "body", "x": 16, "y": 14, "width": 288, "height": 60, "radius": 14, "corner": "cut",
@@ -43,7 +42,6 @@ ui.batch("btn_primary", [
      "size": 28, "style": {"use": "title", "shadow": {"color": "#2e1065@0.9", "blur": 4, "dy": 2}}},
 ])
 
-# --- 9-slice panel
 ui.create_canvas("panel", 256, 256)
 ui.batch("panel", [
     {"op": "add_rect", "id": "bg", "x": 28, "y": 22, "width": 200, "height": 200, "radius": 18, "style": "panel"},
@@ -52,7 +50,6 @@ ui.batch("panel", [
     {"op": "add_polygon", "cx": 212, "cy": 38, "radius": 5, "sides": 4, "fill": "$accent"},
 ])
 
-# Icons are drawn here like any other shape: filled silhouettes on a 24x24 grid, placed with scale = size / 24.
 ICON = {
     "heart": "M12 21C12 21 3 15 3 9A4.5 4.5 0 0 1 12 6.5A4.5 4.5 0 0 1 21 9C21 15 12 21 12 21Z",
     "user": "M8 8A4 4 0 1 0 16 8A4 4 0 1 0 8 8ZM4 21C4 16.5 7.5 14 12 14C16.5 14 20 16.5 20 21Z",
@@ -69,7 +66,6 @@ def icon(name: str, x: float, y: float, size: float, **extra) -> dict:
     return {"op": "add_path", "d": ICON[name], "x": x, "y": y, "scale": size / 24, "fill_rule": "nonzero", **extra}
 
 
-# --- health bar (fill clipped to the rounded track)
 ui.create_canvas("hp_bar", 360, 64)
 ui.batch("hp_bar", [
     {"op": "add_rect", "id": "track", "x": 56, "y": 18, "width": 288, "height": 28, "radius": 14, "fill": "#0b0a12cc",
@@ -85,7 +81,6 @@ ui.batch("hp_bar", [
      "size": 18, "color": "#fff", "stroke": {"color": "#000@0.6", "width": 2}},
 ])
 
-# --- inventory slot
 ui.create_canvas("slot", 96, 96)
 ui.batch("slot", [
     {"op": "add_rect", "id": "s", "x": 8, "y": 8, "width": 80, "height": 80, "radius": 12,
@@ -97,7 +92,6 @@ ui.batch("slot", [
      "color": "#fff", "stroke": {"color": "#000", "width": 2}},
 ])
 
-# --- cartoon button (Roblox style: chunky outline, flat depth, comic font)
 ui.create_canvas("btn_cartoon", 280, 110)
 ui.batch("btn_cartoon", [
     {"op": "add_rect", "id": "depth", "x": 14, "y": 22, "width": 252, "height": 72, "radius": 26, "fill": "#15803d",
@@ -114,7 +108,6 @@ ui.batch("btn_cartoon", [
 kit = ["btn_primary", "panel", "hp_bar", "slot", "btn_cartoon"]
 ui.contact_sheet(kit, columns=3, cell=300, save_path=str(OUT / "kit_sheet.png"))
 
-# --- full-screen HUD mockup
 ui.create_canvas("hud", 1920, 1080, {"type": "linear", "angle": 90, "stops": ["#1b2a4a", "#0b0a12"]})
 ops = [
     {"op": "add_rect", "x": 0, "y": 0, "width": 1920, "height": 1080,

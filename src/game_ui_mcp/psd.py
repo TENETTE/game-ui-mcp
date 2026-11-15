@@ -49,12 +49,12 @@ def write_psd(path: Path, width: int, height: int, layers: list[dict], merged: I
         rec = struct.pack(">4i", top, left, bottom, right) + struct.pack(">H", 4)
         for channel_id, plane in zip((-1, 0, 1, 2), planes):
             rec += struct.pack(">hI", channel_id, len(plane) + 2)
-            pixels += struct.pack(">H", 0) + plane                      # 0 = raw, uncompressed
+            pixels += struct.pack(">H", 0) + plane
         blend = BLEND_KEYS.get(str(layer.get("blend", "normal")), b"norm")
         opacity = max(0, min(255, int(round(float(layer.get("opacity", 1)) * 255))))
         flags = 8 | (0 if layer.get("visible", True) else 2)
         rec += b"8BIM" + blend + struct.pack(">4B", opacity, 1 if layer.get("clip") else 0, flags, 0)
-        extra = struct.pack(">I", 0) + struct.pack(">I", 0)             # no layer mask, no blending ranges
+        extra = struct.pack(">I", 0) + struct.pack(">I", 0)
         extra += _pascal(layer["name"], 4) + _unicode_name(layer["name"])
         rec += struct.pack(">I", len(extra)) + extra
         records += rec
@@ -66,10 +66,10 @@ def write_psd(path: Path, width: int, height: int, layers: list[dict], merged: I
     flat = np.asarray(merged.convert("RGBA"))
     with open(path, "wb") as handle:
         handle.write(b"8BPS" + struct.pack(">H", 1) + b"\0" * 6)
-        handle.write(struct.pack(">HIIHH", 4, height, width, 8, 3))    # 4 channels, 8 bit, RGB
-        handle.write(struct.pack(">I", 0))                              # color mode data
-        handle.write(struct.pack(">I", 0))                              # image resources
+        handle.write(struct.pack(">HIIHH", 4, height, width, 8, 3))
+        handle.write(struct.pack(">I", 0))
+        handle.write(struct.pack(">I", 0))
         handle.write(struct.pack(">I", len(section)) + section)
-        handle.write(struct.pack(">H", 0))                              # merged image: raw
+        handle.write(struct.pack(">H", 0))
         for c in range(4):
             handle.write(flat[..., c].tobytes())

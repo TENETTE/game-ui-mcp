@@ -24,7 +24,6 @@ __all__ = ["set_pin", "resize_canvas", "preview_resolutions", "set_state", "dele
            "export_bitmap_font"]
 
 
-# --------------------------------------------------------------------------- multi-resolution
 
 @tool
 def set_pin(canvas: str, x: str = "left", y: str = "top", ids: list[str] | None = None, group: str | None = None):
@@ -140,7 +139,6 @@ def preview_resolutions(canvas: str, sizes: list | None = None, cell: int = 480,
     return [Image(data=_png_bytes(sheet), format="png"), json.dumps(info)]
 
 
-# --------------------------------------------------------------------------- interaction states
 
 STATE_NAMES = ("hover", "pressed", "disabled", "selected", "focused", "checked", "active", "locked", "new")
 
@@ -205,7 +203,6 @@ def delete_state(canvas: str, state: str, id: str | None = None):
     return {"canvas": c["id"], "states": sorted(states)}
 
 
-# --------------------------------------------------------------------------- localisation
 
 @tool
 def set_strings(language: str, strings: dict, default: bool = False, replace: bool = False):
@@ -236,7 +233,6 @@ def get_strings(language: str | None = None):
             "languages": {k: len(v) for k, v in sorted(st.strings["tables"].items())}}
 
 
-# --------------------------------------------------------------------------- data templates
 
 @tool
 def generate_from_template(template: str, rows: list[dict], name_prefix: str | None = None,
@@ -301,7 +297,6 @@ def generate_from_template(template: str, rows: list[dict], name_prefix: str | N
     return out
 
 
-# --------------------------------------------------------------------------- arranging / scattering
 
 def _wrap_rows(r, elements, mode, gap, cont_el, padding, max_width, origin, align, justify):
     """Greedy line breaking for wrap=true, then each line laid out as a row."""
@@ -330,7 +325,7 @@ def _wrap_rows(r, elements, mode, gap, cont_el, padding, max_width, origin, alig
         cur.append(el)
     lines.append(cur)
     moves, content, y = [], None, y0
-    share = {"center": 0.5, "end": 1.0}.get(justify, 0.0)      # shortcut: space-between wraps like start
+    share = {"center": 0.5, "end": 1.0}.get(justify, 0.0)
     for line in lines:
         lc, lm = lay.arrange(r, line, "row", gap, None, (x0, y), None, 0.0, align, "start")
         shift = max(0.0, limit - (lc[2] - lc[0])) * share
@@ -386,7 +381,7 @@ def arrange_elements(canvas: str, mode: str = "row", ids: list[str] | None = Non
                           "align": align, "justify": justify, "wrap": bool(wrap), "hug": hug,
                           **({"columns": columns} if columns else {})}
         try:
-            st.save_canvas(c)                          # saving re-flows
+            st.save_canvas(c)
         except Exception:
             st.drop_checkpoint(c)
             raise
@@ -405,7 +400,7 @@ def arrange_elements(canvas: str, mode: str = "row", ids: list[str] | None = Non
     if hug and cont_el is None:
         raise ValueError("hug needs a container")
     if hug:
-        box = None                                    # lay out freely from the container's corner, then wrap
+        box = None
         ob = r.element_box(cont_el)
         origin = [ob[0] + padding, ob[1] + padding]
     if wrap:
@@ -513,7 +508,7 @@ def scatter(canvas: str, id: str, count: int, area: list[float], seed: int = 1, 
             _, anim = st.get_animation(c, spec.get("animation", ""))
             last = max(k["t"] for k in anim_mod.normalize_keyframes(_maybe_json(spec.get("keyframes")),
                                                                     anim["duration"], 0.0))
-            spread = max(0.0, min(spread, float(anim["duration"]) - last))   # offsets must keep keys inside
+            spread = max(0.0, min(spread, float(anim["duration"]) - last))
             for el in made:
                 _set_keyframes(c, {**spec, "target": el["id"], "offset": round(arng.uniform(0, spread), 3)},
                                checkpoint=False)
@@ -586,7 +581,6 @@ def redo(canvas: str):
     return {"redone": True, "elements": [e["id"] for e in c["elements"]]}
 
 
-# --------------------------------------------------------------------------- bitmap fonts
 
 @tool
 def export_bitmap_font(name: str, characters: str = "0123456789+-x%.,:!", size: float = 48,

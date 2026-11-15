@@ -56,7 +56,6 @@ def detect_nine_slice(img: Image.Image, tolerance: int = 1, block_x: bool = Fals
     cy0, cy1 = _band(arr, 0, tolerance)
     stretch_x = (cx1 - cx0 + 1) >= 3 and not block_x
     stretch_y = (cy1 - cy0 + 1) >= 3 and not block_y
-    # a non-stretchable axis keeps a 1px centre so every engine still gets a valid slice rect
     if stretch_x:
         left, right = cx0 + 1, w - cx1
     else:
@@ -128,7 +127,6 @@ def engine_metadata(engine: str, size: tuple[int, int], borders: dict | None, sc
         meta["godot"] = {"import": {"compress/mode": "Lossless", "mipmaps/generate": False},
                          "imageSize": [w, h]}
         if borders:
-            # Godot 4: NinePatchRect.patch_margin_* and StyleBoxTexture.texture_margin_* (texture pixels)
             meta["godot"]["node"] = "NinePatchRect or StyleBoxTexture"
             meta["godot"]["margins_LTRB"] = [borders["left"], borders["top"], borders["right"], borders["bottom"]]
     return meta

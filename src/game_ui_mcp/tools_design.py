@@ -18,7 +18,6 @@ from .server import _maybe_json, _prepare_update, _summary, slugify, store, tool
 __all__ = ["guide", "make_palette", "restyle", "path_ops", "find_elements", "vectorize_image"]
 
 
-# --------------------------------------------------------------------------- reference
 
 @tool
 def guide(topic: str = "index"):
@@ -35,11 +34,10 @@ def guide(topic: str = "index"):
     return TOPICS[key]
 
 
-# --------------------------------------------------------------------------- palettes
 
 _STEPS = (50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950)
-_L = (0.975, 0.94, 0.88, 0.80, 0.71, 0.62, 0.53, 0.45, 0.37, 0.29, 0.21)       # OKLab lightness per step
-_C = (0.12, 0.25, 0.45, 0.70, 0.90, 1.0, 0.95, 0.85, 0.72, 0.60, 0.50)         # share of the base chroma
+_L = (0.975, 0.94, 0.88, 0.80, 0.71, 0.62, 0.53, 0.45, 0.37, 0.29, 0.21)
+_C = (0.12, 0.25, 0.45, 0.70, 0.90, 1.0, 0.95, 0.85, 0.72, 0.60, 0.50)
 
 
 def _oklab(rgb) -> np.ndarray:
@@ -126,7 +124,6 @@ def make_palette(base: str, name: str = "primary", apply: bool = False, mode: st
     return result
 
 
-# --------------------------------------------------------------------------- restyle
 
 _NOT_COLOURS = {"code", "text", "font", "use", "type", "blend", "align", "join", "profile", "space", "path",
                 "fit", "anchor", "id", "group", "layer", "clip", "source", "d", "op", "decoration", "lang"}
@@ -237,7 +234,7 @@ def restyle(canvases: list[str] | None = None, replace_colors: dict | None = Non
     if not (replace_colors or replace_fonts or props or texts):
         raise ValueError("give replace_colors, replace_fonts, replace_text or props - otherwise there is nothing to change")
     for dst in replace_colors.values():
-        parse_color(dst, colors)                         # fail before touching anything
+        parse_color(dst, colors)
     rules = [(_colour_matcher(src, colors), str(dst)) for src, dst in replace_colors.items()]
     fonts = {str(k).lower(): str(v) for k, v in replace_fonts.items()}
     report: dict[str, Any] = {"canvases": {}, "dry_run": bool(dry_run)}
@@ -303,7 +300,6 @@ def restyle(canvases: list[str] | None = None, replace_colors: dict | None = Non
     return report
 
 
-# --------------------------------------------------------------------------- find
 
 @tool
 def find_elements(canvas: str | None = None, like: str | None = None, type: str | None = None,
@@ -364,7 +360,6 @@ def find_elements(canvas: str | None = None, like: str | None = None, type: str 
     return {"found": found, "count": sum(len(v) for v in found.values())}
 
 
-# --------------------------------------------------------------------------- path operations
 
 _Q = 1024.0
 
@@ -484,7 +479,7 @@ def path_ops(canvas: str, id: str, action: str = "flatten", distance: float = 2,
             cs, sn = math.cos(math.radians(rot)), math.sin(math.radians(rot))
             shape = [[(cx + (x - cx) * cs - (y - cy) * sn, cy + (x - cx) * sn + (y - cy) * cs) for x, y in p] for p in shape]
         import pyclipper
-        merged = pyclipper.SimplifyPolygons(_ints(shape), pyclipper.PFT_NONZERO)    # glyph holes use winding
+        merged = pyclipper.SimplifyPolygons(_ints(shape), pyclipper.PFT_NONZERO)
         polys = merged if act == "flatten" else _offset(_floats(merged), float(distance), join)
         keep_keys = ("fill", "stroke", "shadow", "glow", "inner_shadow", "inner_glow", "bevel", "light", "opacity",
                      "blend", "blur", "mask", "adjust")
@@ -547,7 +542,6 @@ def path_ops(canvas: str, id: str, action: str = "flatten", distance: float = 2,
     return out
 
 
-# --------------------------------------------------------------------------- vectorize
 
 @tool
 def vectorize_image(canvas: str, path: str, x: float = 0, y: float = 0, width: float | None = None,

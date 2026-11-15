@@ -28,7 +28,6 @@ def design_lint(r, canvas: dict, theme: dict) -> list[tuple[str, str, list[str] 
     W, H = float(canvas["width"]), float(canvas["height"])
     elements = [e for e in canvas["elements"] if e.get("visible", True)]
 
-    # near-miss alignment: edges / centres that almost line up usually should line up exactly
     edges: dict[str, list[tuple[float, str]]] = {"x": [], "y": []}
     for el in elements:
         try:
@@ -36,7 +35,7 @@ def design_lint(r, canvas: dict, theme: dict) -> list[tuple[str, str, list[str] 
         except ValueError:
             continue
         if x1 - x0 >= W * 0.9 and y1 - y0 >= H * 0.9:
-            continue                                     # full-canvas backgrounds line up with everything
+            continue
         edges["x"] += [(x0, el["id"]), (x1, el["id"]), ((x0 + x1) / 2, el["id"])]
         edges["y"] += [(y0, el["id"]), (y1, el["id"]), ((y0 + y1) / 2, el["id"])]
     misses: list[tuple[float, str, str, float, float, str]] = []

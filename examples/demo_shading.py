@@ -14,7 +14,6 @@ from game_ui_mcp.store import Store
 OUT = Path(__file__).resolve().parent
 ui.set_store(Store(Path(tempfile.mkdtemp()) / "ws"))
 
-# ------------------------------------------------------------------ orb, flat (what one fill gives you)
 ui.create_canvas("orb_flat", 240, 240)
 ui.batch("orb_flat", [
     {"op": "add_ellipse", "cx": 120, "cy": 116, "rx": 80, "fill": "#c81e3a"},
@@ -22,42 +21,34 @@ ui.batch("orb_flat", [
      "color": "#b9902f"},
 ])
 
-# ------------------------------------------------------------------ orb, built in passes on layers
 ui.create_canvas("orb", 240, 240)
 ui.batch("orb", [
-    # pass 1: contact shadow under everything
     {"op": "create_layer", "name": "ground"},
     {"op": "add_ellipse", "cx": 120, "cy": 214, "rx": 74, "ry": 12, "fill": "#000000@0.55", "style": {"blur": 14}},
 
-    # pass 2: the body - base colour only
     {"op": "create_layer", "name": "body"},
     {"op": "add_ellipse", "id": "glass", "cx": 120, "cy": 116, "rx": 80,
      "fill": {"type": "radial", "cx": 0.42, "cy": 0.38, "r": 0.7, "space": "oklab",
               "stops": [[0, "#ff5b6e"], [0.55, "#c81e3a"], [1, "#5c0a1c"]]}},
 
-    # pass 3: shading, clipped to the body and multiplied over it
     {"op": "create_layer", "name": "shade", "clip": True, "blend": "multiply"},
     {"op": "add_ellipse", "cx": 120, "cy": 116, "rx": 82,
      "fill": {"type": "radial", "cx": 0.3, "cy": 0.28, "r": 0.98,
               "stops": [[0, "#3b0613@0"], [0.42, "#3b0613@0"], [1, "#22030b@0.92"]]}},
     {"op": "add_ellipse", "cx": 120, "cy": 196, "rx": 70, "ry": 26, "fill": "#2a0410@0.7", "style": {"blur": 22}},
-    # liquid surface texture
     {"op": "add_ellipse", "cx": 120, "cy": 116, "rx": 80,
      "fill": {"type": "clouds", "color": "#40000f@0.55", "color2": "#40000f@0", "size": 46, "octaves": 4,
               "seed": 7, "contrast": 1.7}},
 
-    # pass 4: light, clipped too, screened on
     {"op": "create_layer", "name": "light", "clip": True, "blend": "screen"},
     {"op": "add_ellipse", "cx": 92, "cy": 84, "rx": 52, "ry": 40, "rotation": -28, "fill": "#ffd9de@0.55",
      "style": {"blur": 26}},
     {"op": "add_ellipse", "cx": 88, "cy": 76, "rx": 22, "ry": 11, "rotation": -32, "fill": "#ffffff@0.95",
      "style": {"blur": 3, "mask": {"type": "linear", "angle": 90, "stops": ["#000000", "#000000@0.25"]}}},
     {"op": "add_ellipse", "cx": 112, "cy": 62, "rx": 5, "ry": 3.5, "fill": "#ffffff", "style": {"blur": 1.5}},
-    # bounce light along the lower-right rim
     {"op": "add_arc", "cx": 120, "cy": 116, "radius": 72, "start_angle": 20, "end_angle": 110, "thickness": 7,
      "cap": "round", "color": "#ff9aa6@0.75", "style": {"blur": 7}},
 
-    # pass 5: the metal ring, lit as a raised surface by a layer style
     {"op": "create_layer", "name": "ring",
      "style": {"light": {"angle": 225, "size": 5, "depth": 1.4, "gloss": 0.8, "highlight": "#fff6d8@0.85",
                          "shadow": "#2a1a00@0.75"},
@@ -70,7 +61,6 @@ ui.batch("orb", [
      "length": 10, "width": 5, "cap": "round", "color": "#d9ae4b"},
 ])
 
-# ------------------------------------------------------------------ embossed metal title
 ui.create_canvas("title", 560, 170)
 ui.batch("title", [
     {"op": "create_layer", "name": "letters",
@@ -88,7 +78,6 @@ ui.batch("title", [
      "fill": {"type": "linear", "angle": 0, "stops": ["#ffffff@0", "#ffffff@0.45", "#ffffff@0"]}},
 ])
 
-# ------------------------------------------------------------------ chiselled button: same recipe, one shape
 ui.create_canvas("button_flat", 380, 130)
 ui.batch("button_flat", [
     {"op": "add_rect", "x": 30, "y": 26, "width": 320, "height": 70, "radius": 16, "fill": "#2f7de0"},
@@ -116,7 +105,6 @@ ui.batch("button", [
      "color": {"type": "linear", "angle": 90, "stops": ["#ffffff", "#d6ebff"]}},
 ])
 
-# ------------------------------------------------------------------ shield: one silhouette, shaded by clipped passes
 SHIELD = "M100 14L176 40V104C176 156 142 192 100 212C58 192 24 156 24 104V40Z"
 ui.create_canvas("shield", 200, 230)
 ui.batch("shield", [
@@ -145,7 +133,6 @@ ui.batch("shield", [
 sheet, _ = ui.contact_sheet(["orb_flat", "orb", "button_flat", "button", "title", "shield"], columns=3, cell=320,
                             background="dark", save_path=str(OUT / "shading_kit.png"))
 
-# ------------------------------------------------------------------ the orb, layer by layer
 parts = ui.export_layers("orb", out_dir=str(OUT / "_orb_layers"), merge_clipped=False, trim=False)
 from PIL import Image  # noqa: E402
 

@@ -31,7 +31,7 @@ def test_button_hugs_its_label_live(ws):
     w1 = el("c", "btn")["width"]
     s.update_element("c", "label", {"text": "Play the whole campaign"})
     w2 = el("c", "btn")["width"]
-    assert w2 > w1 + 100                                         # the button grew with its label
+    assert w2 > w1 + 100
     lb = box("c", "label")
     assert lb[0] == pytest.approx(20 + 24, abs=0.5)
 
@@ -45,9 +45,9 @@ def test_fill_min_max_and_space_between(ws):
     s.update_element("c", "b", {"layout_size": {"width": "fill", "max_width": 150}})
     s.update_element("c", "c", {"layout_size": {"height": "fill"}})
     s.arrange_elements("c", mode="row", ids=["a", "b", "c"], container="bar", gap=10, live=True)
-    assert el("c", "b")["width"] == pytest.approx(150)            # clamped by max_width
+    assert el("c", "b")["width"] == pytest.approx(150)
     assert el("c", "c")["height"] == pytest.approx(40)
-    s.update_element("c", "bar", {"width": 200})                  # resizing the frame re-flows
+    s.update_element("c", "bar", {"width": 200})
     assert el("c", "b")["width"] == pytest.approx(200 - 80 - 20)
 
 
@@ -62,7 +62,7 @@ def test_wrap_grid_span_and_groups(ws):
     cell = (230 - 20) / 3
     assert el("c", "g0")["width"] == pytest.approx(cell * 2 + 10)
     assert box("c", "g1")[0] == pytest.approx(2 * (cell + 10))
-    assert box("c", "g2")[1] == pytest.approx(60)                 # next row
+    assert box("c", "g2")[1] == pytest.approx(60)
     s.create_canvas("d", 400, 200)
     s.add_rect("d", 0, 0, 400, 200, id="row")
     for i in range(2):
@@ -90,8 +90,8 @@ def test_variants_hide_show_and_slots(ws):
     import numpy as np
     st = s.store()
     px = np.asarray(st.renderer(st.get("c")).render(include_background=False))
-    assert tuple(px[20, 30, :3]) == (0, 0, 255)                    # last variant wins
-    assert tuple(px[20, 85, :3]) == (0, 0, 255)                    # badge hidden
-    assert px[30, 150, 0] > 200 and px[30, 150, 2] < 60             # the gem sits in the slot
+    assert tuple(px[20, 30, :3]) == (0, 0, 255)
+    assert tuple(px[20, 85, :3]) == (0, 0, 255)
+    assert px[30, 150, 0] > 200 and px[30, 150, 2] < 60
     with pytest.raises(ValueError, match="no state"):
         s.add_instance("c", "btn", 0, 50, variant={"size": "huge"})

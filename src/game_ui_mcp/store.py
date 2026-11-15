@@ -26,7 +26,6 @@ def default_workspace() -> Path:
 
 
 def slugify(name: str, fallback: str = "canvas") -> str:
-    # keep letters of any alphabet (ğ, ş, é ...); only spaces and punctuation become underscores
     slug = re.sub(r"[^\w-]+", "_", str(name).strip().replace("İ", "i")).strip("_").lower()
     return slug or fallback
 
@@ -51,7 +50,6 @@ class Store:
         if persist:
             self._load()
 
-    # ---- persistence
 
     def _load(self) -> None:
         strings_file = self.workspace / "strings.json"
@@ -81,7 +79,7 @@ class Store:
     def save_canvas(self, canvas: dict) -> None:
         if any(isinstance(e.get("layout"), dict) for e in canvas.get("elements", [])):
             from .autolayout import reflow
-            reflow(self, canvas)                     # live auto layout follows every change
+            reflow(self, canvas)
         if self.persist:
             path = self.projects_dir / f"{canvas['id']}.json"
             path.write_text(json.dumps(canvas, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -91,7 +89,6 @@ class Store:
             (self.workspace / "theme.json").write_text(
                 json.dumps(self.theme, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    # ---- canvases
 
     def get(self, canvas_id: str) -> dict:
         if canvas_id in self.canvases:
@@ -140,7 +137,6 @@ class Store:
                 raise
         self.save_canvas(canvas)
 
-    # ---- named versions (Figma-style version history, kept next to the canvas file)
 
     def _versions(self, cid: str) -> dict:
         mem = self._version_mem
@@ -181,7 +177,7 @@ class Store:
         key = slugify(name, "version")
         if key not in versions:
             raise ValueError(f"no version '{key}'. Versions: {', '.join(versions) or '(none - save one first)'}")
-        self.checkpoint(canvas)                 # undo brings the replaced state back
+        self.checkpoint(canvas)
         snapshot = copy.deepcopy(versions[key]["canvas"])
         snapshot["id"] = canvas["id"]
         canvas.clear()
@@ -215,7 +211,6 @@ class Store:
         self.save_canvas(clone)
         return clone
 
-    # ---- undo
 
     def checkpoint(self, canvas: dict) -> None:
         stack = self._undo.setdefault(canvas["id"], [])
@@ -254,7 +249,6 @@ class Store:
             canvas.clear()
             canvas.update(previous)
 
-    # ---- elements
 
     def renderer(self, canvas: dict, scale: float = 1.0, state: str | None = None,
                  language: str | None = None) -> Renderer:
@@ -270,7 +264,6 @@ class Store:
                              "has them on those elements, or drop a .ttf/.otf covering them into the workspace "
                              "'fonts' folder.")
 
-    # ---- string tables (localisation)
 
     def set_strings(self, language: str, strings: dict, default: bool, replace: bool) -> dict:
         lang = str(language).strip()
@@ -553,7 +546,6 @@ class Store:
         self.save_canvas(canvas)
         return {"width": w, "height": h, "moved_by": [round(dx, 2), round(dy, 2)], "keyframes_moved": moved_tracks}
 
-    # ---- layers
 
     def get_layer(self, canvas: dict, name: str) -> dict:
         layers = canvas.get("layers") or []
@@ -636,7 +628,7 @@ class Store:
         index = self._layer_index(canvas, position, layer) if position is not None else None
         if checkpoint:
             self.checkpoint(canvas)
-            layer = self.get_layer(canvas, layer["name"])          # the checkpoint copied nothing, same object
+            layer = self.get_layer(canvas, layer["name"])
         old_name = layer["name"]
         layer.clear()
         layer.update(updated)
@@ -688,7 +680,6 @@ class Store:
                     el.pop("layer", None)
         self.save_canvas(canvas)
 
-    # ---- animations
 
     def animations(self, canvas: dict) -> dict:
         return canvas.setdefault("animations", {})
@@ -739,7 +730,6 @@ class Store:
             if len(pivot) != 2:
                 raise ValueError("pivot must be [x, y]")
             track["pivot"] = [float(pivot[0]), float(pivot[1])]
-        # pose the canvas at every keyframe and render the targets once, so bad values fail now
         warnings: list[str] = []
         probe = {"tracks": [track]}
         for key in keyframes:
@@ -771,7 +761,6 @@ class Store:
         self.animations(canvas).pop(key, None)
         self.save_canvas(canvas)
 
-    # ---- theme
 
     def set_theme(self, colors: dict | None, styles: dict | None, replace: bool,
                   modes: dict | None = None, mode: str | None = None, numbers: dict | None = None) -> None:
@@ -830,7 +819,7 @@ class Store:
                 palette = {**self.theme["colors"], **values}
                 for key, value in values.items():
                     if isinstance(value, (int, float)) and not isinstance(value, bool):
-                        continue                         # a number token's value in this mode
+                        continue
                     try:
                         parse_color(value, palette)
                     except ValueError as exc:

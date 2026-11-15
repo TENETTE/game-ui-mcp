@@ -8,7 +8,6 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-# Machado, Oliveira & Fernandes (2009), severity 1.0, applied in linear RGB
 _CVD = {
     "protanopia": np.array([[0.152286, 1.052583, -0.204868], [0.114503, 0.786281, 0.099216],
                             [-0.003882, -0.048116, 1.051998]]),
@@ -28,7 +27,6 @@ def simulate(img: Image.Image, mode: str) -> Image.Image:
     rgba = np.asarray(img.convert("RGBA"), dtype=np.float64)
     rgb = rgba[..., :3] / 255.0
     if mode == "low-contrast":
-        # sunlight on a phone / a cheap TV: contrast squashed toward mid grey
         out = 0.35 + (rgb - 0.5) * 0.55 + 0.15
     else:
         lin = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
@@ -118,7 +116,6 @@ def draw_guides(view: Image.Image, guides: list[str], canvas: dict, scale: float
             d.line([(X(W / 2), Y(0)), (X(W / 2), Y(H))], fill=(0, 255, 255, 150))
             d.line([(X(0), Y(H / 2)), (X(W), Y(H / 2))], fill=(0, 255, 255, 150))
         elif name == "thumb":
-            # comfortable thumb reach on a landscape phone: lower corners
             r = min(W, H) * 0.45
             for cx in (0, W):
                 d.ellipse([X(cx - r), Y(H - r), X(cx + r), Y(H + r)], outline=(120, 255, 160, 200), width=2)

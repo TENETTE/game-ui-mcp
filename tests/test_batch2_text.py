@@ -26,13 +26,13 @@ def test_lists_paragraphs_and_indent(ws):
     plain = layout(text="one\ntwo")
     assert lay.baselines[1] - lay.baselines[0] == pytest.approx(plain.baselines[1] - plain.baselines[0] + 10)
     wrapped = layout(text="alpha beta gamma delta epsilon", list="bullet", max_width=90)
-    assert len(wrapped.lines) > 1 and wrapped.line_x[1] > wrapped.line_x[0]          # hanging indent
+    assert len(wrapped.lines) > 1 and wrapped.line_x[1] > wrapped.line_x[0]
     assert layout(text="abc", indent=12).line_x[0] == 12
 
 
 def test_features_trim_and_missing_feature_warning(ws):
     tab, prop = layout(text="1111", features=["tnum"]), layout(text="1111")
-    assert tab.lines[0][1] > prop.lines[0][1]                                    # tabular digits are wider
+    assert tab.lines[0][1] > prop.lines[0][1]
     lay = layout(text="Hi", case="small-caps")
     assert any("smcp" in w for w in lay.warnings)
     trimmed, normal = layout(text="Hg", trim=True), layout(text="Hg")
@@ -45,7 +45,7 @@ def test_colour_emoji_render_in_colour(ws):
     st = s.store()
     px = np.asarray(st.renderer(st.get("c")).render(include_background=False))
     vis = px[..., 3] > 200
-    assert (vis & (px[..., 0].astype(int) - px[..., 2].astype(int) > 80)).any()          # orange flame pixels
+    assert (vis & (px[..., 0].astype(int) - px[..., 2].astype(int) > 80)).any()
 
 
 def test_text_on_path_and_to_outlines(ws):
@@ -60,6 +60,6 @@ def test_text_on_path_and_to_outlines(ws):
     before = s.store().renderer(s.store().get("c")).element_box(s.store().find(s.store().get("c"), "t"))
     s.path_ops("c", "t", "flatten", new_id="p")
     el = s.store().find(s.store().get("c"), "p")
-    assert el["type"] == "path" and el["d"].count("M") >= 2                           # O has an inner hole
+    assert el["type"] == "path" and el["d"].count("M") >= 2
     after = s.store().renderer(s.store().get("c")).element_box(el)
     assert abs(after[0] - before[0]) < 3 and abs(after[2] - before[2]) < 3

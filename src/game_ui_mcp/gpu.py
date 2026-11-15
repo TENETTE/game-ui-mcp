@@ -13,7 +13,7 @@ from functools import lru_cache
 
 import numpy as np
 
-MIN_PIXELS = 250_000          # below this the copy to and from the GPU costs more than it saves
+MIN_PIXELS = 250_000
 
 
 @lru_cache(maxsize=1)
@@ -23,13 +23,13 @@ def _cupy():
         return None
     try:
         import warnings
-        with warnings.catch_warnings():         # CUDA comes from the pip wheels, so "no CUDA_PATH" is noise
+        with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             import cupy
         cupy.cuda.runtime.getDeviceCount()
-        cupy.asarray([1.0]).sum().item()      # compiles / loads a kernel: fails here, not mid-render
+        cupy.asarray([1.0]).sum().item()
         return cupy
-    except Exception:                          # not installed, no driver, no device, broken CUDA libraries
+    except Exception:
         return None
 
 

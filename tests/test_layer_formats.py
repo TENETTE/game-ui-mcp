@@ -34,7 +34,7 @@ def test_layers_as_one_layered_svg(ws):
     groups = [g for g in root if g.get(ns + "groupmode") == "layer"]
     assert [g.get(ns + "label") for g in groups] == ["panel", "badge"]
     badge = groups[1][0]
-    assert float(badge.get("x")) == pytest.approx(128, abs=2)        # trimmed piece keeps its place
+    assert float(badge.get("x")) == pytest.approx(128, abs=2)
     assert badge.get("href").startswith("data:image/png;base64,")
     assert [l["file"] for l in res["layers"]] == ["hud.svg", "hud.svg"]
 

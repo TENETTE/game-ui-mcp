@@ -46,7 +46,6 @@ def _compose(doc, frame):
         opa = _value(ks["o"], frame)
         opa = (opa[0] if isinstance(opa, list) else opa) / 100
         c, s_ = math.cos(math.radians(rot)), math.sin(math.radians(rot))
-        # image pixel q -> comp: p + R * S * (q - a); PIL wants the inverse
         a11, a12, a21, a22 = c * sx, -s_ * sy, s_ * sx, c * sy
         det = a11 * a22 - a12 * a21
         i11, i12, i21, i22 = a22 / det, -a12 / det, -a21 / det, a11 / det

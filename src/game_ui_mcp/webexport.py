@@ -47,7 +47,7 @@ class _Ctx:
         self.colors = r.colors
         self.notes: set[str] = set()
         self.raster: list[str] = []
-        self.fonts: dict[str, tuple[str, int, bool]] = {}      # css family -> (file, weight, variable)
+        self.fonts: dict[str, tuple[str, int, bool]] = {}
 
     def color(self, value: Any) -> str:
         """CSS colour; theme tokens stay live as var(--color-x, fallback) so modes switch them."""
@@ -141,7 +141,7 @@ class _Ctx:
         return out
 
     def font_face(self, layout: TextLayout) -> str:
-        family = re.sub(r"[^\w \-]", "", str(layout.family or "Inter")) or "Inter"   # no quotes / braces into CSS
+        family = re.sub(r"[^\w \-]", "", str(layout.family or "Inter")) or "Inter"
         if not layout.path:
             return f"'{family}', system-ui, sans-serif"
         src = Path(layout.path)
@@ -196,7 +196,7 @@ def _style_css(ctx: _Ctx, el: dict, st: dict, w: float, h: float, text: bool = F
             if p:
                 layers.append(p)
         if layers:
-            css["background"] = ", ".join(reversed(layers))          # CSS lists the top layer first
+            css["background"] = ", ".join(reversed(layers))
     strokes = _stroke_specs(st, ctx.colors) if not text else []
     if len(strokes) > 1 or any(s["dash"] or s["offset"] or s["sides"] or isinstance(s["paint"], dict) for s in strokes):
         return None
@@ -511,7 +511,6 @@ def build(store, canvases: list[dict], out: Path, layout: str, language: str | N
     css_rules: list[str] = []
     all_fonts: dict[str, tuple[str, int, bool]] = {}
     report = {"pages": [], "picture": [], "notes": set()}
-    # theme tokens and modes as CSS custom properties, so data-theme switches them live
     root = [f"--color-{_ident(k)}:{_hex(v, theme)}" for k, v in theme.get("colors", {}).items()]
     css_rules.append(":root{" + ";".join(root) + "}")
     for mode, vals in (theme.get("modes") or {}).items():
@@ -607,7 +606,6 @@ def build(store, canvases: list[dict], out: Path, layout: str, language: str | N
                 open_group = None
             if layer_open:
                 body.append("</div>")
-        # interaction states -> CSS
         for state, pseudo in _STATE_PSEUDO.items():
             if state not in states:
                 continue

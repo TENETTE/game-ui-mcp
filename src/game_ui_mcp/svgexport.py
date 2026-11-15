@@ -20,8 +20,8 @@ from .render import (LINE_TYPES, VECTOR_TYPES, Renderer, TextLayout, _is_fill_st
                      _skew_tan, _stroke_specs, resolve_style, vector_geometry)
 from . import geometry as geo
 
-RASTER_SCALE = 2.0                      # default sharpness of embedded fallbacks (2x = crisp at 200% zoom)
-_VECTOR_KEYS = {"fill", "stroke", "opacity", "shadow", "glow", "blend", "use"}      # anything else -> picture
+RASTER_SCALE = 2.0
+_VECTOR_KEYS = {"fill", "stroke", "opacity", "shadow", "glow", "blend", "use"}
 _TEXT_KEYS = _VECTOR_KEYS | {"font", "weight", "size", "letter_spacing", "line_height", "uppercase", "italic"}
 
 
@@ -216,7 +216,7 @@ def _vector_element(doc: _Doc, r: Renderer, el: dict, st: dict) -> bool:
         paint = _paint(doc, fill_list[0], paint_ref, colors)
         if paint is None or len(fill_list) > 1:
             return False
-        if shapes:                                       # arrow heads and other filled line ends
+        if shapes:
             out.append(f'<path d="{d}" fill="{paint[0]}"' + (f' fill-opacity="{_num(paint[1])}"' if paint[1] < 1 else "") + "/>")
         for pts, closed, width, cap in lines:
             out.append(f'<path d="{_open_d(pts, closed)}" fill="none" stroke="{paint[0]}" stroke-width="{_num(width)}" '
@@ -245,7 +245,7 @@ def _vector_element(doc: _Doc, r: Renderer, el: dict, st: dict) -> bool:
                 doc.defs.append(f'<clipPath id="{sid}">{strips}</clipPath>')
                 attrs += f' clip-path="url(#{sid})"'
             if s["align"] == "outside":
-                under.append(f"<path {attrs}/>")              # the fill hides the inner half
+                under.append(f"<path {attrs}/>")
             elif s["align"] == "inside":
                 if clip_id is None:
                     clip_id = doc.uid("c")
@@ -304,7 +304,7 @@ def _text_element(doc: _Doc, r: Renderer, el: dict, st: dict) -> bool:
         if sp is None:
             return False
         attrs += [f'stroke="{sp[0]}"', f'stroke-width="{_num(strokes[0]["width"] * 2)}"', 'stroke-linejoin="round"',
-                  'paint-order="stroke"']                     # our text outlines sit outside the glyphs
+                  'paint-order="stroke"']
     anchor = {"center": "middle", "right": "end"}.get(layout.align, "start")
     attrs.append(f'text-anchor="{anchor}"')
     if layout.lang:
@@ -358,8 +358,8 @@ def canvas_svg(r: Renderer, include_background: bool = True, image_scale: float 
         else:
             _image(doc, big.render(include_background=True, only=set()), 0, 0, "background")
     vector: list[str] = []
-    beneath: list[str] = []                     # ids drawn so far, for background-blur pictures
-    units: list[tuple[dict | None, list[dict], list[dict]]] = []      # (layer, elements, clipped layers' elements)
+    beneath: list[str] = []
+    units: list[tuple[dict | None, list[dict], list[dict]]] = []
     for layer, elements in r.stack():
         props = r.layer_props(layer) if layer else None
         if props and not props["visible"]:
@@ -385,13 +385,12 @@ def canvas_svg(r: Renderer, include_background: bool = True, image_scale: float 
             st = resolve_style(el.get("style"), r.theme)
             beneath.append(el["id"])
             if float(st.get("backdrop_blur", 0) or 0) > 0:
-                # the blur needs what lies beneath: draw the scene up to this element, keep only its footprint
                 result = big.render_element(el)
                 if result is not None:
                     own, px0, py0, _ = result
                     scene = big.render(include_background=include_background, only=set(beneath))
                     patch = scene.crop((px0, py0, px0 + own.width, py0 + own.height))
-                    footprint = ImageChops.lighter(own.getchannel("A"),          # the whole shape, plus its shadow
+                    footprint = ImageChops.lighter(own.getchannel("A"),
                                                    big.shape_mask(el, (px0, py0, own.width, own.height)))
                     patch.putalpha(ImageChops.multiply(patch.getchannel("A"), footprint))
                     _image(doc, patch, px0, py0, el["id"])

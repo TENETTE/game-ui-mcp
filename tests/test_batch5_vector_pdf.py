@@ -18,8 +18,8 @@ def test_vectorize_keeps_colours_holes_and_small_details(ws, tmp_path):
     img = Image.new("RGBA", (120, 80), (20, 20, 30, 255))
     d = ImageDraw.Draw(img)
     d.ellipse((20, 10, 80, 70), fill=(240, 180, 40, 255))
-    d.ellipse((40, 30, 60, 50), fill=(20, 20, 30, 255))            # a hole in the yellow ring
-    d.rectangle((95, 35, 100, 40), fill=(255, 255, 255, 255))       # a small white detail
+    d.ellipse((40, 30, 60, 50), fill=(20, 20, 30, 255))
+    d.rectangle((95, 35, 100, 40), fill=(255, 255, 255, 255))
     src = tmp_path / "logo.png"
     img.save(src)
     s.create_canvas("c", 240, 160)
@@ -27,8 +27,8 @@ def test_vectorize_keeps_colours_holes_and_small_details(ws, tmp_path):
     assert len(res["paths"]) == 3 and "#ffffff" in res["colors"] or any(c.startswith("#f") for c in res["colors"])
     st = s.store()
     px = np.asarray(st.renderer(st.get("c")).render(include_background=False))
-    assert px[80, 60, 0] > 200 and px[80, 100, 0] < 60                 # ring painted, hole kept dark
-    assert px[75, 195, 0] > 200                                        # the small white square survived
+    assert px[80, 60, 0] > 200 and px[80, 100, 0] < 60
+    assert px[75, 195, 0] > 200
 
 
 def test_pdf_has_vector_pages_and_fallbacks(ws):

@@ -10,7 +10,6 @@ from typing import Any
 
 from .render import Renderer, resolve_style, shift_element
 
-# name: (width, height, safe insets (left, top, right, bottom), note)
 PRESETS: dict[str, tuple[int, int, tuple[float, float, float, float], str]] = {
     "720p": (1280, 720, (0, 0, 0, 0), "HD"),
     "1080p": (1920, 1080, (0, 0, 0, 0), "Full HD, the usual PC / console design size"),
@@ -50,7 +49,6 @@ def safe_insets(canvas: dict) -> tuple[float, float, float, float] | None:
     return None
 
 
-# --------------------------------------------------------------------------- pins / resize
 
 def _stretch(el: dict, axis: int, delta: float, warnings: list[str]) -> bool:
     """Grow an element along one axis by delta, keeping its start edge. False when the type cannot."""
@@ -126,7 +124,6 @@ def resized_copy(canvas: dict, renderer: Renderer, width: int, height: int) -> t
     return clone, apply_resize(clone, renderer, width, height)
 
 
-# --------------------------------------------------------------------------- arrange
 
 def arrange(renderer: Renderer, elements: list[dict], mode: str, gap: float, columns: int | None,
             origin: tuple[float, float] | None, container: tuple[float, float, float, float] | None,
@@ -147,7 +144,6 @@ def arrange(renderer: Renderer, elements: list[dict], mode: str, gap: float, col
     else:
         cols = max(1, int(columns or math.ceil(math.sqrt(n))))
         rows = math.ceil(n / cols)
-    # grid cells take the widest / tallest item of their column / row; rows and columns take item sizes
     col_w = [0.0] * cols
     row_h = [0.0] * rows
     for i, (w, h) in enumerate(sizes):
@@ -195,7 +191,6 @@ def arrange(renderer: Renderer, elements: list[dict], mode: str, gap: float, col
                 break
             w, h = sizes[i]
             cell_w, cell_h = col_w[c], row_h[r]
-            # cross-axis alignment inside the cell
             if mode == "row":
                 tx = x
                 ty = y + (0 if align == "start" else (cell_h - h) / 2 if align == "center" else cell_h - h)
@@ -212,7 +207,6 @@ def arrange(renderer: Renderer, elements: list[dict], mode: str, gap: float, col
     return content, moves
 
 
-# --------------------------------------------------------------------------- scatter
 
 def scatter_plan(count: int, area: tuple[float, float, float, float], seed: int, min_distance: float,
                  shape: str = "rect") -> list[tuple[float, float]]:

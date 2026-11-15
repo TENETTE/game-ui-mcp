@@ -25,7 +25,7 @@ def test_line_end_caps_draw_and_export(ws):
     s.create_canvas("c", 120, 40)
     s.add_line("c", [[10, 20], [100, 20]], width=4, id="l", end_cap="triangle", start_cap="circle")
     a = img()[..., 3]
-    assert a[15, 91] > 100 and a[20, 10] > 200 and a[15, 50] == 0          # triangle is wider than the line
+    assert a[15, 91] > 100 and a[20, 10] > 200 and a[15, 50] == 0
     with pytest.raises(ValueError, match="end_cap"):
         s.update_element("c", "l", {"end_cap": "heart"})
     root = s.export_svg("c", path=str(ws / "l.svg"))
@@ -39,7 +39,7 @@ def test_diamond_gradient_and_spring_ease(ws):
     assert px[20, 20, 0] > 230 and px[20, 1, 0] < 60 and px[1, 1, 0] < 30
     from game_ui_mcp.animation import ease
     vals = [ease("spring-out", t / 20) for t in range(21)]
-    assert vals[0] == 0 and abs(vals[-1] - 1) < 1e-9 and max(vals) > 1.0         # overshoots, then settles
+    assert vals[0] == 0 and abs(vals[-1] - 1) < 1e-9 and max(vals) > 1.0
 
 
 def test_number_tokens_follow_modes(ws):

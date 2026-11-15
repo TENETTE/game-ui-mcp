@@ -28,7 +28,7 @@ def test_boolean_ops_cut_merge_and_keep_overlap(ws):
     s.add_rect("c", 30, 10, 40, 40, id="b")
     s.boolean_elements("c", ["a", "b"], op="subtract", id="r")
     a = alpha()
-    assert a[30, 20] == 255 and a[30, 40] == 0 and a[30, 60] == 0        # b removed from a, b itself gone
+    assert a[30, 20] == 255 and a[30, 40] == 0 and a[30, 60] == 0
     s.update_element("c", "r", {"op": "intersect"})
     a = alpha()
     assert a[30, 20] == 0 and a[30, 40] == 255 and a[30, 60] == 0
@@ -47,7 +47,7 @@ def test_boolean_stroke_follows_the_cut_and_moves_with_children(ws):
                        style={"fill": "#000000", "stroke": {"color": "#ff0000", "width": 3, "align": "inside"}})
     st = s.store()
     img = np.asarray(st.renderer(st.get("c")).render(include_background=False))
-    assert img[30, 54, 0] > 200 and img[30, 54, 3] > 200                   # red rim along the round cut edge
+    assert img[30, 54, 0] > 200 and img[30, 54, 3] > 200
     s.move_elements("c", ids=["r"], dx=10, dy=0)
     assert s.store().get("c")["elements"][0]["children"][1]["cx"] == 80
 
@@ -58,7 +58,7 @@ def test_boolean_rejects_lines_and_works_in_batch(ws):
     s.add_line("c", [[0, 0], [90, 50]], id="l")
     with pytest.raises(ValueError, match="only filled shapes"):
         s.boolean_elements("c", ["a", "l"])
-    assert [e["id"] for e in s.store().get("c")["elements"]] == ["a", "l"]          # failed call changed nothing
+    assert [e["id"] for e in s.store().get("c")["elements"]] == ["a", "l"]
     s.batch("c", [{"op": "add_ellipse", "id": "e", "cx": 50, "cy": 30, "rx": 10},
                   {"op": "boolean_elements", "ids": ["a", "e"], "operation": "union", "id": "u"}])
     assert [e["id"] for e in s.store().get("c")["elements"]] == ["u", "l"]
@@ -78,7 +78,7 @@ def test_fill_stack_paints_bottom_to_top(ws):
     s.add_rect("c", 0, 0, 40, 40, style={"fill": ["#0000ff", "#ff000080"]})
     st = s.store()
     px = np.asarray(st.renderer(st.get("c")).render(include_background=False))[20, 20]
-    assert px[0] > 100 and px[2] > 100 and px[3] == 255                    # red at half alpha over blue
+    assert px[0] > 100 and px[2] > 100 and px[3] == 255
 
 
 def test_variable_modes_switch_tokens(ws):
@@ -95,7 +95,7 @@ def test_variable_modes_switch_tokens(ws):
     assert red() == 255
     s.update_canvas("c", mode="light")
     s.set_theme(mode="")
-    assert red() == 255                                                     # the canvas keeps its own mode
+    assert red() == 255
     with pytest.raises(ValueError, match="no mode"):
         s.set_theme(mode="sepia")
     css = s.export_theme("css", path=str(ws / "t.css"))
@@ -105,7 +105,7 @@ def test_variable_modes_switch_tokens(ws):
 
 def test_wrap_flows_items_onto_new_lines(ws):
     s.create_canvas("c", 200, 200)
-    s.add_rect("c", 0, 0, 150, 200, id="box")      # inner width 140 = exactly 3 items
+    s.add_rect("c", 0, 0, 150, 200, id="box")
     for i in range(5):
         s.add_rect("c", 0, 0, 40, 30, id=f"i{i}", group="items")
     s.arrange_elements("c", group="items", container="box", gap=10, padding=5, wrap=True, align="start")
@@ -145,14 +145,14 @@ def test_parallel_frames_match_sequential(ws):
 
 def test_backdrop_blur_softens_what_is_beneath_only_inside_the_shape(ws):
     s.create_canvas("c", 120, 60)
-    for i in range(12):                                         # hard black / white stripes
+    for i in range(12):
         s.add_rect("c", i * 10, 0, 5, 60, fill="#ffffff")
     s.add_rect("c", 30, 10, 60, 40, id="glass", style={"fill": "#ffffff@0.1", "backdrop_blur": 12})
     st = s.store()
     img = np.asarray(st.renderer(st.get("c")).render(include_background=False)).astype(int)
     inside, outside = img[30, 40:80, 0], img[5, 40:80, 0]
-    assert inside.max() - inside.min() < 60                     # stripes melted under the glass
-    assert outside.max() - outside.min() > 200                  # untouched outside it
+    assert inside.max() - inside.min() < 60
+    assert outside.max() - outside.min() > 200
 
 
 def test_text_truncation_and_decoration(ws):
@@ -195,7 +195,7 @@ def test_version_history_save_restore_and_survives_restart(ws):
     assert [e["id"] for e in s.store().get("c")["elements"]] == ["a"]
     s.undo("c")
     assert [e["id"] for e in s.store().get("c")["elements"]] == ["a", "b"]
-    s.set_store(Store(ws / "ws"))                                # a new session reads it from disk
+    s.set_store(Store(ws / "ws"))
     assert s.canvas_version("c")["versions"][0]["note"] == "one rect"
     with pytest.raises(ValueError, match="already exists"):
         s.canvas_version("c", "save", name="first")

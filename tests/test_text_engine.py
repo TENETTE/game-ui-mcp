@@ -35,9 +35,9 @@ def test_latin_keeps_pillow_path():
 def test_arabic_letters_join():
     sh, isolated = glyphs("ب")
     _, joined = glyphs("ببب")
-    iso = {g[1] for g in isolated}                             # isolated beh + its dot (a separate mark glyph)
+    iso = {g[1] for g in isolated}
     forms = {g[1] for g in joined} - iso
-    assert len(forms) >= 3                                     # initial, medial and final forms
+    assert len(forms) >= 3
     assert not sh.missing
 
 
@@ -46,7 +46,7 @@ def test_rtl_runs_right_to_left():
     sh, _ = glyphs("א")
     alef = sh.shape("א")[0][0][1]
     xs = {gid: x for _, gid, x, _ in g}
-    assert xs[alef] > min(xs.values())                         # first logical letter sits on the right
+    assert xs[alef] > min(xs.values())
 
 
 def test_digits_stay_left_to_right_inside_arabic():
@@ -108,7 +108,7 @@ def test_arabic_renders_on_canvas(ws):
     r = st.renderer(st.get("c"))
     img = np.asarray(r.render(include_background=False))
     assert img[..., 3].max() == 255
-    assert any("fallback" in w for w in r.warnings)            # Inter lacks Arabic: says which font drew it
+    assert any("fallback" in w for w in r.warnings)
 
 
 def test_export_refuses_missing_glyphs(ws):

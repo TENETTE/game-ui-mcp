@@ -34,7 +34,6 @@ DOTWEEN_STYLE = {"linear": "Linear", "sine": "Sine", "quad": "Quad", "cubic": "C
 DIRECTION = {"in": "In", "out": "Out", "in-out": "InOut"}
 
 
-# --------------------------------------------------------------------------- easing
 
 def _bounce_out(t: float) -> float:
     n, d = 7.5625, 2.75
@@ -77,7 +76,6 @@ def _ease_in(style: str, t: float) -> float:
     if style == "bounce":
         return 1 - _bounce_out(1 - t)
     if style == "spring":
-        # damped spring settling on the target (Figma / iOS style); "spring-out" overshoots and settles
         def out(x: float) -> float:
             return 1 - math.exp(-6.5 * x) * math.cos(2.6 * math.pi * x)
         return 1 - out(1 - t) / out(1.0)
@@ -129,7 +127,7 @@ def parse_ease(spec: Any) -> tuple:
     else:
         direction = "in" if style == "linear" else "in-out"
     if style is None:
-        style = "cubic"                      # plain "ease-in" / "ease-out" / "ease-in-out"
+        style = "cubic"
     return ("ease", style, direction)
 
 
@@ -151,7 +149,7 @@ def ease(spec: Any, t: float) -> float:
     if parsed[0] == "bezier":
         _, x1, y1, x2, y2 = parsed
         lo, hi = 0.0, 1.0
-        for _ in range(40):                  # solve x(s) = t by bisection (x is monotonic for x1, x2 in [0, 1])
+        for _ in range(40):
             s = (lo + hi) / 2
             x = 3 * (1 - s) ** 2 * s * x1 + 3 * (1 - s) * s * s * x2 + s ** 3
             if x < t:
@@ -180,7 +178,6 @@ def engine_ease(spec: Any) -> dict:
             "dotween": DIRECTION[direction] + DOTWEEN_STYLE[style]}
 
 
-# --------------------------------------------------------------------------- interpolation
 
 def _is_number(v: Any) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
@@ -193,7 +190,6 @@ def lerp_value(a: Any, b: Any, u: float, colors: dict, is_color: bool = False) -
         return a + (b - a) * u
     if isinstance(a, str) and isinstance(b, str) and is_color:
         ca, cb = parse_color(a, colors), parse_color(b, colors)
-        # blend premultiplied so fading to/from transparent does not darken
         aa, ab = ca[3] / 255.0, cb[3] / 255.0
         alpha = aa + (ab - aa) * u
         if alpha <= 0:
@@ -210,7 +206,7 @@ def lerp_value(a: Any, b: Any, u: float, colors: dict, is_color: bool = False) -
         out = []
         for x, y in zip(a, b):
             if is_color and isinstance(x, (list, tuple)) and len(x) == 2 and _is_number(x[0]):
-                out.append([lerp_value(x[0], y[0], u, colors), lerp_value(x[1], y[1], u, colors, True)])  # [offset, color]
+                out.append([lerp_value(x[0], y[0], u, colors), lerp_value(x[1], y[1], u, colors, True)])
             else:
                 out.append(lerp_value(x, y, u, colors, is_color))
         return out
@@ -236,7 +232,6 @@ def sample_track(track: dict, t: float, colors: dict) -> Any:
     return keys[-1]["value"]
 
 
-# --------------------------------------------------------------------------- keyframes / tracks
 
 def normalize_keyframes(keyframes: Any, duration: float, offset: float = 0.0) -> list[dict]:
     if not isinstance(keyframes, (list, tuple)) or not keyframes:
@@ -289,7 +284,6 @@ def _set_path(el: dict, path: str, value: Any) -> None:
         if key == "style" and i == 0 and isinstance(cur, str):
             cur = {"use": cur}
         elif not isinstance(cur, dict):
-            # a shorthand like stroke: "#fff" or glow: true becomes an object we can write into
             cur = {"color": cur} if isinstance(cur, str) else {}
         else:
             cur = dict(cur)

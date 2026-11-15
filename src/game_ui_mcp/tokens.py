@@ -21,7 +21,7 @@ def _name(parts: list[str]) -> str:
 def _dimension(value: Any) -> float | None:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return float(value)
-    if isinstance(value, dict) and "value" in value:              # {"value": 16, "unit": "px"} (2025 spec)
+    if isinstance(value, dict) and "value" in value:
         scale = 16.0 if str(value.get("unit", "px")) == "rem" else 1.0
         return float(value["value"]) * scale
     if isinstance(value, str):
@@ -34,7 +34,7 @@ def _dimension(value: Any) -> float | None:
 def _color(value: Any) -> str | None:
     if isinstance(value, str):
         return value
-    if isinstance(value, dict):                                   # {"colorSpace": "srgb", "components": [r, g, b]}
+    if isinstance(value, dict):
         comps = value.get("components")
         if isinstance(comps, list) and len(comps) >= 3:
             rgb = "".join(f"{max(0, min(255, round(float(c) * 255))):02x}" for c in comps[:3])
@@ -75,7 +75,6 @@ def read_dtcg(data: dict | str) -> tuple[dict, dict]:
                 walk(child, path + [key], kind)
 
     walk(data, [], None)
-    # aliases to numbers resolve now (the renderer only resolves direct number tokens)
     for name, value in list(numbers.items()):
         seen = set()
         while isinstance(value, str) and value.startswith("$") and value[1:] in numbers and value not in seen:

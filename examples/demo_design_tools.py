@@ -30,7 +30,6 @@ def screen(name: str) -> None:
                                "truncate + decoration")):
         ui.add_text(name, title, x=40 + (i % 3) * 280, y=34 + (i // 3) * 310, style="caption")
 
-    # boolean: a crescent badge (subtract) and a keyhole (union) - one outline each, stroke follows the cut
     ui.add_ellipse(name, 100, 150, 70, id="moon")
     ui.add_ellipse(name, 140, 125, 58, id="bite")
     ui.boolean_elements(name, ["moon", "bite"], op="subtract", id="crescent",
@@ -41,7 +40,6 @@ def screen(name: str) -> None:
     ui.boolean_elements(name, ["head", "stem"], op="union", id="key",
                         style={"fill": "$accent2", "shadow": {"color": "$accent2@0.5", "blur": 16}})
 
-    # smoothed corners + a stacked fill (gradient, stripes, sheen)
     ui.add_rect(name, 320, 70, 150, 150, radius=40, smoothing=0.8, id="icon",
                 style={"fill": [{"type": "linear", "angle": 135, "stops": [[0, "$accent"], [1, "#3b1fa8"]]},
                                 {"type": "stripes", "color": "#fff@0.07", "size": 7, "angle": 45},
@@ -52,7 +50,6 @@ def screen(name: str) -> None:
     ui.add_rect(name, 490, 150, 46, 46, radius=12, id="plain", style={"fill": "$panel", "stroke": "$muted"})
     ui.add_text(name, "r=12", x=513, y=212, size=11, anchor="top-center", style={"fill": "$muted"})
 
-    # wrapping auto layout inside a panel that hugs its content
     ui.add_rect(name, 600, 64, 230, 200, radius=16, smoothing=0.6, id="tray",
                 style={"fill": "$panel", "shadow": {"blur": 18, "dy": 8}})
     for i in range(10):
@@ -62,7 +59,6 @@ def screen(name: str) -> None:
                         align="start")
 
     row2 = len(ui.store().get(name)["elements"])
-    # frosted glass: colourful blobs behind, a panel that blurs them
     for cx, cy, r, col in ((90, 400, 50, "$accent"), (170, 450, 42, "$gold"), (120, 500, 34, "$accent2")):
         ui.add_ellipse(name, cx, cy, r, fill=col)
     ui.add_rect(name, 60, 380, 170, 120, radius=20, smoothing=0.6, id="glass",
@@ -72,7 +68,6 @@ def screen(name: str) -> None:
     ui.add_text(name, "GLASS", x=145, y=440, size=22, weight=800, anchor="center", letter_spacing=3,
                 style={"fill": "#ffffff"})
 
-    # tabs: one stroke side only
     for i, label in enumerate(("Gear", "Skills", "Map")):
         on = i == 0
         ui.add_rect(name, 320 + i * 75, 400, 70, 44, id=f"tab{i}",
@@ -82,7 +77,6 @@ def screen(name: str) -> None:
         ui.add_text(name, label, x=355 + i * 75, y=422, size=15, weight=700 if on else 500, anchor="center",
                     style={"fill": "$ink" if on else "$muted"})
 
-    # truncated names, a struck-through old price
     ui.add_rect(name, 600, 380, 230, 140, radius=14, smoothing=0.6, style={"fill": "$panel"})
     ui.add_text(name, "Lady Seraphina of the Eternal Ember Throne", x=618, y=398, size=17, weight=700,
                 max_width=194, max_lines=1, style={"fill": "$ink"})

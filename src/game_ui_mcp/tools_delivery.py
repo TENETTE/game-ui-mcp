@@ -28,7 +28,6 @@ from .store import slugify
 __all__ = ["preview_nine_slice", "export_spec", "export_theme", "set_link", "export_prototype", "export_screen"]
 
 
-# --------------------------------------------------------------------------- 9-slice check
 
 def _borders_for(c: dict, img: PILImage.Image, nine_slice: Any) -> dict:
     nine = _maybe_json(nine_slice)
@@ -90,7 +89,6 @@ def preview_nine_slice(canvas: str, sizes: list[list[int]] | None = None, nine_s
     return [Image(data=_png_bytes(sheet), format="png"), json.dumps(info)]
 
 
-# --------------------------------------------------------------------------- spec / tokens
 
 def _paint_hex(spec: Any, colors: dict) -> Any:
     if spec is None or spec == "none":
@@ -305,7 +303,7 @@ def export_theme(format: str = "json", path: str | None = None):
         for k, v in numbers.items():
             lines.append(f"    --{_ident(k, 'kebab')}: {v:g}px;")
         lines.append("}")
-        for mname, vals in modes.items():               # css: <html data-theme="light">, uss: add class theme-light
+        for mname, vals in modes.items():
             sel = f'[data-theme="{_ident(mname, "kebab")}"]' if fmt == "css" else f".theme-{_ident(mname, 'kebab')}"
             lines.append(sel + " {")
             for k, v in vals.items():
@@ -367,7 +365,6 @@ def export_theme(format: str = "json", path: str | None = None):
     return result
 
 
-# --------------------------------------------------------------------------- prototype
 
 @tool
 def set_link(canvas: str, id: str, target: str | None, mode: str = "navigate"):
@@ -521,7 +518,6 @@ addEventListener('resize',fit);show({json.dumps(first['id'])},false);
     return result
 
 
-# --------------------------------------------------------------------------- engine scene export
 
 ROBLOX_FONTS = {"inter": "BuilderSans", "rajdhani": "TitilliumWeb", "orbitron": "Michroma", "michroma": "Michroma",
                 "bangers": "Bangers", "fredoka": "FredokaOne", "bebas neue": "Oswald", "barlow condensed": "Oswald",
@@ -544,7 +540,6 @@ def _pieces(c: dict, scale: float, bake_text: bool, language: str | None):
         if el["type"] == "text" and not bake_text and not el.get("arc"):
             x0, y0, x1, y1 = r1.element_box(el)
             info = _text_info(r1, el)
-            # engine labels need room: fonts render a little differently there, and translations run longer
             extra = max(8.0, (x1 - x0) * 0.4)
             if info["align"] == "center":
                 x0, x1 = x0 - extra / 2, x1 + extra / 2
@@ -847,7 +842,7 @@ def export_screen(canvas: str, engine: str, out_dir: str | None = None, name: st
             if pin.get("x") == "stretch" or pin.get("y") == "stretch":
                 b = ex.detect_nine_slice(node["img"])
                 if b["stretch_x"] or b["stretch_y"]:
-                    small, b = ex.minimize_nine_slice(node["img"], b)       # tiny texture, engine stretches it
+                    small, b = ex.minimize_nine_slice(node["img"], b)
                     node["img"] = small
                     small.save(folder / node["file"])
                     node["nine"] = {k: b[k] for k in ("left", "top", "right", "bottom")}

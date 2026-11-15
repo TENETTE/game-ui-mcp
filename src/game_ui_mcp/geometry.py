@@ -71,8 +71,8 @@ def rect_path(x: float, y: float, w: float, h: float, radius=0, corner: str = "r
     )
     for cx, cy, r, a0, a1, sharp in corners:
         if r > 0 and s > 0:
-            e = min(r * (1 + s), min(w, h) / 2.0)            # the smoothed corner reaches further along the edges
-            n = 2.0 + 2.0 * s                                 # superellipse exponent: 2 = circle, higher = eased
+            e = min(r * (1 + s), min(w, h) / 2.0)
+            n = 2.0 + 2.0 * s
             ccx = sharp[0] + math.copysign(e, cx - sharp[0])
             ccy = sharp[1] + math.copysign(e, cy - sharp[1])
             for px_, py_ in _arc_points(0, 0, 1, 1, a0, a1, res * e):
@@ -131,7 +131,6 @@ def round_corners(points: Sequence[Point], radius: float, res: float = 4.0) -> l
     return out
 
 
-# --------------------------------------------------------------------------- SVG paths
 
 _TOKEN = re.compile(r"([MmLlHhVvCcSsQqTtAaZz])|([-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?)")
 _ARGS = {"M": 2, "L": 2, "H": 1, "V": 1, "C": 6, "S": 4, "Q": 4, "T": 2, "A": 7, "Z": 0}
@@ -233,7 +232,7 @@ def parse_svg_path(d: str, res: float = 4.0) -> list[Subpath]:
         elif not cmd:
             raise ValueError("SVG path must start with a command (M)")
         elif cmd in "Mm":
-            cmd = "L" if cmd == "M" else "l"  # implicit lineto after moveto
+            cmd = "L" if cmd == "M" else "l"
         up = cmd.upper()
         rel = cmd.islower()
         if up == "Z":
@@ -290,7 +289,6 @@ def parse_svg_path(d: str, res: float = 4.0) -> list[Subpath]:
     return subpaths
 
 
-# --------------------------------------------------------------------------- helpers
 
 def transform(points: Iterable[Point], scale: float = 1.0, dx: float = 0.0, dy: float = 0.0) -> list[Point]:
     return [(x * scale + dx, y * scale + dy) for x, y in points]
@@ -431,7 +429,7 @@ def offset_ring(pts: list[Point], d: float, outward_sign: float, join: str = "mi
         if dot > 1 - 1e-9:
             out.append((vx + d * n2[0], vy + d * n2[1]))
             continue
-        factor = math.sqrt(2.0 / max(1e-9, 1.0 + dot))       # miter length / |d|
+        factor = math.sqrt(2.0 / max(1e-9, 1.0 + dot))
         if join == "bevel" or factor > miter_limit or 1.0 + dot < 1e-6:
             out.append((vx + d * n1[0], vy + d * n1[1]))
             out.append((vx + d * n2[0], vy + d * n2[1]))
@@ -452,6 +450,6 @@ def offset_shape(rings: list[list[Point]], d: float, join: str = "miter", miter_
                     if j != i and len(other) >= 3 and point_in_polygon(ring[0][0], ring[0][1], other))
         sign = 1.0 if signed_area(ring) > 0 else -1.0
         if depth % 2:
-            sign = -sign                                   # a hole: "outward" is into the hole
+            sign = -sign
         out.append(offset_ring(ring, d, sign, join, miter_limit))
     return out

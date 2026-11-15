@@ -19,7 +19,7 @@ def alpha(canvas="c"):
 
 
 def test_instructions_fit_clients_and_guide_has_the_rest():
-    assert len(s.INSTRUCTIONS) < 3500                       # Claude Code cuts server instructions near 4k
+    assert len(s.INSTRUCTIONS) < 3500
     assert "backdrop_blur" in s.guide("design") and "design" in s.guide("index")
     assert "export_svg" in s.guide("export") and "## shader" in s.guide("all")
     with pytest.raises(ValueError, match="Topics"):
@@ -31,7 +31,7 @@ def test_palette_is_ordered_keeps_base_and_reports_contrast(ws):
     from game_ui_mcp.tools_design import _luminance
     from game_ui_mcp.colors import parse_color
     lum = [_luminance(parse_color(v)) for v in res["scale"].values()]
-    assert lum == sorted(lum, reverse=True)                  # 50 lightest ... 950 darkest
+    assert lum == sorted(lum, reverse=True)
     assert "#3b82f6" in res["scale"].values()
     assert res["text_on"]["brand-950"].startswith("white") and res["text_on"]["brand-50"].startswith("black")
     assert s.store().theme["colors"]["brand-500"] and s.store().theme["colors"]["brand"] == "#3b82f6"
@@ -61,14 +61,14 @@ def test_path_ops_flatten_offset_and_outline_stroke(ws):
     s.path_ops("c", "r", "flatten", new_id="p")
     st = s.store()
     assert [e["type"] for e in st.get("c")["elements"]] == ["path"]
-    assert abs(alpha().astype(int).sum() - before) < before * 0.02            # same picture, now a path
+    assert abs(alpha().astype(int).sum() - before) < before * 0.02
     s.path_ops("c", "p", "offset", distance=4, new_id="big")
     assert alpha().astype(int).sum() > before * 1.4
     s.add_line("c", [[5, 55], [95, 55]], width=4, id="ln")
     s.path_ops("c", "ln", "outline_stroke", new_id="lnshape")
     ids = [e["id"] for e in st.get("c")["elements"]]
     assert "ln" not in ids and "lnshape" in ids
-    s.boolean_elements("c", ["big", "lnshape"], op="union")                  # a line can now join booleans
+    s.boolean_elements("c", ["big", "lnshape"], op="union")
     with pytest.raises(ValueError, match="no stroke"):
         s.add_rect("c", 0, 0, 5, 5, id="plain")
         s.path_ops("c", "plain", "outline_stroke")

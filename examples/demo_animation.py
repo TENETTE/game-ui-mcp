@@ -21,7 +21,6 @@ def strip(canvas, animation, name, **kw):
     (OUT / name).write_bytes(image.data)
 
 
-# ------------------------------------------------------------------ 1. button: pop in, shine sweep, idle glow
 ui.create_canvas("button", 360, 130, "#0f0d18")
 ui.batch("button", [
     {"op": "add_rect", "id": "body", "group": "btn", "x": 36, "y": 34, "width": 288, "height": 60, "radius": 14,
@@ -35,22 +34,18 @@ ui.batch("button", [
      "font": "Rajdhani", "weight": 700, "size": 28, "letter_spacing": 2, "color": "#ffffff",
      "style": {"shadow": {"color": "#2e1065@0.9", "blur": 4, "dy": 2}}},
     {"op": "create_animation", "name": "appear", "duration": 1.6},
-    # pop in: the whole group scales around the button centre, overshooting slightly
     {"op": "set_keyframes", "animation": "appear", "target": "group:btn", "property": "scale", "pivot": [180, 64],
      "keyframes": [[0, 0.55], [0.28, 1, "back-out"]]},
     {"op": "set_keyframes", "animation": "appear", "target": "group:btn", "property": "opacity",
      "keyframes": [[0, 0], [0.14, 1, "quad-out"]]},
-    # one shine sweep after it lands
     {"op": "set_keyframes", "animation": "appear", "target": "shine", "property": "dx",
      "keyframes": [[0.35, 0], [0.85, 400, "quad-in-out"]]},
-    # glow swells and settles
     {"op": "set_keyframes", "animation": "appear", "target": "body", "property": "style.glow.blur",
      "keyframes": [[0.28, 14], [0.7, 34, "sine-out"], [1.6, 14, "sine-in-out"]]},
 ])
 strip("button", "appear", "anim_button_strip.png", frames=8, columns=4, cell=300)
 ui.export_animation("button", "appear", format="gif", path=str(OUT / "anim_button.gif"), fps=20)
 
-# ------------------------------------------------------------------ 2. gauge: needle sweep with settle, value arc follows
 CX = CY = 220
 ui.create_canvas("gauge", 440, 440, "#0b0c0f")
 ui.batch("gauge", [
@@ -82,7 +77,6 @@ ui.batch("gauge", [
      "font": "Barlow Condensed", "weight": 700, "italic": True, "size": 76, "color": "#f2f4f7"},
     {"op": "create_animation", "name": "rev", "duration": 2.4, "loop": True},
 ])
-# rev up through first gear, shift (revs drop), rev again, lift off
 rev = [[0, 135], [0.9, 372, "quad-in"], [1.05, 262, "quad-out"], [1.9, 380, "quad-in"], [2.4, 135, "cubic-in-out"]]
 ui.batch("gauge", [
     {"op": "set_keyframes", "animation": "rev", "target": "needle", "property": "rotation", "keyframes": rev},
@@ -98,7 +92,6 @@ ui.batch("gauge", [
 strip("gauge", "rev", "anim_gauge_strip.png", frames=8, columns=4, cell=260)
 ui.export_animation("gauge", "rev", format="gif", path=str(OUT / "anim_gauge.gif"), fps=15, scale=0.5)
 
-# ------------------------------------------------------------------ 3. menu: staggered slide-in, selection bar
 ui.create_canvas("menu", 420, 320, {"type": "linear", "angle": 90, "stops": ["#1a1e25", "#0b0c0f"]})
 items = ["CAREER", "QUICK RACE", "GARAGE", "SETTINGS"]
 ops = [{"op": "add_rect", "id": "bar", "x": 40, "y": 44, "width": 5, "height": 44, "fill": "$red",
@@ -122,7 +115,6 @@ ops += [
      "keyframes": [[0, 0], [0.3, 44, "back-out"]]},
     {"op": "set_keyframes", "animation": "enter", "target": "hl", "property": "opacity",
      "keyframes": [[0.1, 0], [0.4, 1, "quad-out"]]},
-    # selection moves from the first item to the third
     {"op": "set_keyframes", "animation": "enter", "target": "bar", "property": "dy",
      "keyframes": [[1.0, 0], [1.28, 120, "back-out"]]},
     {"op": "set_keyframes", "animation": "enter", "target": "hl", "property": "dy",

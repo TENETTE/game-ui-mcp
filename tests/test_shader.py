@@ -22,7 +22,7 @@ def test_shader_paints_gradient_from_formula(ws):
     s.create_canvas("c", 100, 20)
     s.add_rect("c", 0, 0, 100, 20, style={"fill": {"type": "shader", "code": "r = u; g = 0; b = 1 - u"}})
     img = pixels()
-    assert img[10, 2, 0] < 20 and img[10, 97, 0] > 235          # red grows left to right
+    assert img[10, 2, 0] < 20 and img[10, 97, 0] > 235
     assert img[10, 2, 2] > 235 and img[10, 97, 2] < 20
 
 
@@ -32,7 +32,7 @@ def test_shader_color_params_alpha_and_noise(ws):
     s.add_rect("c", 0, 0, 64, 64, style={"fill": {"type": "shader", "code": code, "params": {"c": "#ff8800"}}})
     img = pixels()
     opaque = img[..., 3] > 250
-    assert 0 < opaque.mean() < 1                                # noise cut some pixels away
+    assert 0 < opaque.mean() < 1
     assert tuple(img[opaque][0][:3]) == (255, 136, 0)
 
 
@@ -63,7 +63,7 @@ def test_shader_rejects_anything_but_math(ws, code):
 
 def test_shader_too_heavy_is_refused_before_running(ws, monkeypatch):
     from game_ui_mcp import gpu, shader
-    monkeypatch.setattr(gpu, "module_for", lambda pixels: np)          # the CPU limit (a GPU allows 20x more)
+    monkeypatch.setattr(gpu, "module_for", lambda pixels: np)
     heavy = ";".join(f"q{i} = voronoi(x/9 + {i}, y/9)" for i in range(70)) + "; r = q1; g = 0; b = 0"
     with pytest.raises(ValueError, match="too heavy"):
         shader.evaluate({"code": heavy}, (1024, 1024), (0, 0, 1024, 1024), 1.0, {})

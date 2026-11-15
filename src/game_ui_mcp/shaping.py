@@ -23,7 +23,6 @@ from .fonts import BUNDLED_DIR
 NOTO_DIR = BUNDLED_DIR / "noto"
 _NOTO = ("Arabic", "Hebrew", "Devanagari", "Bengali", "Tamil", "Thai")
 
-# Han glyphs differ per language, so the CJK system font is chosen by the language tag.
 _CJK = {
     "ja": ["Yu Gothic", "Yu Gothic UI", "Meiryo", "MS Gothic", "Hiragino Sans", "Noto Sans CJK JP", "Noto Sans JP"],
     "zh-hans": ["Microsoft YaHei", "Microsoft YaHei UI", "SimSun", "PingFang SC", "Noto Sans CJK SC", "Noto Sans SC"],
@@ -32,7 +31,6 @@ _CJK = {
 }
 _SYSTEM = ["Segoe UI", "Nirmala UI", "Leelawadee UI", "Kohinoor Devanagari", "Thonburi", "Noto Sans",
            "DejaVu Sans", "Segoe UI Symbol", "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji"]
-# colour emoji fonts: their glyphs are painted in colour by Pillow instead of filled with the text colour
 COLOR_FONTS = ("seguiemj.ttf", "applecoloremoji.ttc", "notocoloremoji.ttf")
 
 
@@ -46,7 +44,6 @@ def _is_emoji(text: str, i: int) -> bool:
     return (0x1F000 <= cp <= 0x1FAFF or (0x2600 <= cp <= 0x27BF and nxt == "\ufe0f")
             or (0x2B00 <= cp <= 0x2BFF and nxt == "\ufe0f") or cp in (0x2B50, 0x2B55, 0x231A, 0x231B, 0x23F0))
 
-# Characters that may not start a CJK line (kinsoku) and ones that may not end it.
 _NO_START = set("、。，．・：；？！ー）」』】〕〉》〙〗｝］’”ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヵヶ々〻…‥")
 _NO_END = set("（「『【〔〈《〘〖｛［‘“")
 
@@ -96,7 +93,6 @@ def guess_lang(text: str, lang: str | None) -> tuple[str | None, str | None]:
                        "set language ('ja', 'zh-Hans', 'zh-Hant', 'ko') so the right glyph forms are used")
 
 
-# --------------------------------------------------------------------------- fonts
 
 @lru_cache(maxsize=64)
 def _face(path: str):
@@ -111,7 +107,7 @@ class _Font:
         self.font = hb.Font(self.face)
         self.var = None
         var = {"wght": float(var_weight), "opsz": float(size_px)} if var_weight is not None else {}
-        var.update(dict(axes or ()))                        # width, slant, optical size... of variable fonts
+        var.update(dict(axes or ()))
         if var:
             self.var = var
             self.font.set_variations(self.var)
@@ -143,7 +139,6 @@ def fallback_chain(fonts, primary_path: str | None, var_weight: int | None, weig
     return tuple(chain)
 
 
-# --------------------------------------------------------------------------- shaping
 
 class _Pen:
     def __init__(self) -> None:
@@ -193,7 +188,6 @@ def _levels(text: str) -> list[int]:
     _bidi.resolve_neutral_types(st, False)
     _bidi.resolve_implicit_levels(st, False)
     levels = [0] * len(text)
-    # explicit embedding controls are dropped from storage["chars"]; map the rest back by order
     it = iter(st["chars"])
     for i, ch in enumerate(text):
         if 0x202A <= ord(ch) <= 0x202E or 0x2066 <= ord(ch) <= 0x2069:
@@ -211,10 +205,10 @@ class ShapedText:
         self.lang = lang
         self.spacing = spacing_px
         self.features = dict(features or {})
-        self.color_runs: dict[str, list[tuple[float, str, int]]] = {}    # text -> [(x px, emoji text, font idx)]
+        self.color_runs: dict[str, list[tuple[float, str, int]]] = {}
         self.missing: set[str] = set()
         self.used: set[int] = set()
-        self.fallback: dict[int, set[str]] = {}       # chain index -> characters the primary font lacked
+        self.fallback: dict[int, set[str]] = {}
         self._cache: dict[str, tuple] = {}
 
     def _pick(self, text: str) -> list[int]:
@@ -222,13 +216,12 @@ class ShapedText:
         prev = None
         for ch in text:
             cp, cat = ord(ch), unicodedata.category(ch)
-            # marks, joiners and covered neutrals (spaces, digits, punctuation) stay in the current run
             if prev is not None and (cat[0] == "M" or cat in ("Cf", "Cc")
                                      or (cat[0] != "L" and cp in self.chain[prev].cmap)):
                 out.append(prev)
                 continue
             idx = None
-            if _is_emoji(text, len(out)):                    # colour emoji before monochrome symbol fonts
+            if _is_emoji(text, len(out)):
                 idx = next((i for i, f in enumerate(self.chain) if f.color and cp in f.cmap), None)
             if idx is None:
                 idx = next((i for i, f in enumerate(self.chain) if cp in f.cmap), None)
@@ -253,13 +246,12 @@ class ShapedText:
             return [], 0.0
         levels = _levels(text)
         picks = self._pick(text)
-        runs: list[tuple[int, int, int, int]] = []        # (start, end, level, font)
+        runs: list[tuple[int, int, int, int]] = []
         start = 0
         for i in range(1, len(text) + 1):
             if i == len(text) or levels[i] != levels[start] or picks[i] != picks[start]:
                 runs.append((start, i, levels[start], picks[start]))
                 start = i
-        # rule L2: reverse every maximal sequence of runs at or above each odd level
         order = list(range(len(runs)))
         top = max(r[2] for r in runs)
         low_odd = min((r[2] for r in runs if r[2] % 2), default=top + 1)
@@ -297,7 +289,7 @@ class ShapedText:
                     if ch and not ch.isspace() and unicodedata.category(ch) not in ("Cf", "Cc"):
                         self.missing.add(ch)
                 if self.spacing and prev_cluster is not None and info.cluster != prev_cluster:
-                    x += self.spacing          # shortcut: also spaces joined Arabic letters; per-script rule if asked
+                    x += self.spacing
                 prev_cluster = info.cluster
                 glyphs.append((fi, info.codepoint, x + pos.x_offset * f.scale, pos.y_offset * f.scale))
                 x += pos.x_advance * f.scale
@@ -307,7 +299,6 @@ class ShapedText:
     def width(self, text: str) -> float:
         return self.shape(text)[1]
 
-    # ---- line breaking
 
     @staticmethod
     def _segments(text: str) -> list[str]:
@@ -360,7 +351,6 @@ class ShapedText:
         lines.append(cur.rstrip())
         return lines
 
-    # ---- drawing
 
     def draw(self, img, text: str, x: float, baseline: float, stroke_px: int = 0) -> None:
         """OR the glyph coverage of ``text`` into the L-mode image ``img`` (already offset)."""
@@ -370,7 +360,7 @@ class ShapedText:
         for fi, gid, gx, gy in glyphs:
             f = self.chain[fi]
             if f.color and stroke_px == 0:
-                continue                                   # painted in colour by draw_color
+                continue
             var = tuple(sorted(f.var.items())) if f.var else None
             contours = _outline(f.path, var, gid)
             if not contours:
@@ -420,8 +410,8 @@ def _font_features(path: str) -> frozenset:
     for table in ("GSUB", "GPOS"):
         try:
             for si in range(len(face.get_table_script_tags(table))):
-                tags |= set(face.get_language_feature_tags(table, si, 0xFFFF))   # 0xFFFF = default language
-        except Exception:                          # very old uharfbuzz: skip the check rather than fail
+                tags |= set(face.get_language_feature_tags(table, si, 0xFFFF))
+        except Exception:
             return frozenset({"*"})
     return frozenset(tags)
 
@@ -439,7 +429,6 @@ def _pil_font(path: str, size: int):
     return ImageFont.truetype(path, size)
 
 
-# --------------------------------------------------------------------------- engine hand-off
 
 def _needs(texts: list[str]) -> tuple[bool, bool, bool]:
     """(right-to-left, Indic / South-East Asian, CJK) present in any of the texts."""

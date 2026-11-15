@@ -16,16 +16,15 @@ def _loops(mask: np.ndarray) -> list[list[tuple[int, int]]]:
     h, w = mask.shape
     m = np.pad(mask, 1)
     nxt: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
-    # horizontal edges between rows y-1 and y (pixel-corner y)
     up, down = m[:-1, 1:-1], m[1:, 1:-1]
-    for y, x in zip(*np.nonzero(down & ~up)):        # filled below: edge runs left -> right
+    for y, x in zip(*np.nonzero(down & ~up)):
         nxt[(x, y)].append((x + 1, y))
-    for y, x in zip(*np.nonzero(up & ~down)):        # filled above: right -> left
+    for y, x in zip(*np.nonzero(up & ~down)):
         nxt[(x + 1, y)].append((x, y))
     left, right = m[1:-1, :-1], m[1:-1, 1:]
-    for y, x in zip(*np.nonzero(right & ~left)):     # filled on the right: edge runs bottom -> top
+    for y, x in zip(*np.nonzero(right & ~left)):
         nxt[(x, y + 1)].append((x, y))
-    for y, x in zip(*np.nonzero(left & ~right)):     # filled on the left: top -> bottom
+    for y, x in zip(*np.nonzero(left & ~right)):
         nxt[(x, y)].append((x, y + 1))
     loops = []
     while nxt:
@@ -110,7 +109,6 @@ def trace(img: Image.Image, colors: int = 6, detail: float = 1.0, smooth: int = 
     alpha = np.asarray(rgba.getchannel("A")) > 127
     flat = Image.new("RGB", rgba.size, (0, 0, 0))
     flat.paste(rgba, mask=rgba.getchannel("A"))
-    # k-means refinement keeps small but distinct colours (white text on a dark button) from being merged away
     q = flat.quantize(colors=max(2, min(32, int(colors))), method=Image.Quantize.MEDIANCUT, kmeans=3,
                       dither=Image.Dither.NONE)
     idx = np.asarray(q)

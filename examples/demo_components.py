@@ -16,7 +16,6 @@ ui.set_store(Store(Path(tempfile.mkdtemp()) / "ws"))
 ui.set_theme(colors={"gold": "hsl(42, 90%, 58%)", "gold_dk": "hsl(32, 80%, 28%)", "gold_md": "hsl(38, 78%, 46%)", "ink": "#0c1018",
                      "steel": "#8b98ab", "accent": "hsl(190, 95%, 55%)"})
 
-# ---- a gem component, drawn once
 ui.create_canvas("gem", 64, 64)
 ui.batch("gem", [
     {"op": "add_polygon", "id": "cut", "cx": 32, "cy": 32, "radius": 28, "sides": 6, "point_rotation": 30,
@@ -26,7 +25,6 @@ ui.batch("gem", [
     {"op": "add_polygon", "id": "facet", "points": [[32, 8], [50, 20], [32, 30], [14, 20]], "fill": "#ffffff@0.35"},
 ])
 
-# ---- the emblem
 ui.create_canvas("emblem", 360, 360)
 ui.batch("emblem", [
     {"op": "add_ellipse", "id": "rim", "cx": 180, "cy": 180, "rx": 150,
@@ -44,7 +42,6 @@ ui.batch("emblem", [
     {"op": "add_text", "id": "season", "text": "SEASON 07", "x": 0, "y": 0, "size": 16, "font": "Rajdhani",
      "weight": 700, "letter_spacing": 4, "anchor": "middle-center",
      "arc": {"cx": 180, "cy": 180, "radius": 132, "side": "inner"}, "fill": "$ink"},
-    # a star with a cut-out ring, all on its own layer so the erase only bites the star
     {"op": "create_layer", "name": "star", "style": {"shadow": {"color": "#000@0.7", "blur": 10, "dy": 5}}},
     {"op": "add_polygon", "id": "star", "cx": 180, "cy": 172, "radius": 78, "inner_radius": 34, "sides": 5,
      "fill": {"type": "linear", "angle": 90, "stops": [[0, "#fff6d5"], [0.45, "$gold"], [1, "$gold_dk"]]},
@@ -53,11 +50,9 @@ ui.batch("emblem", [
     {"op": "add_instance", "id": "gem", "source": "gem", "x": 156, "y": 156, "width": 48,
      "style": {"glow": {"color": "$accent@0.6", "blur": 14}}},
 ])
-# 24 rivets around the rim: one element, then a radial array
 ui.add_ellipse("emblem", 180, 35, 2.5, fill={"type": "radial", "cx": 0.35, "cy": 0.3, "stops": [[0, "#fff"], [1, "$gold_dk"]]}, id="rivet")
 ui.duplicate_element("emblem", "rivet", count=23, rotate=15, pivot=[180, 180], new_id="rivet")
 
-# ---- quick-slot ring: 8 instanced gems with mirrored arrows
 ui.create_canvas("ring", 360, 360)
 ui.add_ellipse("ring", 180, 180, 120, fill="none", stroke={"color": "$steel@0.5", "width": 2, "dash": [10, 6]})
 ui.add_rect("ring", 160, 38, 40, 40, radius=8, fill="#151b26", stroke={"color": "$steel", "width": 2}, id="slot")
@@ -72,7 +67,7 @@ ui.add_svg("ring", '<svg viewBox="0 0 24 24"><path d="M4 12h12M11 6l6 6-6 6" fil
            128, 162, 36, 36, color="#e6edf7", id_prefix="arrow_l")
 ui.update_element("ring", "arrow_l_1", {"flip_x": True})
 
-print("fit:", ui.fit_canvas("emblem", padding=4))      # make room for the drop shadow
+print("fit:", ui.fit_canvas("emblem", padding=4))
 for name in ("emblem", "ring"):
     print(name, json.dumps(ui.review_canvas(name)["issues"], ensure_ascii=False))
 

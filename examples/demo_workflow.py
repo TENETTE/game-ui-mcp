@@ -26,7 +26,6 @@ ui.set_theme(
     styles={"label": {"font": "Rajdhani", "weight": 700, "size": 26, "fill": "$ink", "letter_spacing": 2}},
 )
 
-# ---- 1. one button component: {label} text + interaction states
 ui.create_canvas("button", 280, 84)
 ui.batch("button", [
     {"op": "add_rect", "id": "face", "x": 10, "y": 10, "width": 260, "height": 60, "radius": 14,
@@ -50,7 +49,6 @@ ui.batch("states", [
     for i, (st, text) in enumerate([(None, "PLAY"), ("hover", "PLAY"), ("pressed", "PLAY"), ("disabled", "LOCKED")])
 ])
 
-# ---- 2. rarity cards from one template + data rows
 ICONS = {
     "sword": "M21 3L17 3.6L7.5 13L11 16.5L20.4 7ZM4.5 11.5L6 10L14 18L12.5 19.5ZM7 15.5L8.5 17L4.5 21L3 19.5Z",
     "shield": "M12 2.5L20 5.5V11.5C20 16.3 16.6 19.8 12 21.5C7.4 19.8 4 16.3 4 11.5V5.5Z",
@@ -89,7 +87,6 @@ rows = [
 ]
 cards = ui.generate_from_template("card", rows, name_prefix="card")["canvases"]
 
-# ---- 3. HUD pinned for other screens
 ui.create_canvas("hud", preset="1080p")
 ui.batch("hud", [
     {"op": "add_rect", "x": 40, "y": 40, "width": 420, "height": 96, "radius": 18, "fill": "#0d0b14@0.75",
@@ -120,7 +117,6 @@ res = ui.preview_resolutions("hud", sizes=[[1920, 1080], [2560, 1080], [1280, 80
                              cell=440, guides=["safe"])
 Image.open(io.BytesIO(res[0].data)).save(HERE / "resolutions.png")
 
-# ---- 4. pixel-art potion (16x16, 4 colours)
 ui.create_canvas("pixel_potion", 16, 16)
 ui.batch("pixel_potion", [
     {"op": "add_path", "d": ICONS["potion"], "x": 0, "y": 0, "scale": 16 / 24, "fill": "#e11d48",
@@ -129,14 +125,12 @@ ui.batch("pixel_potion", [
 ])
 ui.update_canvas("pixel_potion", pixel_art={"palette": ["#e11d48", "#3b0718", "#fda4af", "#9f1239"]})
 
-# ---- 5. baked damage numbers
 font_out = ui.export_bitmap_font("damage", "0123456789!", size=56, font="Bangers",
                                  fill={"type": "linear", "angle": 90, "stops": ["#fff7c2", "#f59e0b", "#b45309"]},
                                  stroke={"color": "#2a1003", "width": 5},
                                  style={"shadow": {"color": "#000@0.6", "blur": 0, "dy": 4}},
                                  out_dir=str(TMP / "font"), preview_text="1250!")
 
-# ---- compose the overview image
 def render(cid: str, scale: float = 1.0) -> Image.Image:
     st = ui.store()
     return st.renderer(st.get(cid), scale).render()

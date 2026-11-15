@@ -12,7 +12,6 @@ from . import gpu
 from .colors import parse_color
 
 
-# --------------------------------------------------------------------------- blur / morphology
 
 def _box(a, r: int, axis: int):
     """Box blur of half-width r along one axis; outside the array counts as zero (numpy or cupy)."""
@@ -38,7 +37,7 @@ def blur_float(a: np.ndarray, radius: float, passes: int = 3) -> np.ndarray:
     else:
         sigma = radius / 2.0
         r = max(1, int(round((math.sqrt(12 * sigma * sigma / passes + 1) - 1) / 2)))
-    xp = gpu.module_for(a.size)                    # big shadows / glows blur on the GPU when there is one
+    xp = gpu.module_for(a.size)
     out = xp.asarray(a, dtype=xp.float64)
     for _ in range(passes):
         out = _box(_box(out, r, 0), r, 1)
@@ -53,7 +52,7 @@ def dilate(alpha: np.ndarray, radius: float) -> np.ndarray:
     h, w = alpha.shape
     levels = max(1, int(math.floor(math.log2(2 * big + 1))) + 1)
     padded = np.pad(alpha, ((0, 0), (big, big + (1 << levels))))
-    tables = [padded]                                   # tables[j][:, i] = max of padded[:, i : i + 2**j]
+    tables = [padded]
     for j in range(levels):
         prev = tables[-1]
         shifted = np.zeros_like(prev)
@@ -69,7 +68,7 @@ def dilate(alpha: np.ndarray, radius: float) -> np.ndarray:
             length = 2 * hw + 1
             j = int(math.floor(math.log2(length)))
             t = tables[j]
-            start = big - hw                            # window [i - hw, i + hw] in padded coordinates
+            start = big - hw
             a = t[:, start: start + w]
             b = t[:, start + length - (1 << j): start + length - (1 << j) + w]
             rows[hw] = np.maximum(a, b)
@@ -88,7 +87,6 @@ def grow(alpha: np.ndarray, distance: float) -> np.ndarray:
     return dilate(alpha, distance) if distance > 0 else erode(alpha, -distance) if distance < 0 else alpha
 
 
-# --------------------------------------------------------------------------- lighting
 
 def emboss(alpha: Image.Image, spec: dict, colors: dict, k: float) -> Image.Image:
     """Light a shape as if it were raised: the alpha edge becomes a bevel whose slopes catch light
@@ -97,7 +95,7 @@ def emboss(alpha: Image.Image, spec: dict, colors: dict, k: float) -> Image.Imag
         spec = {}
     size = max(0.5, float(spec.get("size", 6))) * k
     depth = max(0.0, float(spec.get("depth", 1)))
-    angle = math.radians(float(spec.get("angle", 225)))             # where the light comes from
+    angle = math.radians(float(spec.get("angle", 225)))
     altitude = math.radians(max(5.0, min(85.0, float(spec.get("altitude", 40)))))
     profile = str(spec.get("profile", "round")).lower()
     if profile not in ("round", "chisel"):
@@ -111,7 +109,7 @@ def emboss(alpha: Image.Image, spec: dict, colors: dict, k: float) -> Image.Imag
     pad = int(math.ceil(size)) + 2
     ap = np.pad(a, pad)
     height = blur_float(ap, size, 1 if profile == "chisel" else 3)
-    height = np.clip((height - 0.5) * 2.0, 0.0, 1.0)                # 0 at the edge, 1 once `size` inside
+    height = np.clip((height - 0.5) * 2.0, 0.0, 1.0)
     soften = float(spec.get("soften", 0)) * k
     if soften > 0:
         height = blur_float(height, soften, 3)
@@ -142,7 +140,6 @@ def emboss(alpha: Image.Image, spec: dict, colors: dict, k: float) -> Image.Imag
     return Image.fromarray(np.clip(out + 0.5, 0, 255).astype(np.uint8), "RGBA")
 
 
-# --------------------------------------------------------------------------- color adjustment
 
 def adjust(img: Image.Image, spec: dict, colors: dict) -> Image.Image:
     """brightness, contrast, saturation, exposure, temperature, shadows, highlights (-1..1), hue (degrees),
@@ -171,10 +168,10 @@ def adjust(img: Image.Image, spec: dict, colors: dict) -> Image.Image:
         rgb = (rgb - 127.5) * max(0.0, 1.0 + contrast) + 127.5
     exposure = float(spec.get("exposure", 0) or 0)
     if exposure:
-        rgb = rgb * (2.0 ** exposure)                    # photographic stops
+        rgb = rgb * (2.0 ** exposure)
     temp = float(spec.get("temperature", 0) or 0)
     if temp:
-        rgb = rgb + np.array([1.0, 0.25, -1.0]) * temp * 40.0       # warm (+) / cool (-)
+        rgb = rgb + np.array([1.0, 0.25, -1.0]) * temp * 40.0
     shadows = float(spec.get("shadows", 0) or 0)
     highlights = float(spec.get("highlights", 0) or 0)
     if shadows or highlights:
@@ -190,7 +187,6 @@ def adjust(img: Image.Image, spec: dict, colors: dict) -> Image.Image:
     return Image.fromarray((arr + 0.5).astype(np.uint8), "RGBA")
 
 
-# --------------------------------------------------------------------------- noise
 
 def _lattice(ix: np.ndarray, iy: np.ndarray, seed: float) -> np.ndarray:
     v = np.sin(ix * 127.1 + iy * 311.7 + seed * 74.7) * 43758.5453123
@@ -216,7 +212,6 @@ def fractal_noise(ux: np.ndarray, uy: np.ndarray, scale: float, octaves: int, se
     return total / weight
 
 
-# --------------------------------------------------------------------------- color spaces
 
 def _to_linear(c: np.ndarray) -> np.ndarray:
     c = c / 255.0
@@ -259,7 +254,6 @@ def decode_space(values: np.ndarray, space: str) -> np.ndarray:
     return _from_linear((lms ** 3) @ _M1_INV.T)
 
 
-# --------------------------------------------------------------------------- blur, noise, texture, glass
 
 def blur_amount(spec) -> tuple[float, dict | None]:
     """(largest radius, progressive spec or None) of a style.blur / backdrop_blur value."""
@@ -391,7 +385,7 @@ def glass(backdrop: Image.Image, mask: Image.Image, spec, k: float, colors: dict
     arr = np.asarray(src, dtype=np.float64)
     h, w = m.shape
     ys, xs = np.mgrid[0:h, 0:w].astype(np.float64)
-    push = refraction * depth * 6.0                     # edge slope (~1/depth per px) times this = displacement
+    push = refraction * depth * 6.0
     out = np.empty_like(arr)
     for ch, f in enumerate((1 - dispersion, 1.0, 1 + dispersion)):
         sample = _bilinear(arr, xs + gx * push * f, ys + gy * push * f)

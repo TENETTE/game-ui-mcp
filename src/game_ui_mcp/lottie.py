@@ -76,7 +76,7 @@ def build(store, canvas: dict, anim: dict, name: str, fps: float | None, scale: 
     r0 = store.renderer(canvas, scale)
     k = scale
     assets = _Assets()
-    layers: list[dict] = []                       # bottom to top; reversed at the end (Lottie draws the first on top)
+    layers: list[dict] = []
     report = {"transform": [], "frames": [], "static": []}
 
     def image_layer(asset: str, x: float, y: float, ip: int = 0, op: int | None = None, ks: dict | None = None, nm: str = ""):
@@ -111,7 +111,6 @@ def build(store, canvas: dict, anim: dict, name: str, fps: float | None, scale: 
         flush()
         looks_same = all(_look(f, theme) == _look(el, theme) for f in frames)
         if looks_same:
-            # one picture, moved / rotated / scaled / faded by Lottie itself
             plain = {key: v for key, v in el.items() if key not in ("rotation", "scale", "scale_x", "scale_y",
                                                                    "flip_x", "flip_y")}
             st = resolve_style(el.get("style"), theme)
@@ -139,7 +138,6 @@ def build(store, canvas: dict, anim: dict, name: str, fps: float | None, scale: 
             image_layer(assets.add(img), 0, 0, ks=ks, nm=el["id"])
             report["transform"].append(el["id"])
         else:
-            # the look itself changes: one picture per frame, each shown for exactly its frame
             for i, (pose, f) in enumerate(zip(poses, frames)):
                 result = store.renderer(pose, scale).render_element(f)
                 if result is None:

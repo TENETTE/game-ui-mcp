@@ -18,7 +18,6 @@ SAMPLES = [
     ("ta", "விளையாட்டைத் தொடங்கு"), ("th", "เริ่มเกม"), ("ja", "ゲームを始める直"), ("zh-Hans", "开始游戏直"),
     ("zh-Hant", "開始遊戲直"), ("ko", "게임 시작"), ("pl", "Rozpocznij grę"),
 ]
-# CJK comes from system fonts (too big to bundle); machines without them (CI images) skip those rows
 _WIN_FONTS = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
 if not all((_WIN_FONTS / f).exists() for f in ("YuGothM.ttc", "msyh.ttc", "msjh.ttc", "malgun.ttf")):
     SAMPLES = [row for row in SAMPLES if row[0] not in ("ja", "zh-Hans", "zh-Hant", "ko")]

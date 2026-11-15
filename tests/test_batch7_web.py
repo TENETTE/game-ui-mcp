@@ -38,15 +38,15 @@ def test_pages_text_fonts_links_and_states(ws):
     res = site(ws)
     assert res["pages"] == ["index.html", "shop.html", "menu.html"] and res["embedded_as_image"] == []
     page = (ws / "site" / "index.html").read_text(encoding="utf-8")
-    assert "Play &lt;now&gt;" in page                                       # live, escaped text
+    assert "Play &lt;now&gt;" in page
     assert re.search(r"@font-face\{font-family:'Inter'", page) and list((ws / "site" / "assets" / "fonts").glob("*.ttf"))
     assert 'data-href="shop.html" data-mode="navigate"' in page and 'data-href="menu.html" data-mode="overlay"' in page
     assert ".g-b:hover #btn{" in page and "view-transition-name:v-btn" in page
     assert "@keyframes a-home-spin-hex" in page and "infinite" in page
     css = (ws / "site" / "styles.css").read_text(encoding="utf-8")
     assert "--color-accent:#7c5cff" in css and '[data-theme="light"]{--color-accent:#3b82f6}' in css
-    assert "var(--color-accent, #7c5cff)" in page                            # tokens stay live
-    assert "<svg" in page                                                    # the hexagon is inline SVG
+    assert "var(--color-accent, #7c5cff)" in page
+    assert "<svg" in page
 
 
 def test_responsive_layout_uses_pins(ws):
@@ -62,7 +62,7 @@ def test_responsive_layout_uses_pins(ws):
 
 def test_font_names_cannot_break_out_of_css(ws):
     s.create_canvas("c", 100, 40)
-    with pytest.raises(ValueError, match="not found"):                       # only real fonts get in at all
+    with pytest.raises(ValueError, match="not found"):
         s.add_text("c", "x", x=0, y=0, font="Inter'}body{display:none}", id="t")
     from game_ui_mcp.webexport import _Ctx
     import types

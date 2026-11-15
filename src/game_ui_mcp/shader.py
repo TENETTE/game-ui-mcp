@@ -18,8 +18,8 @@ from .colors import parse_color
 
 MAX_CODE = 6000
 MAX_STATEMENTS = 80
-MAX_WORK = 85e6          # noise-call units x pixels, ~10 s on the CPU: an 8-octave fbm still fits a full 4K fill
-GPU_WORK_FACTOR = 20     # the same 10 s buys about this much more work on a CUDA GPU
+MAX_WORK = 85e6
+GPU_WORK_FACTOR = 20
 
 
 def _m(*values):
@@ -96,7 +96,7 @@ def _funcs(xp) -> dict:
         "clamp": lambda a, lo=0.0, hi=1.0: xp.clip(a, lo, hi), "mix": lambda a, b, t: a + (b - a) * t,
         "step": lambda edge, a: (xp.asarray(a) >= edge).astype(xp.float64), "smoothstep": _smoothstep,
         "length": lambda a, b: xp.hypot(a, b), "hypot": xp.hypot,
-        "where": lambda c, a, b: xp.where(xp.asarray(c), a, b),     # cupy needs an array condition
+        "where": lambda c, a, b: xp.where(xp.asarray(c), a, b),
         "noise": _noise, "fbm": _fbm, "voronoi": _voronoi,
         "rand": lambda a, b, seed=0.0: _hash(xp.floor(a), xp.floor(b), seed),
     }
@@ -115,7 +115,7 @@ def compile_code(code: str):
     if len(code) > MAX_CODE:
         raise ValueError(f"shader code is over {MAX_CODE} characters")
     try:
-        lines = (ln.strip() for ln in code.replace(";", "\n").splitlines())   # no blocks, so indent means nothing
+        lines = (ln.strip() for ln in code.replace(";", "\n").splitlines())
         tree = ast.parse("\n".join(lines), mode="exec")
     except SyntaxError as exc:
         raise ValueError(f"shader code: syntax error on line {exc.lineno}: {exc.msg}") from exc
@@ -135,7 +135,7 @@ def compile_code(code: str):
         if isinstance(node, ast.Constant):
             if not isinstance(node.value, (int, float)) or isinstance(node.value, bool):
                 raise ValueError("shader code: only number constants (put colours in params)")
-            node.value = float(node.value)          # float math: 9**9**9 overflows instead of hanging
+            node.value = float(node.value)
     assigned = {t.id for n in ast.walk(tree) if isinstance(n, ast.Assign) for t in n.targets}
     if not {"r", "g", "b"} <= assigned:
         raise ValueError("shader code must assign r, g and b (0..1); a (alpha 0..1) is optional")
@@ -164,7 +164,7 @@ def _env(params: dict, colors: dict) -> dict:
     for key, value in (params or {}).items():
         if not str(key).isidentifier() or key.startswith("_") or key in INPUTS or key in FUNCS:
             raise ValueError(f"shader param '{key}' must be a plain name not used by inputs or functions")
-        if isinstance(value, str):                          # a colour: name_r, name_g, name_b, name_a
+        if isinstance(value, str):
             r, g, b, a = parse_color(value, colors)
             env.update({f"{key}_r": r / 255, f"{key}_g": g / 255, f"{key}_b": b / 255, f"{key}_a": a / 255})
         elif isinstance(value, (int, float)) and not isinstance(value, bool):

@@ -97,7 +97,6 @@ def _flow(store, canvas: dict, cont: dict) -> None:
     x0, y0, x1, y1 = r.element_box(cont)
     inner_w, inner_h = x1 - x0 - pl - pr, y1 - y0 - pt - pb
 
-    # 1) sizes: fill / fixed / min / max (single elements only; groups keep their size)
     main = "width" if mode != "column" else "height"
     cross = "height" if main == "width" else "width"
     boxes = [_union(r, m) for m in items]
@@ -142,7 +141,6 @@ def _flow(store, canvas: dict, cont: dict) -> None:
             _resize(el, want_w if abs(want_w - (cur[2] - cur[0])) > 1e-6 else None,
                     want_h if abs(want_h - (cur[3] - cur[1])) > 1e-6 and el["type"] != "text" else None)
 
-    # 2) positions, with fresh bounds after resizing
     r = store.renderer(canvas)
     boxes = [_union(r, m) for m in items]
     sizes = [(b[2] - b[0], b[3] - b[1]) for b in boxes]
@@ -231,7 +229,6 @@ def _flow(store, canvas: dict, cont: dict) -> None:
             for m in members:
                 shift_element(m, dx, dy)
 
-    # 3) hug: the container wraps its content plus padding
     if (hug_w or hug_h) and cont["type"] == "rect":
         if hug_w:
             cont["width"] = round(content[2] - content[0] + pl + pr, 3)
@@ -260,7 +257,7 @@ def reflow(store, canvas: dict) -> None:
                 done.add(c["id"])
                 pending.remove(c)
                 progress = True
-        if not progress:                               # a cycle: lay the rest out once in order
+        if not progress:
             for c in pending:
                 _flow(store, canvas, c)
             break

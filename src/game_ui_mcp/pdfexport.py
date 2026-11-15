@@ -129,7 +129,6 @@ class _Page:
             ca, sa = math.cos(ang), math.sin(ang)
             half = (abs(bw * ca) + abs(bh * sa)) / 2
             cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-            # map the 0..1 domain onto the stop range so offsets match the PNG
             ax, ay = cx - ca * half + ca * 2 * half * lo, cy - sa * half + sa * 2 * half * lo
             bx, by = cx - ca * half + ca * 2 * half * hi, cy - sa * half + sa * 2 * half * hi
             shading = (f"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [{_n(ax)} {_n(H - ay)} {_n(bx)} {_n(H - by)}] "

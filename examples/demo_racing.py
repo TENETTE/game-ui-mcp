@@ -29,20 +29,17 @@ ui.set_theme(
     },
 )
 
-# ============================================================== full HUD mockup
 ui.create_canvas("racing_hud", 1920, 1080, {"type": "linear", "angle": 90, "stops": ["#39424d", "#20252c", "#0d0f12"]})
-CX, CY = 1640, 800                      # tachometer centre
+CX, CY = 1640, 800
 SWEEP0, SWEEP1 = 135, 405
-RPM = 0.74                              # 0..1
+RPM = 0.74
 needle_angle = SWEEP0 + (SWEEP1 - SWEEP0) * RPM
 
 ops = [
-    # scene stand-in: horizon haze + vignette
     {"op": "add_ellipse", "cx": 960, "cy": 470, "rx": 1100, "ry": 150, "fill": "#aab7c6@0.16", "style": {"blur": 120}},
     {"op": "add_rect", "x": 0, "y": 0, "width": 1920, "height": 1080,
      "fill": {"type": "radial", "r": 0.78, "stops": [[0.45, "#000000@0"], [1, "#000000@0.62"]]}},
 
-    # ---------------- tachometer
     {"op": "add_ellipse", "group": "dial", "cx": CX, "cy": CY, "rx": 214,
      "fill": {"type": "linear", "angle": 70, "stops": ["#7b838d", "#1b1e23", "#565d66", "#15171b"]},
      "style": {"shadow": {"color": "#000000@0.65", "blur": 44, "dy": 18}}},
@@ -63,7 +60,6 @@ ops = [
      "label_italic": True, "label_color": "#d5dae1"},
     {"op": "add_text", "group": "dial", "text": "x1000 rpm", "x": CX, "y": CY - 78, "anchor": "center",
      "style": "label", "size": 15},
-    # value arc + needle + hub (separate groups so an engine can animate them)
     {"op": "add_arc", "group": "value", "cx": CX, "cy": CY, "radius": 186, "start_angle": SWEEP0,
      "end_angle": needle_angle, "thickness": 12,
      "color": {"type": "conic", "from": SWEEP0, "to": SWEEP1,
@@ -78,14 +74,12 @@ ops = [
      "stroke": {"color": "#000000@0.7", "width": 1.5}, "style": {"shadow": {"color": "#000000@0.8", "blur": 10, "dy": 4}}},
     {"op": "add_ellipse", "group": "hub", "cx": CX, "cy": CY, "rx": 9,
      "fill": {"type": "radial", "stops": ["#2a2e35", "#08090b"]}},
-    # gear box in the open sector
     {"op": "add_rect", "group": "gear", "x": CX - 40, "y": CY + 92, "width": 80, "height": 92, "radius": 8,
      "skew": 8, "fill": "#050607@0.92", "stroke": {"color": "$red", "width": 2},
      "style": {"glow": {"color": "#ff3b30@0.35", "blur": 16}}},
     {"op": "add_text", "group": "gear", "text": "4", "x": CX + 1, "y": CY + 138, "anchor": "center", "style": "value",
      "size": 84},
 
-    # ---------------- speed readout
     {"op": "add_text", "text": "187", "x": CX - 250, "y": CY + 170, "anchor": "baseline-right", "size": 150,
      "style": {"use": "value", "shadow": {"color": "#000000@0.65", "blur": 18, "dy": 6}}},
     {"op": "add_text", "text": "km/h", "x": CX - 250, "y": CY + 202, "anchor": "baseline-right", "style": "label",
@@ -93,7 +87,6 @@ ops = [
     {"op": "add_line", "points": [[CX - 470, CY + 214], [CX - 250, CY + 214]], "width": 2,
      "color": {"type": "linear", "angle": 0, "stops": ["#ffffff@0", "#ffffff@0.5"]}, "cap": "butt"},
 
-    # ---------------- shift lights
     {"op": "add_line", "points": [[744, 46], [1176, 46]], "width": 14, "cap": "butt", "dash": [30, 6],
      "color": "#ffffff@0.09"},
     {"op": "add_line", "points": [[744, 46], [1068, 46]], "width": 14, "cap": "butt", "dash": [30, 6],
@@ -101,7 +94,6 @@ ops = [
                                                          [0.86, "#ffb020"], [0.9, "#ff3b30"], [1, "#ff3b30"]]},
      "style": {"glow": {"color": "#ffb020@0.6", "blur": 16}}},
 
-    # ---------------- position / lap tabs (slanted)
     {"op": "add_rect", "x": 56, "y": 44, "width": 132, "height": 66, "skew": 14,
      "fill": {"type": "linear", "angle": 90, "stops": ["#ff5046", "#d92217"]},
      "style": {"shadow": {"color": "#000000@0.5", "blur": 18, "dy": 8}, "bevel": {"size": 1.5}}},
@@ -112,7 +104,6 @@ ops = [
     {"op": "add_text", "text": "/ 12", "x": 322, "y": 80, "anchor": "middle-left", "style": "value", "size": 28,
      "color": "$muted"},
 
-    # ---------------- timing panel
     {"op": "add_rect", "id": "timing", "x": 48, "y": 128, "width": 372, "height": 150, "radius": 6, "style": "glass"},
     {"op": "add_rect", "x": 48, "y": 128, "width": 4, "height": 150, "fill": "$red", "clip": "timing"},
     {"op": "add_text", "text": "current", "x": 72, "y": 158, "anchor": "middle-left", "style": "label"},
@@ -131,7 +122,6 @@ ops = [
     {"op": "add_text", "text": "-0.213", "x": 400, "y": 251, "anchor": "middle-right", "style": "mono",
      "color": "$green"},
 
-    # ---------------- tyres + pedals + fuel
     {"op": "add_rect", "id": "car", "x": 48, "y": 806, "width": 372, "height": 226, "radius": 6, "style": "glass"},
     {"op": "add_rect", "x": 48, "y": 806, "width": 372, "height": 34, "clip": "car",
      "fill": {"type": "carbon", "color": "#3a3f47", "color2": "#121418", "size": 4}},
@@ -152,7 +142,7 @@ for name, x, y, c1, c2, temp in tyres:
         {"op": "add_text", "text": temp, "x": x + 50, "y": y + 33, "anchor": "middle-left", "style": "mono", "size": 17},
     ]
 ops += [
-    {"op": "add_rect", "x": 100, "y": 934, "width": 86, "height": 8, "radius": 4, "fill": "#ffffff@0.12"},   # axle hint
+    {"op": "add_rect", "x": 100, "y": 934, "width": 86, "height": 8, "radius": 4, "fill": "#ffffff@0.12"},
     {"op": "add_rect", "x": 139, "y": 882, "width": 8, "height": 112, "radius": 4, "fill": "#ffffff@0.12"},
 ]
 for label, x, level, color in (("thr", 286, 0.82, "$green"), ("brk", 336, 0.12, "$red"), ("clt", 386, 0.0, "$blue")):
@@ -166,7 +156,6 @@ for label, x, level, color in (("thr", 286, 0.82, "$green"), ("brk", 336, 0.12, 
         ops.append({"op": "add_rect", "x": x - 9, "y": 862 + 132 - h, "width": 18, "height": h, "fill": color,
                     "clip": f"{label}_track", "style": {"glow": {"color": color + "@0.5", "blur": 10}}})
 
-# ---------------- minimap
 MX, MY = 1764, 176
 ops += [
     {"op": "add_ellipse", "cx": MX, "cy": MY, "rx": 118, "style": "glass"},
@@ -186,7 +175,6 @@ ui.batch("racing_hud", ops)
 ui.export_png("racing_hud", str(OUT / "racing_hud.png"), scales=[0.5], include_background=True)
 (OUT / "racing_hud_0_5x.png").replace(OUT / "racing_hud.png")
 
-# ============================================================== separate realistic assets
 ui.create_canvas("btn_carbon", 360, 104)
 ui.batch("btn_carbon", [
     {"op": "add_rect", "id": "body", "x": 24, "y": 18, "width": 312, "height": 60, "radius": 4, "skew": 12,

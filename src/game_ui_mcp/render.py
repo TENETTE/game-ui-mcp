@@ -25,7 +25,7 @@ from .fonts import FontLibrary, load_font, missing_glyphs, parse_weight
 
 SS = 4
 MAX_MASK_PIXELS = 40_000_000
-MAX_OUTPUT_PIXELS = 140_000_000      # 16K x 8K; larger renders exhaust RAM before Python can raise MemoryError
+MAX_OUTPUT_PIXELS = 140_000_000
 TEXT_STYLE_KEYS = ("font", "weight", "size", "letter_spacing", "line_height", "uppercase", "italic", "case",
                    "features", "axes", "paragraph_spacing", "indent", "trim")
 
@@ -53,7 +53,7 @@ def _ot_features(spec: Any, case: str) -> dict:
 def _letter_case(text: str, case: str) -> str:
     """Non-destructive letter case like Figma's: upper, lower, title (Capitalize), tr-upper / tr-lower."""
     if not case or case in ("none", "small-caps", "all-small-caps"):
-        return text                              # small caps come from the font's smcp feature
+        return text
     if case == "upper":
         return text.upper()
     if case == "tr-upper":
@@ -77,7 +77,6 @@ CUT_K = math.tan(math.pi / 8)
 Box = tuple[float, float, float, float]
 
 
-# --------------------------------------------------------------------------- style
 
 def resolve_style(style: Any, theme: dict) -> dict:
     """Expand a style reference. ``style`` is None, a theme style name, or a dict
@@ -253,7 +252,6 @@ def _stroke_specs(st: dict, colors: dict) -> list[dict]:
     return out
 
 
-# --------------------------------------------------------------------------- painting
 
 def _stops(spec: dict, colors: dict, space: str = "srgb") -> tuple[np.ndarray, np.ndarray]:
     raw = spec.get("stops") or spec.get("colors")
@@ -275,7 +273,7 @@ def _stops(spec: dict, colors: dict, space: str = "srgb") -> tuple[np.ndarray, n
         r, g, b, a = parse_color(col, colors)
         af = a / 255.0
         c0, c1, c2 = fxlib.encode_space(np.array([r, g, b], dtype=np.float64), space)
-        cols.append((c0 * af, c1 * af, c2 * af, a))  # premultiplied, in the interpolation space
+        cols.append((c0 * af, c1 * af, c2 * af, a))
     order = np.argsort(np.array(offs), kind="stable")
     return np.array(offs)[order], np.array(cols, dtype=np.float64)[order]
 
@@ -315,14 +313,12 @@ def _pattern_cov(spec: dict, kind: str, size: tuple[int, int], origin: tuple[flo
         dy = np.abs((np.mod(ry / cell + 0.5, 1.0) - 0.5) * cell)
         return np.clip((lw / 2 - np.minimum(dx, dy)) * k + 0.5, 0, 1)
     if kind == "carbon":
-        # 2x2 twill weave: alternating cells shaded along x or along y
         cu, cv = rx / cell, ry / cell
         fu, fv = np.mod(cu, 1.0), np.mod(cv, 1.0)
         horizontal = (np.floor(cu) + np.floor(cv)) % 2 == 0
         shade = np.where(horizontal, fu, fv)
         return np.clip(0.15 + 0.85 * shade, 0, 1)
     if kind == "brushed":
-        # brushed metal: fine streaks running along the angle direction
         seed = zlib.crc32(repr(sorted((str(a), str(b)) for a, b in spec.items())).encode())
         rng = np.random.default_rng(seed)
         amount = max(0.0, min(1.0, float(spec.get("amount", 0.5))))
@@ -334,7 +330,6 @@ def _pattern_cov(spec: dict, kind: str, size: tuple[int, int], origin: tuple[flo
         grain = rng.normal(0, 0.25, (h, w))
         return np.clip(0.5 + (streak[idx] + grain) * 0.22 * amount, 0, 1)
     if kind == "hex":
-        # honeycomb outlines; ``size`` is the distance between opposite sides of a cell
         lw = float(spec.get("line_width", 1))
         px_, py_ = rx / cell, ry / cell
         r3 = 1.7320508075688772
@@ -342,10 +337,9 @@ def _pattern_cov(spec: dict, kind: str, size: tuple[int, int], origin: tuple[flo
         bx, by = np.mod(px_ - 0.5, 1.0) - 0.5, np.mod(py_ - r3 / 2, r3) - r3 / 2
         near_a = ax * ax + ay * ay < bx * bx + by * by
         gx, gy = np.abs(np.where(near_a, ax, bx)), np.abs(np.where(near_a, ay, by))
-        edge = 0.5 - np.maximum(gx, gx * 0.5 + gy * (r3 / 2))            # 0 on the cell border
+        edge = 0.5 - np.maximum(gx, gx * 0.5 + gy * (r3 / 2))
         return np.clip((lw / 2 - edge * cell) * k + 0.5, 0, 1)
     if kind == "clouds":
-        # soft fractal noise: smoke, energy, marble, worn metal
         seed = float(spec.get("seed", 1))
         n = fxlib.fractal_noise(rx, ry, cell, int(spec.get("octaves", 4)), seed)
         contrast = float(spec.get("contrast", 1))
@@ -395,12 +389,12 @@ def paint(mask: Image.Image, spec: Any, box_px: Box, colors: dict, k: float) -> 
             span = a_to - a_from
             if abs(span) < 1e-6:
                 raise ValueError("conic gradient: 'from' and 'to' angles must differ")
-            ang = np.degrees(np.arctan2(ys - cy, xs - cx))            # 0 = 3 o'clock, clockwise
+            ang = np.degrees(np.arctan2(ys - cy, xs - cx))
             rel = np.mod((ang - a_from) * (1 if span > 0 else -1), 360.0)
             width = min(360.0, abs(span))
             t = rel / width
             if width < 360:
-                dead = 360.0 - width                                   # split the unused sector between both ends
+                dead = 360.0 - width
                 t = np.where(rel <= width, t, np.where(rel - width < dead / 2, 1.0, 0.0))
         else:
             cx = x0 + bw * float(spec.get("cx", 0.5))
@@ -414,7 +408,6 @@ def paint(mask: Image.Image, spec: Any, box_px: Box, colors: dict, k: float) -> 
         if space != "srgb":
             rgba[..., :3] = fxlib.decode_space(rgba[..., :3], space)
         if spec.get("dither", True):
-            # half-a-level noise before rounding hides 8-bit banding in soft gradients
             rng = np.random.default_rng(zlib.crc32(repr(spec.get("stops") or spec.get("colors") or "").encode()))
             rgba[..., :3] += rng.uniform(-0.5, 0.5, (h, w, 1))
             soft = (rgba[..., 3] > 0.5) & (rgba[..., 3] < 254.5)
@@ -526,7 +519,6 @@ def _inner_effects(layer: Image.Image, shape: Image.Image, fx: "Effects", k: flo
         m = _shift(m, int(round(e["dx"] * k)), int(round(e["dy"] * k)), fill=255)
         cov = np.asarray(m, dtype=np.float64)
         if e["blur"] > 0:
-            # pad with "outside" so the canvas edge does not read as an edge of the shape
             pad = int(math.ceil(e["blur"] * k * 1.6)) + 1
             cov = fxlib.blur_float(np.pad(cov, pad, constant_values=255.0), e["blur"] * k)[pad:-pad, pad:-pad]
         layer = Image.alpha_composite(layer, _soft_tint(cov * shape_f, e["color"], e.get("strength", 1.0)))
@@ -588,7 +580,6 @@ def composite(dst: Image.Image, src: Image.Image, ox: int, oy: int, blend: str =
     part = src.crop((x0 - ox, y0 - oy, x1 - ox, y1 - oy))
     base = dst.crop((x0, y0, x1, y1))
     if blend == "erase":
-        # destination-out: the element's alpha cuts a hole in what is already on this layer
         b = np.asarray(base, dtype=np.float64).copy()
         b[..., 3] *= 1.0 - np.asarray(part, dtype=np.float64)[..., 3] / 255.0
         merged = Image.fromarray((b + 0.5).astype(np.uint8), "RGBA")
@@ -639,7 +630,6 @@ def composite(dst: Image.Image, src: Image.Image, ox: int, oy: int, blend: str =
     dst.paste(merged, (x0, y0))
 
 
-# --------------------------------------------------------------------------- text layout
 
 def parse_anchor(anchor: str | None) -> tuple[str, str]:
     """Parse an anchor like 'top-left', 'center', 'middle-right', 'baseline-center' into (h, v)."""
@@ -737,7 +727,6 @@ class TextLayout:
             if not max_width:
                 raise ValueError("max_lines needs max_width (the width the text is cut to)")
             if len(self.lines) > keep:
-                # Figma "truncate text": cut the last kept line and end it with an ellipsis
                 last, limit = self.lines[keep - 1][0].rstrip(), float(max_width) * ppu
                 while last and self._width(last + "\u2026") > limit:
                     last = last[:-1].rstrip()
@@ -782,13 +771,12 @@ class TextLayout:
                 self.line_x.append(bx + self.block_w - w)
             else:
                 self.line_x.append(bx + ind)
-        # visual box in px at this density
         top, bottom = self.cap, self.descent
-        if self.shaper:          # fallback fonts (Thai, Devanagari...) reach higher and lower than the primary
+        if self.shaper:
             used = [self.shaper.chain[i] for i in self.shaper.used]
             top = max([top] + [f.ascent for f in used])
             bottom = max([bottom] + [f.descent for f in used])
-        if self.trim:                    # vertical trim: the box hugs cap height to baseline (Figma "vertical trim")
+        if self.trim:
             top, bottom = self.cap, 0.0
         self.box_px = (bx, self.baselines[0] - top, bx + self.block_w, self.baselines[-1] + bottom)
         self.arc = None
@@ -851,7 +839,7 @@ class TextLayout:
         for ch, adv in zip(text, advances):
             mid = s + adv / 2
             px, py, ux, uy = at(mid)
-            nx, ny = uy, -ux                                  # "up" for the glyph, left of the direction of travel
+            nx, ny = uy, -ux
             lift = offset - shift
             gx, gy = px + nx * lift, py + ny * lift
             rot = math.degrees(math.atan2(uy, ux))
@@ -942,7 +930,6 @@ class TextLayout:
         glyphs = []
         pos = s0
         pts = []
-        # vertical anchor moves the baseline radius so top/middle/bottom refer to the glyph band
         if self.v == "top":
             shift = -self.cap
         elif self.v == "middle":
@@ -951,14 +938,13 @@ class TextLayout:
             shift = self.descent
         else:
             shift = 0.0
-        Rb = R + shift if side == "outer" else R - shift          # glyph "up" is outward / inward
+        Rb = R + shift if side == "outer" else R - shift
         for ch, adv in zip(text, advances):
             mid = pos + adv / 2
             theta = math.radians(angle) + sign * mid / max(1e-6, Rb)
             gx, gy = cx * ppu + Rb * math.cos(theta), cy * ppu + Rb * math.sin(theta)
             rot = math.degrees(theta) + (90.0 if side == "outer" else -90.0)
             glyphs.append((ch, gx, gy, rot, adv))
-            # glyph box corners (baseline-centred, up = -y before rotation)
             ca, sa = math.cos(math.radians(rot)), math.sin(math.radians(rot))
             for lx, ly in ((-adv / 2, -self.cap * 1.25), (adv / 2, -self.cap * 1.25),
                            (-adv / 2, self.descent), (adv / 2, self.descent)):
@@ -1083,7 +1069,7 @@ class TextLayout:
         if self.decoration != "none":
             px = self.size * self.ppu
             thick = max(1.0, px * 0.07)
-            lift = -px * 0.12 if self.decoration == "underline" else px * 0.3   # below / through the x-height
+            lift = -px * 0.12 if self.decoration == "underline" else px * 0.3
             draw = ImageDraw.Draw(img)
             for (line, width), lx, by in zip(self.lines, self.line_x, self.baselines):
                 if line.strip():
@@ -1113,18 +1099,17 @@ class TextLayout:
                 draw.text((lx - ox, by - oy), line, **kwargs)
 
 
-# --------------------------------------------------------------------------- vector geometry
 
 class Geometry:
     def __init__(self) -> None:
-        self.fills: list[list[geo.Point]] = []                                  # even-odd filled outlines
-        self.lines: list[tuple[list[geo.Point], bool, float, str]] = []          # intrinsic strokes (pts, closed, width, cap)
-        self.outline: list[tuple[list[geo.Point], bool]] = []                    # for style.stroke on polygons/paths
+        self.fills: list[list[geo.Point]] = []
+        self.lines: list[tuple[list[geo.Point], bool, float, str]] = []
+        self.outline: list[tuple[list[geo.Point], bool]] = []
         self.kind = "poly"
         self.rect: tuple | None = None
         self.ellipse: tuple | None = None
         self.box: Box = (0, 0, 0, 0)
-        self.paint_box: Box | None = None      # reference box for gradients when it differs from ``box``
+        self.paint_box: Box | None = None
 
 
 def vector_geometry(el: dict, res: float) -> Geometry:
@@ -1139,7 +1124,7 @@ def vector_geometry(el: dict, res: float) -> Geometry:
             raise ValueError("rect corner must be 'round' or 'cut'")
         g.box = (x, y, x + w, y + h)
         if w == 0 or h == 0:
-            return g                      # collapsed (e.g. a bar animating from zero): draws nothing
+            return g
         smooth = float(el.get("smoothing", 0) or 0)
         g.kind, g.rect = "rect", (x, y, w, h, el.get("radius", 0), corner, smooth)
         g.fills = [geo.rect_path(x, y, w, h, el.get("radius", 0), corner, res, smooth)]
@@ -1186,11 +1171,10 @@ def vector_geometry(el: dict, res: float) -> Geometry:
         width = max(0.25, float(el.get("thickness", 4)))
         if radius <= 0:
             raise ValueError("arc radius must be > 0")
-        # gradients (conic sweeps above all) refer to the whole circle, whatever part of it is drawn
         g.paint_box = (cx - radius - width / 2, cy - radius - width / 2, cx + radius + width / 2, cy + radius + width / 2)
         if abs(end - start) < 1e-6:
             g.box = (cx, cy, cx, cy)
-            return g                      # empty sweep (a value arc at zero): draws nothing
+            return g
         full = abs(end - start) >= 360 - 1e-6
         pts = geo.arc_path(cx, cy, radius, start, start + 360 if full else end, res)
         if full:
@@ -1270,7 +1254,7 @@ def _boolean_polys(el: dict, res: float) -> list[list[geo.Point]]:
     children = el.get("children") or []
     if len(children) < 2:
         raise ValueError("boolean needs at least 2 child shapes")
-    q = 1024.0                                           # clipper works on integers: 1/1024 unit precision
+    q = 1024.0
 
     def ints(polys):
         return [[(round(x * q), round(y * q)) for x, y in p] for p in polys if len(p) >= 3]
@@ -1281,7 +1265,6 @@ def _boolean_polys(el: dict, res: float) -> list[list[geo.Point]]:
 
     clip_type = {"union": pyclipper.CT_UNION, "subtract": pyclipper.CT_DIFFERENCE,
                  "intersect": pyclipper.CT_INTERSECTION, "exclude": pyclipper.CT_XOR}[op]
-    # fold left: ((a op b) op c) ..., so "subtract" removes every later child from the first
     result = None
     for child in children:
         polys = ints(_placed_polys(child, res))
@@ -1306,8 +1289,8 @@ def _boolean_polys(el: dict, res: float) -> list[list[geo.Point]]:
 def _side_strips(rect: tuple, sides: list[str], d0: float, d1: float) -> list[list[geo.Point]]:
     """Strips along each chosen edge that hold that edge's stroke band (full length, like Figma)."""
     x, y, w, h = rect[:4]
-    inner = max(0.0, -d0) + 0.01                       # how far the band reaches inside the shape
-    far = max(0.0, d1) + 1.0 + max(w, h)              # and outside it
+    inner = max(0.0, -d0) + 0.01
+    far = max(0.0, d1) + 1.0 + max(w, h)
     x0, y0, x1, y1 = x - far, y - far, x + w + far, y + h + far
     strips = {"top": (x0, y0, x1, y + inner), "bottom": (x0, y + h - inner, x1, y1),
               "left": (x0, y0, x + inner, y1), "right": (x + w - inner, y0, x1, y1)}
@@ -1394,7 +1377,7 @@ def _line_ends(g, el: dict, pts: list, width: float, closed: bool) -> list:
         half = size * 0.6
         if kind == "triangle":
             g.fills.append([tip, (bx + nx * half, by + ny * half), (bx - nx * half, by - ny * half)])
-            new_end = (bx + ux * 0.5, by + uy * 0.5)          # the line stops inside the triangle
+            new_end = (bx + ux * 0.5, by + uy * 0.5)
             if which == "start_cap":
                 pts[0] = new_end
             else:
@@ -1413,7 +1396,7 @@ def _line_ends(g, el: dict, pts: list, width: float, closed: bool) -> list:
             h = size * 0.5
             g.fills.append([(tip[0] + ux * h, tip[1] + uy * h), (tip[0] + nx * h, tip[1] + ny * h),
                             (tip[0] - ux * h, tip[1] - uy * h), (tip[0] - nx * h, tip[1] - ny * h)])
-        else:                                                  # bar
+        else:
             g.lines.append(([(tip[0] + nx * size * 0.6, tip[1] + ny * size * 0.6),
                              (tip[0] - nx * size * 0.6, tip[1] - ny * size * 0.6)], False, width, "butt"))
     return pts
@@ -1450,7 +1433,6 @@ def _inset_rect(rect: tuple, delta: float, res: float) -> list[geo.Point] | None
     return geo.rect_path(x - delta, y - delta, nw, nh, radii, corner, res, smooth)
 
 
-# --------------------------------------------------------------------------- renderer
 
 class Renderer:
     def __init__(self, canvas: dict, theme: dict, fonts: FontLibrary, scale: float = 1.0,
@@ -1459,18 +1441,17 @@ class Renderer:
         if state:
             canvas = apply_state(canvas, state)
         self.canvas = canvas
-        self.lookup = lookup            # canvas id -> canvas dict, for instance elements
+        self.lookup = lookup
         self.depth = depth
         self.theme = theme
         self.state = state
         self.language = language
         self.strings = strings or {}
-        self.mode = canvas.get("mode") or theme.get("mode")       # Figma-style variable mode (light / dark ...)
+        self.mode = canvas.get("mode") or theme.get("mode")
         mode_vals = ((theme.get("modes") or {}).get(self.mode) or {}) if self.mode else {}
         mode_colors = {k: v for k, v in mode_vals.items() if not _is_number(v)}
         self.colors = {**theme.get("colors", {}), **mode_colors, **(canvas.get("colors") or {}),
                        **(extra_colors or {})}
-        # number variables (spacing, radius, sizes...): "$space-md" anywhere a number goes
         self.numbers = {**(theme.get("numbers") or {}), **{k: v for k, v in mode_vals.items() if _is_number(v)},
                         **(canvas.get("numbers") or {})}
         self._num_cache: dict[int, tuple] = {}
@@ -1485,14 +1466,11 @@ class Renderer:
         self.warnings: list[str] = []
         self._by_id = {e["id"]: e for e in canvas["elements"]}
 
-    # ---- public
 
     def render(self, include_background: bool = True, only: set[str] | None = None,
                only_layers: set[str] | None = None) -> Image.Image:
         pixel = self.canvas.get("pixel_art")
         if pixel and not getattr(self, "_pixel_pass", False):
-            # pixel art: draw once at 1x without anti-aliasing, snap alpha and colours, then scale by
-            # whole pixels (nearest neighbour) so every art pixel stays a crisp square
             base = self.derive(1.0)
             base._pixel_pass = True
             img = base.render(include_background, only, only_layers)
@@ -1598,7 +1576,6 @@ class Renderer:
                 raise ValueError("origin must be [x, y]") from exc
         return (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
 
-    # ---- internals
 
     def _geom_box(self, el: dict, st: dict) -> Box:
         t = el["type"]
@@ -1635,7 +1612,7 @@ class Renderer:
         if self.depth >= MAX_INSTANCE_DEPTH:
             raise ValueError(f"instances nest deeper than {MAX_INSTANCE_DEPTH} levels")
         if el.get("animation"):
-            from .animation import apply_animation           # local import: animation imports render helpers
+            from .animation import apply_animation
             anims = src.get("animations") or {}
             name = str(el["animation"])
             if name not in anims:
@@ -1695,7 +1672,7 @@ class Renderer:
 
     def _pick_ss(self, w: int, h: int) -> int:
         if self.canvas.get("pixel_art"):
-            return 1                       # hard pixel edges: sample each pixel centre once
+            return 1
         ss = SS
         while ss > 1 and w * h * ss * ss > MAX_MASK_PIXELS:
             ss -= 1
@@ -1759,7 +1736,6 @@ class Renderer:
                 rim = lines([(pts, True, abs(d) * 2, "round") for pts in closed_paths])
                 if join == "round":
                     return (inside | rim) if d > 0 else (inside & ~rim)
-                # sharp corners: the exact round offset plus the corner wedges of the miter offset
                 sharp = fill(geo.offset_shape(closed_paths, d, join, limit), "evenodd")
                 if d > 0:
                     return inside | rim | sharp
@@ -1767,7 +1743,7 @@ class Renderer:
 
             for spec in strokes:
                 if g.kind == "poly" and not g.fills and not g.outline:
-                    bands.append(np.zeros((bh, bw), dtype=np.uint8))       # collapsed shape
+                    bands.append(np.zeros((bh, bw), dtype=np.uint8))
                     continue
                 join = spec["join"] or ("miter" if g.kind == "poly" else "round")
                 band = (grown(spec["d1"], join, spec["miter_limit"])
@@ -1779,9 +1755,8 @@ class Renderer:
                         raise ValueError("stroke.sides works on rects only (Figma individual strokes)")
                     band = band & fill(_side_strips(g.rect, spec["sides"], spec["d0"], spec["d1"]), "nonzero")
                 if spec["dash"]:
-                    # dashes run along the shape edge; each dash is a wide butt-capped strip across the band
                     edge = [(pts, c) for pts, c in g.outline] if g.outline else [(pts, True) for pts in g.fills]
-                    reach = 4 * max(abs(spec["d0"]), abs(spec["d1"])) + 2.0 / f      # wide enough for corners
+                    reach = 4 * max(abs(spec["d0"]), abs(spec["d1"])) + 2.0 / f
                     pieces = []
                     for pts, c in edge:
                         pieces += geo.dash_polyline(pts, c, spec["dash"], spec["dash_offset"])
@@ -1829,7 +1804,6 @@ class Renderer:
         color = layout.color_layer(big, px0 * ss, py0 * ss)
         masks = []
         for spec in strokes:
-            # text outlines always sit outside the glyphs; an offset leaves a gap before the outline starts
             inner = max(0.0, spec["offset"])
             band = glyphs(inner + spec["width"])
             if inner > 0:
@@ -1839,7 +1813,7 @@ class Renderer:
         if layout.skew and layout.arc is None:
             lean = math.tan(math.radians(layout.skew))
             mid = (by0 + by1) / 2 - py0 * ss
-            matrix = (1, lean, -lean * mid, 0, 1, 0)       # output (x, y) samples input (x + lean * (y - mid), y)
+            matrix = (1, lean, -lean * mid, 0, 1, 0)
             shape = shape.transform(big, Image.AFFINE, matrix, resample=Image.BICUBIC)
             masks = [m.transform(big, Image.AFFINE, matrix, resample=Image.BICUBIC) for m in masks]
             if color is not None:
@@ -1947,7 +1921,6 @@ class Renderer:
         drop = ("scale_x", "scale_y", "flip_x", "flip_y", "clip") + (() if el["type"] == "path" else ("scale",))
         plain = {key: value for key, value in el.items() if key not in drop}
         if fx_ or fy_:
-            # mirror the shape, not the lighting: pre-mirror offsets and light so they come out unchanged
             plain["style"] = _mirror_style(resolve_style(el.get("style"), self.theme), fx_, fy_)
             if fx_ != fy_ and plain.get("rotation"):
                 plain["rotation"] = -float(plain["rotation"])
@@ -1955,7 +1928,7 @@ class Renderer:
             sub = self
             result = self._render_plain(plain, clip_region=False)
         else:
-            sub = self.derive(k * m)                                     # true vector scale
+            sub = self.derive(k * m)
             result = sub._render_plain(plain, clip_region=False)
             self.warnings += sub.warnings
         if result is None:
@@ -1966,7 +1939,7 @@ class Renderer:
                                  Image.LANCZOS)
         st = resolve_style(el.get("style"), self.theme)
         pvx, pvy = self._pivot(el, self._geom_box(plain, st))
-        lx = (pvx * k * m - px0) * ax / m           # pivot inside the (resized) layer
+        lx = (pvx * k * m - px0) * ax / m
         ly = (pvy * k * m - py0) * ay / m
         if fx_:
             layer = layer.transpose(Image.FLIP_LEFT_RIGHT)
@@ -2003,7 +1976,7 @@ class Renderer:
             for sp in strokes:
                 reach = max(0.0, sp["d1"])
                 if t in ("polygon", "path") and (sp["join"] or "miter") == "miter":
-                    reach *= sp["miter_limit"]            # sharp corners can poke out up to the miter limit
+                    reach *= sp["miter_limit"]
                 grow = max(grow, reach)
         gbox = (box[0] - grow, box[1] - grow, box[2] + grow, box[3] + grow)
         rot = float(el.get("rotation", 0) or 0)
@@ -2011,7 +1984,6 @@ class Renderer:
         pad = fx.pad() + soften * 1.5 + (3 if t == "text" else 1)
         pivot = self._pivot(el, box)
         if rot:
-            # the unrotated shape is drawn first, so the region must hold every orientation
             half = max(math.hypot(px_ - pivot[0], py_ - pivot[1])
                        for px_ in (gbox[0], gbox[2]) for py_ in (gbox[1], gbox[3]))
             cx, cy = pivot
@@ -2033,11 +2005,11 @@ class Renderer:
             smasks = []
         else:
             raise ValueError(f"Unknown element type '{t}'")
-        if not _is_none(st.get("texture")):        # distressed, rough edges (Figma texture effect)
+        if not _is_none(st.get("texture")):
             origin = (px0 / k, py0 / k)
             shape = fxlib.roughen(shape, st["texture"], k, origin)
             smasks = [fxlib.roughen(m, st["texture"], k, origin) for m in smasks]
-        drawn = list(zip(strokes, smasks))        # line-like elements ignore style.stroke, so this may be empty
+        drawn = list(zip(strokes, smasks))
 
         fill_spec = st.get("fill", "#ffffff" if (not strokes or t in LINE_TYPES or t == "text") else None)
         has_fill = color_layer is not None or not _is_none(fill_spec)
@@ -2060,7 +2032,7 @@ class Renderer:
             return target
 
         if t == "text":
-            layer = draw_strokes(layer, reversed(drawn))      # outlines sit behind the glyphs, widest at the back
+            layer = draw_strokes(layer, reversed(drawn))
             drawn = []
         emoji = self.__dict__.pop("_text_color", None) if t == "text" else None
 
@@ -2068,7 +2040,7 @@ class Renderer:
             if color_layer is not None:
                 fill_img = color_layer
             elif _is_fill_stack(fill_spec):
-                fill_img = None                # Figma-style fill stack: bottom to top, each with its own blend
+                fill_img = None
                 for one in fill_spec:
                     one, fill_blend = _fill_blend(one)
                     one_img = paint(shape, one, box_px, self.colors, k)
@@ -2098,8 +2070,6 @@ class Renderer:
         if st.get("adjust"):
             layer = fxlib.adjust(layer, st["adjust"], self.colors)
         if soften > 0:
-            # blur in premultiplied space so transparent pixels do not bleed dark fringes; a progressive
-            # blur ({radius, angle, start, end}) ramps from sharp to soft across the element
             prog = fxlib.progressive_t((w, h), soften_prog, box_px) if soften_prog else None
             layer = fxlib.blur_image(layer, soften * k / 2, prog)
         if not _is_none(st.get("mask")):
@@ -2124,7 +2094,6 @@ class Renderer:
             raise ValueError(f"style.blend must be one of {', '.join(BLENDS)}")
         return layer, px0, py0, blend
 
-    # ---- layers
 
     def layer_props(self, layer: dict) -> dict:
         """Validated compositing settings of a layer."""
@@ -2175,7 +2144,7 @@ class Renderer:
         r_px = radius * self.k / 2
         glass = st.get("glass")
         reach = r_px * 3 + (float(glass.get("depth", 14)) * self.k * 2 if isinstance(glass, dict) else 30 * self.k)
-        pad = int(math.ceil(reach if glass else r_px * 3)) + 1     # work on a larger patch so edges stay clean
+        pad = int(math.ceil(reach if glass else r_px * 3)) + 1
         x0, y0 = max(0, ox + margin - pad), max(0, oy + margin - pad)
         x1, y1 = min(img.width, ox + margin + w + pad), min(img.height, oy + margin + h + pad)
         if x1 <= x0 or y1 <= y0:
@@ -2285,8 +2254,6 @@ class Renderer:
             plain = (not props["style"] and props["opacity"] >= 1 and props["blend"] == "normal"
                      and not props["clip"] and not erases)
             if plain and not clipped_onto:
-                # nothing special about this layer: draw straight onto the picture, so element blend
-                # modes see everything beneath them
                 if shown:
                     self._draw_elements(img, elements)
                 base_alpha, base_visible = None, True
@@ -2294,8 +2261,8 @@ class Renderer:
             clip_alpha = base_alpha if props["clip"] else None
             if props["clip"] and (base_alpha is None or not base_visible):
                 if not base_visible:
-                    continue                       # its base is hidden, so the clipped layer is hidden too
-                clip_alpha = None                  # nothing below to clip to: behaves like a normal layer
+                    continue
+                clip_alpha = None
             final, content_alpha = self.layer_image(layer, elements, clip_alpha)
             if not props["clip"]:
                 base_alpha, base_visible = content_alpha, True
@@ -2353,7 +2320,6 @@ def _component_overrides(src: dict, el: dict, lookup) -> dict:
         if not isinstance(variant, dict):
             raise ValueError('variant must be like {"size": "large", "state": "hover"}')
         for prop, value in variant.items():
-            # same naming as set_state, which stores "size=large" as "size_large"
             name = re.sub(r"[^\w-]+", "_", f"{prop}={value}".strip().replace("İ", "i")).strip("_").lower()
             src = apply_state(src, name)
     else:
@@ -2529,7 +2495,6 @@ def shift_element(el: dict, dx: float, dy: float) -> None:
         el["arc"] = dict(el["arc"], cx=float(el["arc"]["cx"]) + dx, cy=float(el["arc"]["cy"]) + dy)
 
 
-# --------------------------------------------------------------------------- preview helpers
 
 def checkerboard(size: tuple[int, int], cell: int = 12, dark: bool = True) -> Image.Image:
     w, h = size
@@ -2554,7 +2519,6 @@ def backdrop(size: tuple[int, int], background: str, colors: dict) -> Image.Imag
     if key == "light":
         return Image.new("RGBA", size, (240, 240, 244, 255))
     if key == "game":
-        # a busy mid-tone gradient standing in for a game scene behind the HUD
         w, h = size
         ys, xs = np.mgrid[0:h, 0:w].astype(np.float64)
         arr = np.empty((h, w, 4), dtype=np.uint8)
