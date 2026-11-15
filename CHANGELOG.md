@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0 - 2026-11-16
+
+- Lottie: plain shapes and text export as vector shape layers (solid / gradient fill, stroke, animated colour).
+- Animation: `motion` property moves along a path (optional rotate), `motion_blur` in export_animation.
+- Style: `feather` softens edges.
+- Skill rewritten; code comments removed.
+
 ## 0.8.0 - 2026-11-16
 
 Closes every applicable gap found against Figma and Penpot:

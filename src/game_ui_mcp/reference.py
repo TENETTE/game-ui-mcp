@@ -62,6 +62,7 @@ exact vector outline (strokes and shadows follow the cut; prefer it to blend "er
 smoothing 0..1 gives Figma-style smoothed "squircle" corners; arrange_elements(wrap=true) flows items onto new
 lines; set_theme(modes={...}, mode=...) switches every $token between light / dark / team / seasonal sets.
 export_svg writes an editable vector SVG for Figma, Penpot, Illustrator and the web.
+style.feather: px softens only the edge (soft light spots, fog, beams).
 style.backdrop_blur: px blurs whatever is already drawn beneath the shape (frosted glass panels; give
   its shadow "knockout": true so the shadow does not show through the glass);
 stroke.sides ["top", "bottom"...] strokes only some edges of a rect (tab underlines, dividers);
@@ -136,6 +137,10 @@ keyframed (x, width, rotation, radius, end_angle, style.glow.blur, style.fill, .
 (move), scale / scale_x / scale_y (around the pivot) and opacity. Check motion with preview_animation (a
 filmstrip of frames) and export with export_animation (sprite sheet, frames, GIF/APNG/WebP, Lottie JSON, or
 keyframe JSON). Eases include spring ("spring-out"). Animation frames render in parallel.
+property "motion" travels along a path: values 0..1, path {"d": "M 0 0 C ...", "rotate": true}.
+export_animation motion_blur 4-8 averages sub-frames (camera shutter) for fast spins and swipes.
+Lottie: plain shapes and text become vector shape layers; effects move as pictures; animated glow /
+shape becomes one picture per frame (the result lists which).
 """,
     "export": """\
 Which export to use:

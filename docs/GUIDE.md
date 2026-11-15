@@ -145,7 +145,7 @@ Roblox'ta görselleri Studio'ya kendin yüklemen gerekir (server internete çık
 - `backdrop_blur` yalnızca aynı canvas'ta altta çizilmiş şeyleri bulanıklaştırır (oyundaki gerçek sahneyi değil; motorda buzlu cam için `BackgroundBlur` gibi motor özelliği gerekir). Stilli, clip'li ya da yarı saydam bir katmandaysa yalnızca o katmanın içindekileri görür. `scale_x` / `flip` verilmiş elemanlarda bulanık alan ölçeklenmemiş şekle göre kesilir.
 - `stroke.sides` yalnızca dikdörtgenlerde çalışır.
 - Web çıktısında cam, ışık, doku, shader ve özel desenler o elemanın resmi olarak gider; animasyonlarda yalnızca hareket, dönme, ölçek ve saydamlık CSS olur. Rive `.riv` biçimi kapalı olduğu için yok; Lottie var.
-- Lottie'de renk / glow gibi değişen görünüşler kare başına bir resim olur (dosya büyür); hareket, dönme, ölçek ve saydamlık gerçek animasyon kalır.
+- Lottie'de sade şekil ve yazılar vektör katman olur (renk değişimi dahil); efektli parçalar resim olarak hareket eder; glow ya da şekli değişen parçalar kare başına bir resim olur (dosya büyür).
 - `vectorize_image` düz renkli çizimlerde iyi sonuç verir; fotoğraflar posterize olur.
 - Figma ve Penpot dosyası içe aktarma yok (Figma hesabınız ve internet gerekir; proje tamamen yerel).
 - `export_svg`: shader / desen dolgusu, `light`, iç gölge, bulanıklık, özel karışım modları, clip'li ya da stilli katmanlar, görseller ve yay üstü yazı SVG'ye o elemanın resmi olarak gömülür; `erase` SVG'de karşılığı olmadığı için atlanır (delik için `boolean_elements` kullan). Dış konturlar SVG'de dolgunun altına çizilir; yarı saydam dolguda konturun iç yarısı görünür.
