@@ -370,22 +370,30 @@ def export_theme(format: str = "json", path: str | None = None):
 # --------------------------------------------------------------------------- prototype
 
 @tool
-def set_link(canvas: str, id: str, target: str | None):
-    """Make an element clickable in export_prototype: target is another canvas id (a screen), "back",
-    or null to remove the link. Hover / pressed looks come from the element's states automatically
+def set_link(canvas: str, id: str, target: str | None, mode: str = "navigate"):
+    """Make an element clickable in export_prototype and export_web: target is another canvas id (a screen),
+    "back", a URL (mode "url"), or null to remove the link. mode: "navigate" (go to the screen), "overlay"
+    (open the screen on top - menus, dialogs, tooltips; its "back" link closes it) or "url". Hover / pressed looks come from the element's states automatically
     (an instance whose source has "hover" / "pressed" states, or this canvas's "hover" / "pressed"
     states that override this element)."""
     st = store()
     c = st.get(canvas)
     el = st.find(c, id)
     links = c.setdefault("links", {})
+    mode = str(mode).lower()
+    if mode not in ("navigate", "overlay", "url"):
+        raise ValueError("mode must be 'navigate', 'overlay' or 'url'")
     if target is None:
         links.pop(el["id"], None)
+    elif mode == "url":
+        if not re.match(r"^(https?://|mailto:|#)", str(target)):
+            raise ValueError("a url link must start with https://, http://, mailto: or #")
+        links[el["id"]] = {"target": str(target), "mode": "url"}
     else:
         if target != "back":
             st.get(target)
             target = slugify(target)
-        links[el["id"]] = target
+        links[el["id"]] = target if mode == "navigate" else {"target": target, "mode": mode}
     if not links:
         c.pop("links", None)
     st.save_canvas(c)

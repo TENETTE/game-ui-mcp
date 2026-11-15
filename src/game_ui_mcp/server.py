@@ -2350,6 +2350,42 @@ def export_svg(canvas: str, path: str | None = None, include_background: bool = 
 
 
 @tool
+def export_web(canvases: list[str] | str, out_dir: str | None = None, layout: str = "fit",
+               language: str | None = None, include_background: bool = True, image_scale: float = 2):
+    """Export canvases as a working website: one HTML page per canvas (the first is index.html), with
+    styles.css, app.js and an assets folder - open index.html in a browser or upload the folder.
+
+    Rects and ellipses become CSS boxes (gradients, borders, shadows, blur, backdrop-filter), text stays
+    real, selectable text with its fonts copied in, other shapes become inline SVG, and only effects the
+    web cannot draw the same way become pictures. Theme colours stay CSS variables (set
+    <html data-theme="light"> to switch a mode). Interactivity: set_link targets become page links
+    (mode "overlay" opens a page as a dialog, "url" an external link); "hover" / "pressed" / "focused"
+    states become CSS; move / rotate / scale / fade animations become CSS keyframes (they autoplay);
+    elements with the same id animate between pages (smart animate via View Transitions);
+    canvas focus_order sets keyboard order; an element's "fixed": true keeps it in place while scrolling.
+    layout: "fit" scales each page to the window like a prototype; "responsive" uses the elements' pins
+    (set_pin) as CSS anchors so the page adapts to any window size and scrolls when taller.
+    """
+    from . import webexport
+    st = store()
+    names = [canvases] if isinstance(canvases, str) and not canvases.strip().startswith("[") else (_maybe_json(canvases) or [])
+    if not names:
+        raise ValueError("canvases must name at least one canvas")
+    if layout not in ("fit", "responsive"):
+        raise ValueError("layout must be 'fit' or 'responsive'")
+    pages = [st.get(n) for n in names]
+    for c in pages:
+        st.require_glyphs(c, language)
+    folder = _out_dir(out_dir, f"web/{pages[0]['id']}")
+    report = webexport.build(st, pages, folder, layout, language, include_background, image_scale)
+    result: dict = {"folder": str(folder), "open": str(folder / "index.html"), "pages": report["pages"],
+                    "embedded_as_image": report["picture"]}
+    if report["notes"]:
+        result["notes"] = report["notes"]
+    return result
+
+
+@tool
 def export_pdf(canvases: list[str] | str, path: str | None = None, include_background: bool = True,
                image_scale: float = 2, language: str | None = None, state: str | None = None):
     """Save one or more canvases as a vector PDF (one page each): print, client review, a kit book.
