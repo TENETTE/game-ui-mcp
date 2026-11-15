@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.0 - 2026-11-16
+
+Closes every applicable gap found against Figma and Penpot:
+
+- Live auto layout (re-flows on every change), fill / min / max sizing, grid spans, group items.
+- Component variants (states named prop=value), optional parts (hide / show), slots.
+- Number tokens, W3C DTCG token import / export, letter case, spring easing, diamond gradients.
+- Glass refraction, progressive blur, noise modes, edge texture, luminance masks and clips, per-fill blend,
+  image crop and exposure / temperature / shadows / highlights.
+- Line ends (arrows...), tapered / variable-width / wiggly strokes.
+- Text: lists, paragraph spacing, indent, OpenType features, variable axes, vertical trim, colour emoji,
+  text on any path, text to vector outlines.
+- vectorize_image, path simplify, find_elements, restyle replace_text, version diff, notes, focus order.
+- New outputs: vector PDF (export_pdf), Lottie (export_animation lottie) and websites (export_web: HTML / CSS
+  with links, overlays, hover states, CSS animations, View Transitions, responsive pins).
+- Fix: export_theme had lost its tool registration.
+
 ## 0.7.0 - 2026-11-15
 
 - Server instructions cut to ~1.8k characters: clients truncate long instructions (Claude Code near 4k),

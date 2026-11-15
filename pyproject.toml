@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "game-ui-mcp"
-version = "0.7.0"
+version = "0.8.0"
 description = "Let your AI agent design, animate and export game and app UI. Local MCP server, no image model."
 readme = "README.md"
 license = "MIT"

@@ -43,8 +43,17 @@ Style object (every key optional; `style` may also be a theme style name, or {"u
   inner_shadow {color, blur, dx, dy}, inner_glow {color, blur}, bevel {size, highlight, shadow},
   light {angle, altitude, size, depth, profile: round|chisel, highlight, shadow, gloss, soften} - lights the
     shape as a raised 3D surface (angle = where the light comes from; 225 = top-left),
-  mask: a fill spec whose alpha fades the element out (e.g. a linear gradient from opaque to "#000@0"),
-  adjust {brightness, contrast, saturation: -1..1, hue: degrees, tint: color, invert}.
+  mask: a fill spec whose alpha fades the element out (e.g. a linear gradient from opaque to "#000@0");
+    mask_mode "luminance" uses its brightness instead. An element's clip_mode "luminance" masks it by the
+    brightness of the clip target instead of its shape.
+  adjust {brightness, contrast, saturation, exposure, temperature, shadows, highlights: -1..1, hue: degrees,
+    tint: color, invert}.
+  blur and backdrop_blur take a number or a progressive blur {radius, angle, start, end} (sharp -> soft).
+  backdrop_blur blurs what is beneath (frosted glass); glass {refraction, depth, dispersion, frost, light,
+    intensity} bends, splits and rim-lights what is beneath (glass buttons, liquid-glass panels).
+  noise: 0..1, or {mode: mono | duo | multi, amount, size, colors: [c1, c2], density} (film grain, speckle).
+  texture: number or {amount, size, seed} roughens the edges (worn, stamped, torn, hand-cut looks).
+  A fill list entry may carry its own blend: [gradient, {"type": "radial", ..., "blend": "overlay"}].
   shadow / glow / inner_shadow / inner_glow also accept a list for stacked effects.
 """,
     "design": """\
@@ -62,7 +71,18 @@ make_palette(base) builds a 50-950 colour scale (even perceived lightness, same 
 step, matching accent hues) and can add it to the theme or a mode. restyle swaps a colour or font across
 every canvas and theme style at once (Figma "selection colours"), or sets props on matching elements.
 path_ops: flatten (any shape -> plain path), offset (grow / shrink a shape: inner panels, even rims),
-outline_stroke (a stroke or line -> filled shape that can take gradients, effects and booleans).
+outline_stroke (a stroke or line -> filled shape that can take gradients, effects and booleans), simplify;
+on text, flatten turns the glyphs into an editable path. find_elements selects matching objects (same look,
+colour, font, text). restyle replace_text finds and replaces copy. canvas_version diff compares versions.
+Tokens: set_theme(numbers={"space-md": 16}) then "$space-md" in any number (radius, width, gap, size,
+blur...; not x / y), per mode too; set_theme(tokens=<W3C DTCG json>) imports Tokens Studio / Penpot tokens,
+export_theme("dtcg") writes them. Element "note" adds a designer note (shown in specs and as a web tooltip).
+Live auto layout: arrange_elements(..., container=id, live=true) keeps re-flowing on every change (a
+button hugs its label, lists re-flow); children take layout_size {width / height: "fill" | number, min_*,
+max_*}, span [cols, rows] in grids, absolute true. Components: add_instance variant {prop: value} (states
+named "prop=value"), hide / show [ids], slots {placeholder: canvas}. vectorize_image turns a picture into
+editable vector paths. Lines take start_cap / end_cap (arrow, triangle, circle, square, diamond, bar),
+taper, width_profile and wiggle. Fills also take {"type": "diamond", ...}.
 """,
     "layers": """\
 Layers (create_layer): a canvas is a stack of layers, bottom to top; new elements go to the active layer.
@@ -86,8 +106,12 @@ weight 100-900 or "bold"..., anchor ("top-left", "center", "middle-left", "botto
 "center" is optically centred on capital height), align for multi-line text.
 max_width wraps lines; fit_width shrinks the size until the text fits; max_lines (with max_width) cuts the
 text and ends it with "..."; decoration "underline" | "strikethrough"; letter_spacing (px); line_height;
-uppercase true or "tr" (Turkish i -> I-dot rules); italic; skew; stroke = outline behind the glyphs.
-arc {cx, cy, radius, angle, side: outer|inner} sets text on a circle (Latin, Greek, Cyrillic).
+uppercase true or "tr" (Turkish i -> I-dot rules); case upper | lower | title | tr-upper | small-caps;
+italic; skew; stroke = outline behind the glyphs. list "bullet" | "number", paragraph_spacing, indent;
+features ["tnum", "smcp", "ss01"...] (OpenType; warns when the font lacks one); axes {"wdth": 75, ...};
+trim true (box hugs cap height to baseline). Colour emoji are drawn in colour.
+arc {cx, cy, radius, angle, side: outer|inner} sets text on a circle; path {"d": svg path} or {"points"}
+runs it along any path (Latin, Greek, Cyrillic).
 lang ("ar", "he", "hi", "th", "ja", "zh-Hans", "zh-Hant", "ko", "tr"...): Arabic, Hebrew, Indic, Thai and
 CJK are shaped with HarfBuzz and fall back to bundled Noto / system fonts. Always set lang for Han text.
 {placeholders} in text are filled from canvas vars, template rows and string tables (set_strings; render
@@ -110,7 +134,8 @@ canvas to the painted area.
 Animation: create_animation, then set_keyframes per (target, property). Any numeric or color property can be
 keyframed (x, width, rotation, radius, end_angle, style.glow.blur, style.fill, ...) plus the helpers dx, dy
 (move), scale / scale_x / scale_y (around the pivot) and opacity. Check motion with preview_animation (a
-filmstrip of frames) and export with export_animation (sprite sheet, frames, GIF/APNG/WebP, or keyframe JSON).
+filmstrip of frames) and export with export_animation (sprite sheet, frames, GIF/APNG/WebP, Lottie JSON, or
+keyframe JSON). Eases include spring ("spring-out"). Animation frames render in parallel.
 """,
     "export": """\
 Which export to use:
@@ -119,11 +144,15 @@ Which export to use:
   export_png     PNG / WebP / JPG / ICO at scales [1, 2], exact sizes, or preset "ios" | "android" | "web"
                  for whole density sets; trim, ids / group, state, language.
   export_svg     editable vector SVG for Figma, Penpot, Illustrator, web; image_scale for embedded pictures.
+  export_pdf     vector PDF, one page per canvas (print, client review, kit books); text as outlines.
+  export_web     a working website: HTML / CSS pages with live text, links, overlays, hover CSS,
+                 CSS animations, smart-animate page transitions; layout "fit" or "responsive" (pins).
   export_layers  one image per layer or group (+ layout JSON with positions and pivots); format png | webp |
                  jpg | svg (one layered SVG). For engine-animated parts (needles, fills, glows).
   export_psd     layered Photoshop file (opens in Photopea, Krita, GIMP).
   export_atlas   many canvases packed into one texture + frame JSON.
-  export_animation  sprite sheet, frames, GIF / APNG / WebP, or keyframe JSON for engine tweens.
+  export_animation  sprite sheet, frames, GIF / APNG / WebP, Lottie JSON (apps, web, Lottie players), or
+                 keyframe JSON for engine tweens.
   export_screen  a whole screen as an engine scene: Godot .tscn, Roblox LocalScript, Unity UXML + USS;
                  texts stay live engine text, pins become anchors.
   export_spec / export_theme / export_prototype / export_bitmap_font: developer spec, design tokens

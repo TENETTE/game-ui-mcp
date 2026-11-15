@@ -73,24 +73,25 @@ JSON config'te: `"args": ["--from", "game-ui-mcp[gpu] @ git+https://github.com/T
 - **Ekranlar:** hazır cihaz boyutları ve güvenli alanlar, kenara sabitleme, çok çözünürlük önizleme, renk körlüğü simülasyonu
 - **Durum ve veri:** hover / pressed / disabled, tek şablondan onlarca kart, dil tabloları ve sahte (pseudo) dillerle taşma testi
 - **Animasyon:** her özellik keyframe + ease ile; GIF, sprite sheet, kare dizisi ya da motorun tween'i için JSON
-- **Teslim:** Figma / Penpot'ta düzenlenebilir vektör SVG, iOS / Android / web boyut setleri (`preset`), PNG / WebP / JPG, katman katman (PNG, JPG, WebP ya da katmanlı SVG), PSD, atlas, bitmap font, uygulama ikonu, tıklanabilir HTML prototip, motor sahneleri
+- **Web sitesi:** gerçek HTML / CSS sayfalar: canlı yazı ve fontlar, linkler ve açılır pencereler, hover durumları, CSS animasyonları, sayfalar arası yumuşak geçiş, pencereye sığan ya da duyarlı (responsive) yerleşim
+- **Teslim:** vektör PDF, Lottie animasyon, Figma / Penpot'ta düzenlenebilir vektör SVG, iOS / Android / web boyut setleri (`preset`), PNG / WebP / JPG, katman katman (PNG, JPG, WebP ya da katmanlı SVG), PSD, atlas, bitmap font, uygulama ikonu, tıklanabilir HTML prototip, motor sahneleri
 
 Ayrıntılı özellik listesi, stil nesnesi, katmanlar, animasyon ve motor tabloları: **[docs/GUIDE.md](docs/GUIDE.md)**
 
-## Tool'lar (78)
+## Tool'lar (82)
 
 | Grup | Tool'lar |
 | --- | --- |
 | Canvas | `create_canvas`, `list_canvases`, `get_canvas`, `update_canvas`, `duplicate_canvas`, `delete_canvas`, `fit_canvas`, `resize_canvas`, `canvas_version` |
 | Katman | `create_layer`, `update_layer`, `delete_layer`, `set_layer` |
 | Çizim | `add_rect`, `add_ellipse`, `add_line`, `add_polygon`, `add_path`, `add_arc`, `add_ticks`, `add_text`, `add_image`, `add_instance`, `add_svg` |
-| Düzenleme | `update_element`, `delete_elements`, `duplicate_element`, `boolean_elements`, `path_ops`, `restyle`, `move_elements`, `reorder_element`, `align_elements`, `arrange_elements`, `scatter`, `copy_elements`, `set_pin`, `batch`, `undo`, `redo` |
+| Düzenleme | `update_element`, `delete_elements`, `duplicate_element`, `boolean_elements`, `path_ops`, `restyle`, `find_elements`, `vectorize_image`, `move_elements`, `reorder_element`, `align_elements`, `arrange_elements`, `scatter`, `copy_elements`, `set_pin`, `batch`, `undo`, `redo` |
 | Durum, veri, dil | `set_state`, `delete_state`, `generate_from_template`, `set_strings`, `get_strings` |
 | Denetim | `review_canvas`, `inspect_pixels`, `view_image`, `preview_nine_slice` |
 | Animasyon | `create_animation`, `set_keyframes`, `delete_keyframes`, `get_animations`, `delete_animation`, `preview_animation`, `export_animation` |
 | Tema ve bilgi | `set_theme`, `get_theme`, `make_palette`, `list_fonts`, `measure_text`, `guide` |
 | Önizleme | `preview`, `preview_resolutions`, `contact_sheet` |
-| Dışa aktarma | `export_png`, `export_svg`, `export_asset`, `export_layers`, `export_psd`, `export_atlas`, `export_bitmap_font`, `write_engine_helpers` |
+| Dışa aktarma | `export_png`, `export_svg`, `export_pdf`, `export_web`, `export_asset`, `export_layers`, `export_psd`, `export_atlas`, `export_bitmap_font`, `write_engine_helpers` |
 | Teslim | `export_spec`, `export_theme`, `set_link`, `export_prototype`, `export_screen` |
 
 Bakmaya yarayan tool'lar (`preview`, `get_*`, `review_canvas`...) salt okunur, `delete_*` ise yıkıcı olarak işaretli; istemciler buna göre onay sorar. Hatalar AI'a neyin yanlış olduğunu ve nasıl düzelteceğini söyler.
@@ -109,7 +110,7 @@ Canvas'lar, tema ve dışa aktarmalar `~/GameUI` klasöründe durur (oturum kapa
 
 - Karakter, illüstrasyon, fotoğraf üretmez; hazır görseli `add_image` ile yerleştirebilirsin.
 - Motor tarafı dosyalar üretiliyor ve biçimleri test ediliyor, ama Unity / Unreal / Godot / Roblox içinde henüz denenmedi.
-- 78 tool'un tanımı yaklaşık 25 bin token; tool'ları gerektikçe yükleyen istemcilerde (Claude Code) bu maliyet düşer.
+- 82 tool'un tanımı yaklaşık 27 bin token; tool'ları gerektikçe yükleyen istemcilerde (Claude Code) bu maliyet düşer.
 
 Tam liste: [docs/GUIDE.md](docs/GUIDE.md#sınırlar).
 

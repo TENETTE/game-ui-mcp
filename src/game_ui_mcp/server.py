@@ -57,9 +57,9 @@ Style keys: fill, stroke {color, width, align, dash, sides}, shadow, glow, inner
 light (3D lighting), blur, backdrop_blur (frosted glass), mask, adjust, opacity, blend, noise.
 
 Full reference: call guide(topic) before using a feature you have not used yet in this session.
-Topics: fills, shader, style, design (boolean shapes, smoothed corners, modes, wrap, glass, truncation,
-versions, palettes, restyle, path ops), layers, geometry (angles, rotation, skew, scale, flip), text,
-reuse (instances, arrays, SVG import), review, animation, export.
+Topics: fills, shader, style (glass, progressive blur, noise, texture, masks), design (booleans, live auto
+layout, variants and slots, tokens, palettes, restyle, path ops, vectorize), layers, geometry, text (lists,
+OpenType, emoji, text on a path), reuse, review, animation (Lottie), export (PDF, website, SVG, engines).
 """
 
 mcp = _Server("game-ui-mcp", instructions=INSTRUCTIONS)
