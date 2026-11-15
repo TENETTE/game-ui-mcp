@@ -1,26 +1,38 @@
+<p align="center"><img src="docs/banner.png" alt="game-ui-mcp" width="100%"></p>
+
+<p align="center">
+  <a href="https://github.com/TENETTE/game-ui-mcp/actions/workflows/tests.yml"><img src="https://github.com/TENETTE/game-ui-mcp/actions/workflows/tests.yml/badge.svg" alt="tests"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/python-3.10%2B-3776AB.svg" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/MCP-server-7c5cff.svg" alt="MCP server">
+  <img src="https://img.shields.io/badge/GPU-optional%20CUDA-76b900.svg" alt="optional GPU">
+</p>
+
+<p align="center"><b>English</b> · <a href="README.tr.md">Türkçe</a></p>
+
 # game-ui-mcp
 
-Bir AI'ın (Claude, Cursor, VS Code Copilot... MCP destekleyen her istemci) **oyun ve uygulama arayüzü çizmesini, canlandırmasını ve Unity / Unreal / Godot / Roblox'a teslim etmesini** sağlayan yerel MCP server.
+A local [MCP](https://modelcontextprotocol.io) server that lets an AI (Claude, Cursor, VS Code Copilot, any MCP client) **draw, animate and ship game and app UI**: panels, buttons, HUDs, gauges, menus, icons and whole screens, ready for Unity, Unreal, Godot, Roblox, Figma and Penpot.
 
-- Görsel üreten bir model yok, internete çıkmıyor: AI şekil, yazı, stil ve keyframe tool'larını çağırır, server bunu temiz PNG'ye çevirir.
-- AI çizdiğine bakar, `review_canvas` ile hatalarını bulur (taşan yazı, düşük kontrast, eksik harf), düzeltir.
-- Çıktı doğrudan motora girer: 9-slice ayarlı sprite, katmanlar, PSD, animasyon, hatta hazır sahne (Godot `.tscn`, Unity UXML, Roblox script).
+- **No image model, no internet.** The AI calls shape, text, style and keyframe tools; the server turns them into clean, deterministic vector-quality art.
+- **It checks its own work.** `preview` shows the AI what it drew, `review_canvas` finds clipped shadows, low contrast, overflowing or missing-glyph text, blurry half-pixel edges.
+- **Engine-ready output.** 9-slice sprites, layers, PSD, editable vector SVG, iOS / Android density sets, sprite sheets, and scenes (Godot `.tscn`, Unity UXML/USS, Roblox Luau).
 
-![Örnek kit](examples/kit_sheet.png)
+![UI kit](examples/kit_sheet.png)
 
-![Gerçekçi yarış HUD'u](examples/racing_hud.png)
+![Realistic racing HUD](examples/racing_hud.png)
 
-Tasarım aracı özellikleri: boolean şekiller, yumuşatılmış köşe, dolgu yığını, satır atlayan yerleşim, buzlu cam, tek kenar kontur, "..." ile kırpılan yazı ve tek satırla açık / koyu mod. Aynı ekran Figma ve Penpot'ta düzenlenebilir [vektör SVG](examples/design_tools.svg) olarak da çıkıyor:
+Design-tool features in one screen (boolean shapes, smoothed corners, fill stacks, wrapping layout, frosted glass, single-side strokes, truncated text, light / dark modes), also exported as an [editable SVG](examples/design_tools.svg):
 
-![Tasarım araçları](examples/design_tools.png)
+![Design tools](examples/design_tools.png)
 
-| Buton girişi + parlama | Devir saati | Menü girişi ve seçim |
+| Button entrance + shine | Rev gauge | Menu entrance and selection |
 | --- | --- | --- |
-| ![Buton animasyonu](examples/anim_button.gif) | ![Gösterge animasyonu](examples/anim_gauge.gif) | ![Menü animasyonu](examples/anim_menu.gif) |
+| ![Button animation](examples/anim_button.gif) | ![Gauge animation](examples/anim_gauge.gif) | ![Menu animation](examples/anim_menu.gif) |
 
-## Kurulum
+## Install
 
-[uv](https://docs.astral.sh/uv/) kurulu olsun (`winget install astral-sh.uv` ya da `pip install uv`). Clone, venv ya da Python yolu gerekmez; ilk açılışta kendini indirir (~30 sn).
+You need [uv](https://docs.astral.sh/uv/) (`winget install astral-sh.uv`, `brew install uv` or `pip install uv`). No clone, venv or Python path needed; the first start downloads everything (~30 s).
 
 **Claude Code**
 
@@ -28,7 +40,7 @@ Tasarım aracı özellikleri: boolean şekiller, yumuşatılmış köşe, dolgu 
 claude mcp add game-ui -s user -- uvx --from git+https://github.com/TENETTE/game-ui-mcp game-ui-mcp
 ```
 
-**Claude Desktop, Cursor, Windsurf** (istemcinin MCP config dosyasına; VS Code'da `.vscode/mcp.json` içinde anahtar `mcpServers` yerine `servers`):
+**Claude Desktop, Cursor, Windsurf** (the client's MCP config file; in VS Code `.vscode/mcp.json` uses `servers` instead of `mcpServers`):
 
 ```json
 {
@@ -41,75 +53,75 @@ claude mcp add game-ui -s user -- uvx --from git+https://github.com/TENETTE/game
 }
 ```
 
-Claude Desktop'ta dosya: Ayarlar → Developer → Edit Config. Kaydettikten sonra uygulamayı tamamen kapatıp aç.
-
-**CPU ya da GPU sürümü:** varsayılan kurulum (`[cpu]`) her bilgisayarda çalışır. NVIDIA ekran kartın varsa `[gpu]` sürümü shader dolgularını ve büyük gölge / glow bulanıklıklarını ekran kartında hesaplar (CuPy + CUDA 12, ilk kurulumda ~1 GB indirir). Komuttaki paket adının sonuna hangisini yazdığın belirler:
+**CPU or GPU build.** The default (`[cpu]`) runs everywhere. With an NVIDIA card, `[gpu]` computes shader fills and large blurs on the GPU (CuPy + CUDA 12, ~1 GB download; 9-11x faster on an RTX 4060 Ti). Pick it in the package name:
 
 ```bash
 claude mcp add game-ui -s user -- uvx --from "game-ui-mcp[gpu] @ git+https://github.com/TENETTE/game-ui-mcp" game-ui-mcp
 ```
 
-JSON config'te: `"args": ["--from", "game-ui-mcp[gpu] @ git+https://github.com/TENETTE/game-ui-mcp", "game-ui-mcp"]`. pip ile: `pip install "game-ui-mcp[gpu] @ git+https://github.com/TENETTE/game-ui-mcp"` (CPU için `[cpu]` ya da hiçbir şey). GPU yoksa, sürücü eskiyse ya da CUDA açılamazsa `[gpu]` sürümü de sessizce CPU'ya döner; sonuç aynıdır. GPU'yu kapatmak için config'e `"env": {"GAME_UI_MCP_GPU": "0"}`.
+Without a working CUDA device the `[gpu]` build quietly falls back to the CPU with identical results; `GAME_UI_MCP_GPU=0` turns it off.
 
-**İsteğe bağlı skill:** [`skill/game-ui-mcp/SKILL.md`](skill/game-ui-mcp/SKILL.md) AI'a bu tool'ları iyi kullanmayı öğretir (tema, katman sırası, 9-slice, kontrol turu). Claude Code'da `~/.claude/skills/` altına kopyala.
+**Optional skill:** [`skill/game-ui-mcp/SKILL.md`](skill/game-ui-mcp/SKILL.md) teaches the model the craft (themes, layer order, lighting, 9-slice rules, a review pass, engine hand-off). In Claude Code copy the folder to `~/.claude/skills/`.
 
-## Şunu iste
+## Try asking
 
-- "Fantastik bir RPG için altın kenarlı envanter paneli ve üç durumlu buton çiz, Unity'ye 9-slice olarak aktar."
-- "Yarış oyunu için devir saati çiz, ibresi dönen bir animasyon yap, parçaları ayrı katman olarak `D:\Oyun\UI` klasörüne ver."
-- "Bu ana menüyü Arapça ve Japonca'ya çevir, taşan yazı var mı kontrol et."
-- "Bu ekran görüntüsündeki HUD'un renk paletini al ve aynı tarzda bir skor tablosu yap."
+- "Draw a gold-trimmed inventory panel and a three-state button for a fantasy RPG, export them to Unity as 9-slice."
+- "Make a rev gauge for a racing game with a needle animation, and give me the parts as separate layers in `D:\Game\UI`."
+- "Translate this main menu to Arabic and Japanese and check for overflowing text."
+- "Take the palette from this screenshot and build a scoreboard in the same style, light and dark."
+- "Design an iOS app icon and export the @1x/@2x/@3x set plus an SVG for Figma."
 
-## Ne yapabiliyor
+## What it can do
 
-- **Çizim:** dikdörtgen (Figma tarzı yumuşak "squircle" köşe dahil), elips, çokgen, yay, kadran çizgisi, SVG path ve SVG içe aktarma, boolean (birleştir / çıkar / kesiştir / dışla), başka canvas'ı bileşen olarak kullanma
-- **Stil:** gradient, doku, üst üste dolgu yığını, arka plan bulanıklığı (buzlu cam), tek kenara kontur, gölge, glow, bevel, yönlü ışık, 13 karışım modlu katmanlar, AI'ın kendi yazdığı piksel formülleri (shader dolgusu)
-- **Tasarım sistemi:** renk token'ları, isimli stiller, açık / koyu / takım renkleri gibi modlar (Figma variables), satır atlayan otomatik yerleşim, isimli sürüm geçmişi
-- **Yazı:** 10 gömülü font + sistem fontları, "..." ile kırpma, altı / üstü çizili yazı; Arapça, İbranice, Hintçe, Tayca, Çince, Japonca, Korece doğru şekillenir
-- **Ekranlar:** hazır cihaz boyutları ve güvenli alanlar, kenara sabitleme, çok çözünürlük önizleme, renk körlüğü simülasyonu
-- **Durum ve veri:** hover / pressed / disabled, tek şablondan onlarca kart, dil tabloları ve sahte (pseudo) dillerle taşma testi
-- **Animasyon:** her özellik keyframe + ease ile; GIF, sprite sheet, kare dizisi ya da motorun tween'i için JSON
-- **Teslim:** Figma / Penpot'ta düzenlenebilir vektör SVG, PNG / WebP / JPG, katman katman (PNG, JPG, WebP ya da katmanlı SVG), PSD, atlas, bitmap font, uygulama ikonu, tıklanabilir HTML prototip, motor sahneleri
+- **Shapes:** rects (round, cut or smoothed "squircle" corners, skew), ellipses, polygons and stars, lines, arcs, gauge ticks, SVG paths and SVG import, exact boolean union / subtract / intersect / exclude, components (instances of other canvases), linear and circular arrays
+- **Style:** solid, linear / radial / conic gradients (OKLab option), patterns, fill stacks, your own per-pixel shader formulas, inside / center / outside / dashed / single-side strokes, shadows, glows, inner effects, bevel, directional 3D lighting, background blur (frosted glass), 13 blend modes, layers with clipping
+- **Text:** 10 bundled fonts plus system fonts; Arabic, Hebrew, Indic, Thai and CJK shaped with HarfBuzz; text on arcs; ellipsis truncation; underline / strikethrough; missing-glyph checks that refuse broken exports
+- **Design system:** colour tokens, named styles, variable modes (light / dark / team colours), interaction states, templates from data rows, string tables with pseudo-localisation, named version history
+- **Layout:** row / column / grid auto layout with wrap and hug, pinning to screen edges, device presets with safe areas, multi-resolution preview, colour-blindness simulation
+- **Animation:** keyframes with 30+ eases on any property, filmstrip preview, GIF / APNG / WebP / sprite sheet / frames, or tween JSON for the engine
+- **Hand-off:** PNG / WebP / JPG / ICO, density presets, layered PNG / SVG, PSD, atlases, bitmap fonts, design tokens (CSS, USS, C#, GDScript, Luau), clickable HTML prototypes, engine scenes and import helpers
 
-Ayrıntılı özellik listesi, stil nesnesi, katmanlar, animasyon ve motor tabloları: **[docs/GUIDE.md](docs/GUIDE.md)**
+Full feature list, style reference, layers, animation and engine tables: **[docs/GUIDE.md](docs/GUIDE.md)** (Turkish).
 
-## Tool'lar (74)
+## Tools (74)
 
-| Grup | Tool'lar |
+| Group | Tools |
 | --- | --- |
 | Canvas | `create_canvas`, `list_canvases`, `get_canvas`, `update_canvas`, `duplicate_canvas`, `delete_canvas`, `fit_canvas`, `resize_canvas`, `canvas_version` |
-| Katman | `create_layer`, `update_layer`, `delete_layer`, `set_layer` |
-| Çizim | `add_rect`, `add_ellipse`, `add_line`, `add_polygon`, `add_path`, `add_arc`, `add_ticks`, `add_text`, `add_image`, `add_instance`, `add_svg` |
-| Düzenleme | `update_element`, `delete_elements`, `duplicate_element`, `boolean_elements`, `move_elements`, `reorder_element`, `align_elements`, `arrange_elements`, `scatter`, `copy_elements`, `set_pin`, `batch`, `undo`, `redo` |
-| Durum, veri, dil | `set_state`, `delete_state`, `generate_from_template`, `set_strings`, `get_strings` |
-| Denetim | `review_canvas`, `inspect_pixels`, `view_image`, `preview_nine_slice` |
-| Animasyon | `create_animation`, `set_keyframes`, `delete_keyframes`, `get_animations`, `delete_animation`, `preview_animation`, `export_animation` |
-| Tema ve bilgi | `set_theme`, `get_theme`, `list_fonts`, `measure_text` |
-| Önizleme | `preview`, `preview_resolutions`, `contact_sheet` |
-| Dışa aktarma | `export_png`, `export_svg`, `export_asset`, `export_layers`, `export_psd`, `export_atlas`, `export_bitmap_font`, `write_engine_helpers` |
-| Teslim | `export_spec`, `export_theme`, `set_link`, `export_prototype`, `export_screen` |
+| Layers | `create_layer`, `update_layer`, `delete_layer`, `set_layer` |
+| Drawing | `add_rect`, `add_ellipse`, `add_line`, `add_polygon`, `add_path`, `add_arc`, `add_ticks`, `add_text`, `add_image`, `add_instance`, `add_svg` |
+| Editing | `update_element`, `delete_elements`, `duplicate_element`, `boolean_elements`, `move_elements`, `reorder_element`, `align_elements`, `arrange_elements`, `scatter`, `copy_elements`, `set_pin`, `batch`, `undo`, `redo` |
+| States, data, language | `set_state`, `delete_state`, `generate_from_template`, `set_strings`, `get_strings` |
+| Checks | `review_canvas`, `inspect_pixels`, `view_image`, `preview_nine_slice` |
+| Animation | `create_animation`, `set_keyframes`, `delete_keyframes`, `get_animations`, `delete_animation`, `preview_animation`, `export_animation` |
+| Theme and info | `set_theme`, `get_theme`, `list_fonts`, `measure_text` |
+| Preview | `preview`, `preview_resolutions`, `contact_sheet` |
+| Export | `export_png`, `export_svg`, `export_asset`, `export_layers`, `export_psd`, `export_atlas`, `export_bitmap_font`, `write_engine_helpers` |
+| Hand-off | `export_spec`, `export_theme`, `set_link`, `export_prototype`, `export_screen` |
 
-Bakmaya yarayan tool'lar (`preview`, `get_*`, `review_canvas`...) salt okunur, `delete_*` ise yıkıcı olarak işaretli; istemciler buna göre onay sorar. Hatalar AI'a neyin yanlış olduğunu ve nasıl düzelteceğini söyler.
+Look-only tools (`preview`, `get_*`, `review_canvas`...) are marked read-only and `delete_*` destructive, so clients can skip or ask for approval accordingly. Every error tells the model what was wrong and how to fix it.
 
-## Dosyalar
+## Files
 
-Canvas'lar, tema ve dışa aktarmalar `~/GameUI` klasöründe durur (oturum kapansa da kalır). Başka klasör için config'e `"env": {"GAME_UI_MCP_DIR": "D:\\UI"}` ekle. `~/GameUI/fonts/` içine attığın `.ttf` / `.otf` fontlar listeye girer.
+Canvases, theme and exports live in `~/GameUI` and survive restarts. Set `"env": {"GAME_UI_MCP_DIR": "D:\\UI"}` in the config for another folder. Fonts dropped into `~/GameUI/fonts/` become available.
 
-## Güvenlik
+## Security
 
-- İnternete bağlanmaz; ürettiği motor script'lerini kendisi çalıştırmaz. Shader formülleri yalnızca aritmetik ve izinli fonksiyonlardan oluşabilir, dosyaya ya da sisteme erişemez.
-- Motor script'lerine yazılan değerler (yollar, asset id'leri) izin listesiyle denetlenir; SVG'de DOCTYPE / ENTITY reddedilir; aşırı büyük render ve ağır formüller başlamadan reddedilir.
-- Dışa aktarma araçları verdiğin klasöre yazar ve aynı adlı dosyanın üstüne yazar.
+- No network access; generated engine scripts are written, never run. Shader formulas are a whitelisted maths language that cannot touch files or the system.
+- Values written into engine scripts (paths, asset ids) are allow-listed; SVG DOCTYPE / ENTITY declarations are refused; oversized renders and heavy formulas are refused before they start.
+- Export tools write to the folder you give them and overwrite files of the same name.
 
-## Sınırlar
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
-- Karakter, illüstrasyon, fotoğraf üretmez; hazır görseli `add_image` ile yerleştirebilirsin.
-- Motor tarafı dosyalar üretiliyor ve biçimleri test ediliyor, ama Unity / Unreal / Godot / Roblox içinde henüz denenmedi.
-- 74 tool'un tanımı yaklaşık 25 bin token; tool'ları gerektikçe yükleyen istemcilerde (Claude Code) bu maliyet düşer.
+## Limits
 
-Tam liste: [docs/GUIDE.md](docs/GUIDE.md#sınırlar).
+- It does not generate characters, illustrations or photos; place existing art with `add_image`.
+- Engine-side files are generated and format-tested but not yet opened inside Unity, Unreal, Godot or Roblox.
+- The 74 tool definitions take about 25k tokens; clients that load tools on demand (Claude Code) pay much less.
 
-## Geliştirme
+Full list: [docs/GUIDE.md](docs/GUIDE.md#sınırlar).
+
+## Development
 
 ```bash
 git clone https://github.com/TENETTE/game-ui-mcp
@@ -118,14 +130,10 @@ uv venv && uv pip install -e ".[dev]"
 uv run pytest
 ```
 
-Örnek görseller `examples/demo*.py` ile yeniden üretilir.
+`examples/demo*.py` rebuild every picture in this README (`python examples/run_all.py` runs them all). See [CONTRIBUTING.md](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
 
-## Katkı ve güvenlik
+## License
 
-Hata bildirimi ve katkı için [CONTRIBUTING.md](CONTRIBUTING.md); güvenlik açıklarını herkese açık issue yerine [SECURITY.md](SECURITY.md)'deki yoldan bildir. Topluluk kuralları: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+[MIT](LICENSE): free for any use, including commercial. Bundled fonts are under the SIL Open Font License (`OFL.txt` in each font folder). What you draw with it is yours.
 
-## Lisans
-
-[MIT](LICENSE): ticari dahil özgürce kullan. Gömülü fontlar SIL Open Font License ile gelir (her font klasöründe `OFL.txt`). Bu araçla çizdiğin görseller senindir.
-
-Figma, Penpot, Unity, Unreal Engine, Godot, Roblox, Photoshop, Illustrator, Inkscape ve adı geçen diğer ürünler kendi sahiplerinin markalarıdır. Bu proje onlarla bağlantılı değildir ve onlar tarafından desteklenmez; adlar yalnızca uyumluluğu anlatmak için geçer.
+Figma, Penpot, Unity, Unreal Engine, Godot, Roblox, Photoshop, Illustrator, Inkscape and other product names are trademarks of their owners. This project is not affiliated with or endorsed by them; the names only describe compatibility.

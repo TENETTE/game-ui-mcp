@@ -10,15 +10,17 @@ from __future__ import annotations
 import base64
 import io
 import math
+
+from PIL import ImageChops
 from html import escape
 from typing import Any
 
 from .colors import parse_color
-from .render import (LINE_TYPES, VECTOR_TYPES, Renderer, TextLayout, _is_fill_stack, _is_none, _skew_tan,
-                     _stroke_specs, resolve_style, vector_geometry)
+from .render import (LINE_TYPES, VECTOR_TYPES, Renderer, TextLayout, _is_fill_stack, _is_none, _side_strips,
+                     _skew_tan, _stroke_specs, resolve_style, vector_geometry)
 from . import geometry as geo
 
-RASTER_SCALE = 2.0                      # embedded fallbacks are drawn at 2x so they stay crisp when zoomed
+RASTER_SCALE = 2.0                      # default sharpness of embedded fallbacks (2x = crisp at 200% zoom)
 _VECTOR_KEYS = {"fill", "stroke", "opacity", "shadow", "glow", "blend", "use"}      # anything else -> picture
 _TEXT_KEYS = _VECTOR_KEYS | {"font", "weight", "size", "letter_spacing", "line_height", "uppercase", "italic"}
 
@@ -38,6 +40,7 @@ class _Doc:
         self.body: list[str] = []
         self.notes: set[str] = set()
         self.raster: list[str] = []
+        self.scale = RASTER_SCALE
         self._n = 0
 
     def uid(self, prefix: str) -> str:
@@ -52,6 +55,8 @@ def _paint(doc: _Doc, spec: Any, box, colors: dict) -> tuple[str, float] | None:
     if not isinstance(spec, dict):
         return _rgba(spec, colors)
     kind = str(spec.get("type", "linear")).lower()
+    if kind in ("stripes", "dots", "grid"):
+        return _pattern(doc, spec, kind, box, colors)
     if kind not in ("linear", "radial"):
         return None
     raw = spec.get("stops") or spec.get("colors") or ([spec["from"], spec["to"]] if "from" in spec else None)
@@ -92,6 +97,38 @@ def _paint(doc: _Doc, spec: Any, box, colors: dict) -> tuple[str, float] | None:
     return f"url(#{gid})", 1.0
 
 
+def _pattern(doc: _Doc, spec: dict, kind: str, box, colors: dict) -> tuple[str, float]:
+    """Stripes / dots / grid as a vector SVG pattern, tiled from the box corner like the PNG."""
+    cell = max(0.5, float(spec.get("size", 8)))
+    ang = float(spec.get("angle", 45 if kind == "stripes" else 0))
+    fg, fa = _rgba(spec.get("color", "#ffffff@0.15"), colors)
+    bg, ba = _rgba(spec.get("color2", spec.get("background", "transparent")), colors)
+
+    def paint(hexc: str, a: float) -> str:
+        return f'fill="{hexc}"' + (f' fill-opacity="{_num(a)}"' if a < 1 else "")
+
+    tile_h = cell
+    body = []
+    if ba > 0:
+        body.append(f'<rect width="{_num(cell)}" height="{_num(cell)}" {paint(bg, ba)}/>')
+    if kind == "stripes":
+        ratio = max(0.02, min(0.98, float(spec.get("ratio", 0.5))))
+        body.append(f'<rect width="{_num(ratio * cell)}" height="{_num(tile_h)}" {paint(fg, fa)}/>')
+    elif kind == "dots":
+        radius = float(spec.get("radius", cell * 0.25))
+        body.append(f'<circle cx="{_num(cell / 2)}" cy="{_num(cell / 2)}" r="{_num(radius)}" {paint(fg, fa)}/>')
+    else:
+        lw = float(spec.get("line_width", 1))
+        for x0, y0, w, h in ((-lw / 2, 0, lw, cell), (cell - lw / 2, 0, lw, cell),
+                             (0, -lw / 2, cell, lw), (0, cell - lw / 2, cell, lw)):
+            body.append(f'<rect x="{_num(x0)}" y="{_num(y0)}" width="{_num(w)}" height="{_num(h)}" {paint(fg, fa)}/>')
+    pid = doc.uid("p")
+    doc.defs.append(f'<pattern id="{pid}" patternUnits="userSpaceOnUse" x="{_num(box[0])}" y="{_num(box[1])}" '
+                    f'width="{_num(cell)}" height="{_num(tile_h)}" '
+                    f'patternTransform="rotate({_num(ang)} {_num(box[0])} {_num(box[1])})">{"".join(body)}</pattern>')
+    return f"url(#{pid})", 1.0
+
+
 def _filter(doc: _Doc, st: dict, colors: dict) -> str | None:
     """Drop shadows and glows as an SVG filter; '' when there are none, None when SVG cannot match them."""
     parts = []
@@ -110,13 +147,18 @@ def _filter(doc: _Doc, st: dict, colors: dict) -> str | None:
             blur = float(spec.get("blur", 8 if key == "shadow" else 12))
             dx = float(spec.get("dx", 0)) if key == "shadow" else 0.0
             dy = float(spec.get("dy", 4)) if key == "shadow" else 0.0
-            parts.append(f'<feDropShadow dx="{_num(dx)}" dy="{_num(dy)}" stdDeviation="{_num(blur / 2)}" '
-                         f'flood-color="{hexc}" flood-opacity="{_num(a)}"/>')
+            n = len(parts)
+            parts.append(f'<feGaussianBlur in="SourceAlpha" stdDeviation="{_num(blur / 2)}" result="b{n}"/>'
+                         f'<feOffset in="b{n}" dx="{_num(dx)}" dy="{_num(dy)}" result="o{n}"/>'
+                         f'<feFlood flood-color="{hexc}" flood-opacity="{_num(a)}"/>'
+                         f'<feComposite in2="o{n}" operator="in" result="s{n}"/>')
     if not parts:
         return ""
     fid = doc.uid("f")
+    merge = "".join(f'<feMergeNode in="s{i}"/>' for i in range(len(parts)))
     doc.defs.append(f'<filter id="{fid}" x="-50%" y="-50%" width="200%" height="200%" '
-                    f'color-interpolation-filters="sRGB">{"".join(parts)}</filter>')
+                    f'color-interpolation-filters="sRGB">{"".join(parts)}'
+                    f'<feMerge>{merge}<feMergeNode in="SourceGraphic"/></feMerge></filter>')
     return fid
 
 
@@ -180,7 +222,7 @@ def _vector_element(doc: _Doc, r: Renderer, el: dict, st: dict) -> bool:
                        + (f' stroke-opacity="{_num(paint[1])}"' if paint[1] < 1 else "") + "/>")
     else:
         strokes = _stroke_specs(st, colors)
-        if any(s["offset"] or s["sides"] for s in strokes):
+        if any(s["offset"] for s in strokes) or (any(s["sides"] for s in strokes) and g.kind != "rect"):
             return False
         under, over = [], []
         clip_id = None
@@ -194,13 +236,19 @@ def _vector_element(doc: _Doc, r: Renderer, el: dict, st: dict) -> bool:
             attrs = (f'd="{d}" fill="none" stroke="{paint[0]}" stroke-width="{_num(width)}" stroke-linejoin="{join}"'
                      f' stroke-miterlimit="{_num(s["miter_limit"])}"{dash}'
                      + (f' stroke-opacity="{_num(paint[1])}"' if paint[1] < 1 else ""))
+            if s["sides"]:
+                sid = doc.uid("s")
+                strips = "".join(f'<path d="{_points_d([p])}"/>'
+                                 for p in _placed(el, _side_strips(g.rect, s["sides"], s["d0"], s["d1"]), g.box))
+                doc.defs.append(f'<clipPath id="{sid}">{strips}</clipPath>')
+                attrs += f' clip-path="url(#{sid})"'
             if s["align"] == "outside":
                 under.append(f"<path {attrs}/>")              # the fill hides the inner half
             elif s["align"] == "inside":
                 if clip_id is None:
                     clip_id = doc.uid("c")
                     doc.defs.append(f'<clipPath id="{clip_id}"><path d="{d}" fill-rule="{rule}"/></clipPath>')
-                over.append(f'<path {attrs} clip-path="url(#{clip_id})"/>')
+                over.append(f'<g clip-path="url(#{clip_id})"><path {attrs}/></g>')
             else:
                 over.append(f"<path {attrs}/>")
         out += under
@@ -282,21 +330,23 @@ def _text_element(doc: _Doc, r: Renderer, el: dict, st: dict) -> bool:
 
 
 def _image(doc: _Doc, img, x: float, y: float, name: str, blend: str = "normal") -> None:
+    scale = doc.scale
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
     data = base64.b64encode(buf.getvalue()).decode("ascii")
     style = f' style="mix-blend-mode:{blend}"' if blend not in ("normal", "erase") else ""
-    doc.body.append(f'<image id="{escape(name, quote=True)}" x="{_num(x / RASTER_SCALE)}" y="{_num(y / RASTER_SCALE)}" '
-                    f'width="{_num(img.width / RASTER_SCALE)}" height="{_num(img.height / RASTER_SCALE)}"{style} '
+    doc.body.append(f'<image id="{escape(name, quote=True)}" x="{_num(x / scale)}" y="{_num(y / scale)}" '
+                    f'width="{_num(img.width / scale)}" height="{_num(img.height / scale)}"{style} '
                     f'href="data:image/png;base64,{data}"/>')
     doc.raster.append(name)
 
 
-def canvas_svg(r: Renderer, include_background: bool = True) -> tuple[str, dict]:
+def canvas_svg(r: Renderer, include_background: bool = True, image_scale: float = RASTER_SCALE) -> tuple[str, dict]:
     """The whole canvas as an SVG document plus a report of what stayed vector and what became pixels."""
     doc = _Doc()
+    doc.scale = max(1.0, min(8.0, float(image_scale)))
     c = r.canvas
-    big = r.derive(r.k * RASTER_SCALE)
+    big = r.derive(r.k * doc.scale)
     if include_background and not _is_none(c.get("background")):
         bg = c["background"]
         if isinstance(bg, str) and not bg.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
@@ -306,6 +356,7 @@ def canvas_svg(r: Renderer, include_background: bool = True) -> tuple[str, dict]
         else:
             _image(doc, big.render(include_background=True, only=set()), 0, 0, "background")
     vector: list[str] = []
+    beneath: list[str] = []                     # ids drawn so far, for background-blur pictures
     units: list[tuple[dict | None, list[dict], list[dict]]] = []      # (layer, elements, clipped layers' elements)
     for layer, elements in r.stack():
         props = r.layer_props(layer) if layer else None
@@ -320,6 +371,7 @@ def canvas_svg(r: Renderer, include_background: bool = True) -> tuple[str, dict]
         plain = props is None or (not props["style"] and props["blend"] == "normal")
         if not plain or clipped:
             ids = {e["id"] for e in elements + clipped}
+            beneath.extend(ids)
             img = big.render(include_background=False, only=ids)
             bbox = img.getchannel("A").getbbox()
             if bbox:
@@ -329,6 +381,20 @@ def canvas_svg(r: Renderer, include_background: bool = True) -> tuple[str, dict]
         start = len(doc.body)
         for el in elements:
             st = resolve_style(el.get("style"), r.theme)
+            beneath.append(el["id"])
+            if float(st.get("backdrop_blur", 0) or 0) > 0:
+                # the blur needs what lies beneath: draw the scene up to this element, keep only its footprint
+                result = big.render_element(el)
+                if result is not None:
+                    own, px0, py0, _ = result
+                    scene = big.render(include_background=include_background, only=set(beneath))
+                    patch = scene.crop((px0, py0, px0 + own.width, py0 + own.height))
+                    footprint = ImageChops.lighter(own.getchannel("A"),          # the whole shape, plus its shadow
+                                                   big.shape_mask(el, (px0, py0, own.width, own.height)))
+                    patch.putalpha(ImageChops.multiply(patch.getchannel("A"), footprint))
+                    _image(doc, patch, px0, py0, el["id"])
+                    doc.notes.add("background blur is embedded as a picture of the blurred area")
+                continue
             done = False
             if el["type"] in VECTOR_TYPES:
                 done = _vector_element(doc, r, el, st)

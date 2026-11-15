@@ -1,6 +1,6 @@
 ---
 name: game-ui-mcp
-description: Oyun UI'ı (menü, HUD, buton, panel, bar, gösterge, ikon, amblem) çizerken ve canlandırırken game-ui-mcp server'ının temel gereçlerini kullanır: katmanlar, ışık ve gölgeleme, bileşen ve diziler, stilize ve gerçekçi tarz, keyframe animasyon, öz denetim; Unity, Unreal, Roblox, Godot ve Assetto Corsa için PNG, 9-slice, katman, PSD ve animasyon çıktısı.
+description: Oyun ve uygulama arayüzü (menü, HUD, buton, panel, bar, gösterge, ikon, amblem, uygulama ikonu, mobil ekran) çizerken, canlandırırken ya da Figma / Penpot tarzı tasarlarken game-ui-mcp server'ını kullanır. Katmanlar, ışık ve gölgeleme, boolean şekiller, buzlu cam, açık / koyu modlar, bileşen ve diziler, stilize ve gerçekçi tarz, keyframe animasyon, öz denetim; Unity, Unreal, Roblox, Godot için PNG, 9-slice, katman, PSD, düzenlenebilir vektör SVG, iOS / Android boyut setleri ve animasyon çıktısı.
 ---
 
 # game-ui-mcp ile oyun UI'ı çizmek
@@ -12,14 +12,14 @@ Tool'lar listede yoksa (`create_canvas`, `preview` görünmüyorsa) server bağl
 ## Çalışma sırası
 
 1. **Brief.** Motor (Unity / Unreal / Roblox / Godot / Assetto Corsa app'i), platform, tür, hangi parçalar lazım ve **stil ailesi**: gerçekçi mi (yarış, simülasyon, AAA) yoksa stilize mi (cartoon, arcade, sci-fi, fantastik). İkisinin kuralları farklı; "Stil ailesi" bölümüne göre ilerle. Eksikse en fazla 2-3 soru sor; kullanıcı "sen karar ver" dediyse karar ver ve ne seçtiğini yaz.
-2. **Tema.** İlk iş `set_theme`. Renkleri ve tekrar eden stilleri orada tanımla, sonra her yerde `$token` ve stil adı kullan. Tek tek hex yazma: kit tutarsızlaşır.
+2. **Tema.** İlk iş `set_theme`. Renkleri ve tekrar eden stilleri orada tanımla, sonra her yerde `$token` ve stil adı kullan. Tek tek hex yazma: kit tutarsızlaşır. Açık / koyu ya da takım renkleri gerekecekse baştan `modes` ile kur.
 3. **Canvas.** Her asset ayrı canvas, asset'in gerçek boyutunda. Ekran tasarımı ise 1920x1080 tek canvas (mockup).
 4. **Çiz.** Kat kat: taban → gölge → ışık → detay → yazı, her geçiş ayrı katmanda (`create_layer`; "Katmanlar" ve "Işık ve gölgeleme" bölümleri). `batch` ile, elemanlara açık `id` vererek; tek tek `add_*` çağrısı yavaş.
 5. **Bak.** `preview` çağır ve resme gerçekten bak, sonra `review_canvas` çalıştır (kesilen gölge, düşük kontrast, küçük yazı, eksik glif, bulanık yarım piksel kenar gibi gözden kaçanları sayıyla bulur). Sorun bul, `update_element` ile düzelt, tekrar bak. En az bir tur düzeltme yapmadan export etme.
 6. **Durumlar.** Buton gibi parçalarda `duplicate_canvas` ile hover / pressed / disabled üret.
 7. **Hareket.** Gerekiyorsa `create_animation` + `set_keyframes` ile canlandır, `preview_animation` film şeridine bak ("Animasyon" bölümü).
-8. **Tutarlılık.** `contact_sheet` ile bütün kiti yan yana gör.
-9. **Export.** `export_asset` (motor + 9-slice), ikon setleri için `export_atlas`, katman katman ya da parça parça çıktı için `export_layers`, düzenlenebilir katmanlı dosya için `export_psd`, animasyon için `export_animation`. Sonra motor tarafındaki kodu yaz.
+8. **Tutarlılık.** `contact_sheet` ile bütün kiti yan yana gör. Beğenilen hali `canvas_version(action="save")` ile kaydet; sonraki deneme kötü giderse `restore` et.
+9. **Export.** `export_asset` (motor + 9-slice), ikon setleri için `export_atlas`, katman katman ya da parça parça çıktı için `export_layers`, düzenlenebilir katmanlı dosya için `export_psd`, animasyon için `export_animation`. Uygulama / mobil için `export_png(preset="ios" | "android" | "web")` tüm yoğunlukları tek seferde yazar. Ne kadar büyütülse de bozulmayan çıktı gerekiyorsa (baskı, Figma / Penpot'ta düzenleme, web) `export_svg`; sonuçtaki `embedded_as_image` listesi resim olarak gömülen elemanları söyler, büyük baskı için `image_scale: 4`. Sonra motor tarafındaki kodu yaz.
 
 ## Tema: önce bunu kur
 

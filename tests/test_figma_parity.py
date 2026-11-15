@@ -1,5 +1,6 @@
 """Figma / Penpot style features: boolean shapes, corner smoothing, fill stacks, variable modes,
 auto-layout wrap, vector SVG export and parallel animation frames."""
+import pathlib
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -125,7 +126,7 @@ def test_svg_export_keeps_shapes_and_text_editable(ws):
     root = ET.parse(ws / "c.svg").getroot()
     ns = "{http://www.w3.org/2000/svg}"
     assert root.find(f".//{ns}linearGradient") is not None
-    assert root.find(f".//{ns}feDropShadow") is not None
+    assert root.find(f".//{ns}feGaussianBlur") is not None and root.find(f".//{ns}feMerge") is not None
     assert [t.text for t in root.iter(f"{ns}tspan")] == ["PLAY"]
 
 
@@ -200,3 +201,14 @@ def test_version_history_save_restore_and_survives_restart(ws):
         s.canvas_version("c", "save", name="first")
     s.canvas_version("c", "delete", name="first")
     assert s.canvas_version("c")["versions"] == []
+
+
+def test_export_presets_write_density_sets(ws):
+    s.create_canvas("c", 20, 10)
+    s.add_rect("c", 0, 0, 20, 10)
+    ios = s.export_png("c", path=str(ws / "out" / "Play Button.png"), preset="ios")
+    assert [pathlib.Path(f["file"]).name for f in ios["files"]] == ["Play Button.png", "Play Button@2x.png",
+                                                                    "Play Button@3x.png"]
+    assert [f["width"] for f in ios["files"]] == [20, 40, 60]
+    android = s.export_png("c", path=str(ws / "res" / "Play Button.png"), preset="android")
+    assert (ws / "res" / "drawable-xxxhdpi" / "play_button.png").is_file() and android["files"][-1]["width"] == 80

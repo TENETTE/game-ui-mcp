@@ -1,0 +1,34 @@
+name: Bug report
+description: Something renders wrong, a tool fails, or an export does not work in an engine
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected and what you got. Screenshots of the preview / export help a lot.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The tool calls (or the canvas JSON from get_canvas) that show the problem.
+      render: json
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: From pyproject.toml, or the commit you installed.
+  - type: dropdown
+    id: build
+    attributes:
+      label: Build
+      options: ["cpu (default)", "gpu"]
+  - type: input
+    id: env
+    attributes:
+      label: OS, Python and MCP client
+      placeholder: Windows 11, Python 3.12, Claude Desktop

@@ -2296,7 +2296,7 @@ def _render_export(c: dict, scale: float, include_background: bool, ids: list[st
 
 @tool
 def export_svg(canvas: str, path: str | None = None, include_background: bool = True, state: str | None = None,
-               language: str | None = None):
+               language: str | None = None, image_scale: float = 2):
     """Save the canvas as an editable vector SVG for Figma, Penpot, Illustrator, Inkscape or the web.
 
     Shapes (rect, ellipse, polygon, path, boolean, line, arc, ticks) keep their outlines, solid / linear /
@@ -2305,13 +2305,15 @@ def export_svg(canvas: str, path: str | None = None, include_background: bool = 
     named groups. Whatever SVG cannot show the same way (shader / pattern fills, light, inner effects,
     blur, special blends, clipped or styled layers, images, arc text) is embedded as a picture of just that
     element, so the SVG still looks like the PNG. The result lists which ids stayed vector.
+    Stripes / dots / grid fills and rect side strokes stay vector too. image_scale (1-8, default 2) sets how
+    sharp those embedded pictures are: 4 keeps them crisp at 400% zoom or on large prints, at a bigger file.
     """
     from . import svgexport
     st = store()
     c = st.get(canvas)
     st.require_glyphs(c, language)
     r = st.renderer(c, 1.0, state=state, language=language)
-    svg, report = svgexport.canvas_svg(r, include_background)
+    svg, report = svgexport.canvas_svg(r, include_background, image_scale)
     out = _out_path(path, f"{c['id']}.svg", suffixes=(".svg",))
     out.write_text(svg, encoding="utf-8")
     result: dict = {"file": str(out), "vector": report["vector"], "embedded_as_image": report["raster"]}
@@ -2326,7 +2328,7 @@ def export_svg(canvas: str, path: str | None = None, include_background: bool = 
 def export_png(canvas: str, path: str | None = None, scales: list[float] | None = None, trim: bool = False,
                padding: int = 0, include_background: bool = False, ids: list[str] | None = None,
                group: str | None = None, format: str = "png", state: str | None = None,
-               language: str | None = None, sizes: list[int] | None = None):
+               language: str | None = None, sizes: list[int] | None = None, preset: str | None = None):
     """Save a canvas as PNG (transparent unless include_background=true).
 
     path: file path ending in .png; relative paths go to the workspace "exports" folder
@@ -2338,6 +2340,9 @@ def export_png(canvas: str, path: str | None = None, scales: list[float] | None 
     sizes: for square icons, exact pixel sizes instead of scales, e.g. [16, 32, 64, 128, 512, 1024]
       (store / app icon sets): writes <name>_<size>.png each, rendered sharp at that size.
     state / language: export an interaction state or a translated version.
+    preset: a whole density set in one call, like Figma's export presets - "ios" (name, name@2x, name@3x),
+      "web" (name, name@2x), "android" (drawable-mdpi/hdpi/xhdpi/xxhdpi/xxxhdpi folders, 1x to 4x; the
+      file name is made lowercase with underscores as Android requires). Overrides scales.
     """
     st = store()
     c = st.get(canvas)
@@ -2372,7 +2377,20 @@ def export_png(canvas: str, path: str | None = None, scales: list[float] | None 
             result["warnings"] = sorted(set(warnings))
         return result
     jobs = []
-    if sizes:
+    if preset:
+        key = str(preset).lower()
+        if key in ("ios", "web"):
+            factors = (1, 2, 3) if key == "ios" else (1, 2)
+            jobs = [(float(f), "" if f == 1 else f"@{f}x") for f in factors]
+        elif key == "android":
+            name = slugify(base.stem, "asset").replace("-", "_")
+            for folder, f in (("mdpi", 1), ("hdpi", 1.5), ("xhdpi", 2), ("xxhdpi", 3), ("xxxhdpi", 4)):
+                target = base.parent / f"drawable-{folder}" / f"{name}.{fmt}"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                jobs.append((float(f), target))
+        else:
+            raise ValueError("preset must be 'ios', 'android' or 'web'")
+    elif sizes:
         for size in _maybe_json(sizes):
             jobs.append((int(size) / max(c["width"], c["height"]), f"_{int(size)}"))
     else:
@@ -2385,7 +2403,10 @@ def export_png(canvas: str, path: str | None = None, scales: list[float] | None 
         offset = (0, 0)
         if trim:
             img, offset = ex.trim(img, int(round(padding * scale)))
-        out = base.with_name(base.stem + (suffix if suffix is not None else _scale_suffix(scale)) + "." + fmt)
+        if isinstance(suffix, Path):
+            out = suffix
+        else:
+            out = base.with_name(base.stem + (suffix if suffix is not None else _scale_suffix(scale)) + "." + fmt)
         _save_image(img, out, fmt)
         files.append({"file": str(out), "scale": round(scale, 4), "width": img.width, "height": img.height,
                       "trim_offset": list(offset)})
