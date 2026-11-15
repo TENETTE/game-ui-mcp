@@ -4,6 +4,7 @@ Registered on the same MCP server."""
 from __future__ import annotations
 
 import copy
+import json
 import math
 from typing import Any
 
@@ -15,7 +16,7 @@ from .reference import TOPICS
 from .render import LINE_TYPES, VECTOR_TYPES, _placed_polys, _stroke_specs, resolve_style, vector_geometry
 from .server import _maybe_json, _prepare_update, _summary, slugify, store, tool
 
-__all__ = ["guide", "make_palette", "restyle", "path_ops", "find_elements", "vectorize_image"]
+__all__ = ["guide", "make_palette", "restyle", "path_ops", "find_elements", "vectorize_image", "make_variations"]
 
 
 
@@ -589,3 +590,104 @@ def vectorize_image(canvas: str, path: str, x: float = 0, y: float = 0, width: f
     st.save_canvas(c)
     return {"group": grp, "paths": made, "colors": ["#%02x%02x%02x" % r[0][:3] for r in regions],
             "size": [round(img.width * s, 2), round(img.height * s, 2)]}
+
+
+_PAIRS = [("Rajdhani", "Inter"), ("Bebas Neue", "Barlow Condensed"), ("Cinzel", "Inter"), ("Fredoka", "Fredoka"),
+          ("Orbitron", "JetBrains Mono"), ("Michroma", "Barlow Condensed"), ("Bangers", "Fredoka")]
+_SKIP = {"id", "text", "font", "path", "code", "d", "group", "layer", "source", "type", "anchor", "name", "note"}
+
+
+def _hue(value: str, colors: dict, degrees: float, sat: float) -> str:
+    import colorsys
+    r, g, b, a = parse_color(value, colors)
+    h, l, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
+    r2, g2, b2 = colorsys.hls_to_rgb((h + degrees / 360) % 1, l, max(0.0, min(1.0, s * sat)))
+    out = f"#{round(r2 * 255):02x}{round(g2 * 255):02x}{round(b2 * 255):02x}"
+    return out + (f"{a:02x}" if a < 255 else "")
+
+
+def _recolor_all(obj: Any, colors: dict, degrees: float, sat: float) -> Any:
+    if isinstance(obj, dict):
+        return {k: v if k in _SKIP else _recolor_all(v, colors, degrees, sat) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_recolor_all(v, colors, degrees, sat) for v in obj]
+    if isinstance(obj, str) and obj.lower().startswith(("#", "rgb", "hsl")):
+        try:
+            return _hue(obj, colors, degrees, sat)
+        except ValueError:
+            return obj
+    return obj
+
+
+@tool
+def make_variations(canvas: str, count: int = 3, vary: list[str] | None = None, seed: int = 1):
+    """Explore design alternatives in one go: `count` copies of a canvas named <canvas>_v1, _v2..., each
+    with a different direction, plus a contact sheet comparing them with the original.
+
+    vary (default all): "palette" (hue-shifted colour scheme - theme tokens are overridden on the copy only,
+      hand-typed colours are shifted too), "shape" (sharp / round / cut corners and lighter / heavier
+      strokes), "type" (a different display + body font pairing; big text gets the display font).
+    seed changes which directions are picked. Look at the sheet, keep the copy you like (continue editing
+    it, or copy what works back), and delete the others with delete_canvas."""
+    import random
+    from .server import contact_sheet
+    st = store()
+    src = st.get(canvas)
+    vary = _maybe_json(vary) or ["palette", "shape", "type"]
+    vary = [vary] if isinstance(vary, str) else list(vary)
+    bad = set(vary) - {"palette", "shape", "type"}
+    if bad:
+        raise ValueError(f"vary takes palette, shape, type (got {', '.join(sorted(bad))})")
+    count = max(1, min(8, int(count)))
+    rng = random.Random(seed)
+    theme_colors = {**st.theme.get("colors", {}), **(src.get("colors") or {})}
+    sizes = [float(e.get("size") or 0) for e in src["elements"] if e["type"] == "text"]
+    big = max(sizes) * 0.7 if sizes else 0
+    shapes = [(0.3, "round", 1.0), (2.0, "round", 1.6), (1.0, "cut", 1.0), (1.5, "round", 0.6), (0.0, "round", 2.0)]
+    made, notes = [], []
+    for i in range(count):
+        name = f"{src['id']}_v{i + 1}"
+        if name in st.canvases:
+            raise ValueError(f"canvas '{name}' already exists - delete it or pass another seed / canvas")
+        clone = st.duplicate_canvas(src, name)
+        desc = []
+        if "palette" in vary:
+            deg = (i + 1) * 360 / (count + 1) + rng.uniform(-15, 15)
+            sat = rng.uniform(0.85, 1.25)
+            clone["elements"] = _recolor_all(clone["elements"], theme_colors, deg, sat)
+            over = {}
+            for k, v in theme_colors.items():
+                if isinstance(v, str) and not v.startswith("$"):
+                    try:
+                        over[k] = _hue(v, theme_colors, deg, sat)
+                    except ValueError:
+                        pass
+            clone["colors"] = over
+            if clone.get("background") and isinstance(clone["background"], (str, dict)):
+                clone["background"] = _recolor_all(clone["background"], theme_colors, deg, sat)
+            desc.append(f"hue {round(deg)}")
+        if "shape" in vary:
+            mult, corner, stroke = shapes[(i + seed) % len(shapes)]
+            for el in clone["elements"]:
+                if el["type"] in ("rect", "image", "instance") and isinstance(el.get("radius"), (int, float)):
+                    r = float(el["radius"]) * mult if corner == "round" else max(6.0, float(el["radius"]))
+                    el["radius"] = round(min(r, min(float(el.get("width") or r * 2), float(el.get("height") or r * 2)) / 2), 2)
+                    if el["type"] == "rect":
+                        el["corner"] = corner
+                sty = el.get("style")
+                if isinstance(sty, dict) and isinstance(sty.get("stroke"), dict) and                         isinstance(sty["stroke"].get("width"), (int, float)):
+                    sty["stroke"] = {**sty["stroke"], "width": round(float(sty["stroke"]["width"]) * stroke, 2)}
+            desc.append(f"{corner} corners x{mult:g}, strokes x{stroke:g}")
+        if "type" in vary and sizes:
+            display, body = _PAIRS[(i + seed) % len(_PAIRS)]
+            for el in clone["elements"]:
+                if el["type"] == "text":
+                    el["font"] = display if float(el.get("size") or 0) >= big else body
+            desc.append(f"{display} + {body}")
+        st.save_canvas(clone)
+        made.append(clone["id"])
+        notes.append({"canvas": clone["id"], "direction": ", ".join(desc)})
+    sheet = contact_sheet([src["id"]] + made, columns=min(4, count + 1))
+    info = json.loads(sheet[1])
+    info["variations"] = notes
+    return [sheet[0], json.dumps(info)]

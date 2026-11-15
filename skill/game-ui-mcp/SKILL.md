@@ -1,6 +1,6 @@
 ---
 name: game-ui-mcp
-description: Oyun ve uygulama arayüzü (menü, HUD, buton, panel, bar, gösterge, ikon, amblem, uygulama ikonu, mobil ekran, web sayfası) tasarlarken, canlandırırken ve teslim ederken game-ui-mcp server'ını kullanır. Tema ve token'lar, katmanlar, ışık ve efektler, canlı otomatik yerleşim, bileşen varyantları, keyframe animasyon, öz denetim; Unity, Unreal, Roblox, Godot için 9-slice ve sahne, PNG / SVG / PDF / PSD, Lottie, HTML / CSS web sitesi ve iOS / Android boyut setleri.
+description: Oyun ve uygulama arayüzü (menü, HUD, buton, panel, bar, gösterge, ikon, amblem, uygulama ikonu, mobil ekran, web sayfası) tasarlarken, canlandırırken ve teslim ederken game-ui-mcp server'ını kullanır. Tema, token ve DESIGN.md, katmanlar, ışık, hazır ve kendi materyallerin, görsel animasyonu, canlı otomatik yerleşim, bileşen varyantları, tasarım alternatifleri, keyframe animasyon ve etkileşim (durum makinesi), öz denetim; Unity, Unreal, Roblox, Godot için 9-slice ve sahne, PNG / SVG / PDF / PSD, Lottie, MP4 / WebM, HTML / CSS web sitesi, React bileşenleri ve iOS / Android boyut setleri.
 ---
 
 # game-ui-mcp ile arayüz tasarlamak
@@ -11,15 +11,16 @@ Tool'lar listede yoksa (`create_canvas`, `preview` görünmüyorsa) server bağl
 
 ## Çalışma sırası
 
-1. **Brief.** Hedef (Unity / Unreal / Roblox / Godot / web / mobil uygulama / baskı), ekran boyutu, hangi parçalar lazım ve **stil ailesi**: gerçekçi mi (yarış, simülasyon, AAA) stilize mi (cartoon, arcade, sci-fi, fantastik). Eksikse en fazla 2-3 soru sor; "sen karar ver" denirse karar ver ve ne seçtiğini yaz.
-2. **Tasarım sistemi.** İlk iş `set_theme`: renk token'ları, isimli stiller, gerekiyorsa modlar ve sayı token'ları ("Tema ve tasarım sistemi").
-3. **Canvas.** Her asset kendi gerçek boyutunda ayrı canvas; ekran tasarımı tek canvas (1920×1080, telefon için `preset`).
-4. **Çiz.** Kat kat (taban → gölge → ışık → detay → yazı), her geçiş ayrı katmanda. `batch` kullan ve elemanlara açık `id` ver; tek tek `add_*` yavaştır. İçeriği değişecek her şeyi (buton, liste, envanter) canlı yerleşimle kur.
-5. **Bak ve düzelt.** `preview` resmine gerçekten bak, sonra `review_canvas`. Her `warn` maddesini düzelt, tekrar bak. En az bir düzeltme turu yapmadan export etme ("Kontrol turu").
-6. **Durumlar ve varyantlar.** Hover / pressed / disabled / focused için `set_state`; boyut, renk gibi varyantlar için `prop=değer` adlı durumlar.
-7. **Hareket.** `create_animation` + `set_keyframes`, sonra `preview_animation` film şeridi ("Animasyon").
-8. **Tutarlılık.** `contact_sheet` ile kiti yan yana gör. Beğenilen hali `canvas_version(action="save")` ile kaydet; kötü giden denemeyi `restore` et, `diff` ile neyin değiştiğine bak.
-9. **Teslim.** Hedefe göre doğru çıktıyı seç ("Çıktı seçimi"), sonra gerekiyorsa motor tarafındaki kodu yaz.
+1. **Brief.** Hedef (Unity / Unreal / Roblox / Godot / web / React / mobil uygulama / baskı), ekran boyutu, hangi parçalar lazım ve **stil ailesi**: gerçekçi mi (yarış, simülasyon, AAA) stilize mi (cartoon, arcade, sci-fi, fantastik). Eksikse en fazla 2-3 soru sor; "sen karar ver" denirse karar ver ve ne seçtiğini yaz.
+2. **Tasarım sistemi.** İlk iş `set_theme`: renk token'ları, isimli stiller, gerekiyorsa modlar ve sayı token'ları ("Tema ve tasarım sistemi"). Kullanıcının DESIGN.md'si varsa `set_theme(tokens="…/DESIGN.md")`.
+3. **Yön seçimi (isteğe bağlı).** Yön belirsizse ilk ekranı kabaca kur, `make_variations(canvas, count=3)` ile palet / şekil / yazı alternatifleri üret, karşılaştırma resmini kullanıcıya göster, seçileni geliştir, diğerlerini `delete_canvas` ile sil.
+4. **Canvas.** Her asset kendi gerçek boyutunda ayrı canvas; ekran tasarımı tek canvas (1920×1080, telefon için `preset`).
+5. **Çiz.** Kat kat (taban → gölge → ışık → detay → yazı), her geçiş ayrı katmanda. `batch` kullan ve elemanlara açık `id` ver; tek tek `add_*` yavaştır. İçeriği değişecek her şeyi (buton, liste, envanter) canlı yerleşimle kur.
+6. **Bak ve düzelt.** `preview` resmine gerçekten bak, sonra `review_canvas`. Her `warn` maddesini düzelt, tekrar bak. En az bir düzeltme turu yapmadan export etme ("Kontrol turu").
+7. **Durumlar ve varyantlar.** Hover / pressed / disabled / focused için `set_state`; boyut, renk gibi varyantlar için `prop=değer` adlı durumlar.
+8. **Hareket ve etkileşim.** `create_animation` + `set_keyframes`, `preview_animation` film şeridi; sonra hangi olayda hangi animasyonun / durumun çalışacağını `set_interaction` ile bağla ("Animasyon", "Etkileşim").
+9. **Tutarlılık.** `contact_sheet` ile kiti yan yana gör. Beğenilen hali `canvas_version(action="save")` ile kaydet; kötü giden denemeyi `restore` et, `diff` ile neyin değiştiğine bak.
+10. **Teslim.** Hedefe göre doğru çıktıyı seç ("Çıktı seçimi"), sonra gerekiyorsa motor tarafındaki kodu yaz.
 
 ## Tema ve tasarım sistemi
 
@@ -41,6 +42,7 @@ Tool'lar listede yoksa (`create_canvas`, `preview` görünmüyorsa) server bağl
 - **Palet:** 1 zemin, 1-2 yüzey tonu, 1 ana renk, 1 vurgu, yazı + soluk yazı, durum renkleri (tehlike, başarı, altın). Daha fazlası dağınık görünür. Tek bir ana renkten başlıyorsan `make_palette(base, apply=true)` 50-950 tonlarını eşit algılanan açıklıkta kurar; yazı rengini sonuçtaki `text_on` listesine göre seç (her ton için okunabilirlik oranı orada).
 - **Hep token:** her yerde `$token` ve stil adı kullan, tek tek hex yazma. Böylece `restyle`, modlar ve web çıktısındaki CSS değişkenleri çalışır; `review_canvas` elle yazılmış renkleri işaretler.
 - **Modlar:** açık / koyu, takım renkleri ya da sezon teması gerekecekse baştan `set_theme(modes={"light": {...}}, mode=...)`. Bir canvas'a ayrı mod: `update_canvas(mode=...)`.
+- **DESIGN.md:** AI tasarım / kod araçlarıyla (Stitch, kodlama ajanları) tasarım sistemini paylaşmak için `export_theme("design.md")`; gelen DESIGN.md'yi `set_theme(tokens=yol)` okur (renkler, yazı stilleri, köşe ve boşluk değerleri).
 - **Sayı token'ları:** köşe yarıçapı, boşluk, kontur kalınlığı, yazı boyu için `numbers` ve `"$radius-lg"` (x / y konumu için değil). Hazır bir token dosyası verilirse (Tokens Studio, Penpot) `set_theme(tokens=...)`; geliştiriciye `export_theme("dtcg" | "css" | "uss" | "csharp" | "gdscript" | "luau")`.
 - **Referans görsel:** kullanıcı ekran görüntüsü verdiyse `view_image(path)` ile bak ve dönen baskın renklerden temayı kur; tahmin etme.
 - **Fontlar** (`list_fonts`): Inter (temiz, modern), Barlow Condensed (motorsport, gerçek italiği var), Bebas Neue (uzun başlık), Michroma (geniş gösterge yazısı), JetBrains Mono (sabit genişlikli rakam), Rajdhani / Orbitron (sci-fi), Cinzel (fantastik), Fredoka (yuvarlak, casual), Bangers (çizgi roman). Bir kitte en fazla 2 aile, 4-6 yazı boyu. Orbitron'da Ğ/ğ yok; tool uyarırsa fontu değiştir.
@@ -124,7 +126,8 @@ Tipik yığın (alttan üste): `ground` (bulanık zemin gölgesi) → `body` (an
 - **Bulanıklık:** `blur` bütün elemanı yumuşatır; `{"radius", "angle", "start", "end"}` ile kademeli bulanıklık (keskinden yumuşağa). `feather` yalnızca kenarı yumuşatır (yumuşak ışık lekesi, sis, ışık hüzmesi).
 - **Doku ve gren:** `noise` (sayı ya da `{mode: mono | duo | multi, amount, size}`) film / baskı hissi; `texture` kenarları pürüzlendirir (yıpranmış, damga, yırtık); `clouds`, `hex`, `carbon`, `brushed` dolguları; kendi görselin `{"type":"image","path":...,"fit":"tile"}`. Dokuyu düşük alfayla, tercihen clip katmanında kullan.
 - **Maske:** `mask` elemanı gradient ile söndürür (yalnızca alfa önemli); `mask_mode: "luminance"` parlaklığı kullanır. Bir elemanı başka bir şekle kırpmak için `clip`, parlaklığa göre kırpmak için `clip_mode: "luminance"`.
-- **Hazır materyal:** `style: {"material": "gold"}` ya da `{"material": {"name": "wood", "color": "$primary", "scale": 1.5, "seed": 3}}`. Seçenekler: gold, silver, chrome, bronze, copper, steel, iron, rust, wood, stone, marble, leather, fabric, paper, lava, ice, gem, plastic, rubber, jelly, glass, neon, hologram. Işık ve dolguyu birlikte verir; kendi yazdığın anahtarlar (ör. `light`, `stroke`) üstüne yazar. Lava, jelly ve hologram `style.material.t` ile canlanır. Hiçbiri uymuyorsa sıfırdan shader yaz ("Shader dolgusu").
+- **Hazır materyal:** `style: {"material": "gold"}` ya da `{"material": {"name": "wood", "color": "$primary", "scale": 1.5, "seed": 3}}`. Seçenekler: gold, silver, chrome, bronze, copper, steel, iron, rust, wood, stone, marble, leather, fabric, paper, lava, ice, gem, plastic, rubber, jelly, glass, neon, hologram. Işık ve dolguyu birlikte verir; kendi yazdığın anahtarlar (ör. `light`, `stroke`) üstüne yazar. Lava, jelly ve hologram `style.material.t` ile canlanır.
+- **Kendi materyalin:** kitte tekrar eden yüzeyi bir kez tanımla: `set_theme(materials={"dark_oak": {"material": "wood", "color": "#4a2c18", "scale": 2, "light": {...}}})` (hazırdan türet) ya da `{"fill": {"type": "shader", "code": "...", "params": {"c": "$primary", "t": 0}}, "light": {...}, "noise": 0.04}` (sıfırdan). Sonra her yerde `{"material": "dark_oak"}`; `{"name": ..., "color": ..., "scale": ..., "t": ...}` shader'ın `c`, `sc`, `t` parametrelerine gider. Shader yazımı için "Shader dolgusu".
 - **Renk:** `adjust` yeniden çizmeden düzeltir (brightness, contrast, saturation, exposure, temperature, shadows, highlights, hue, tint). Hover `brightness: 0.08`, disabled `saturation: -0.8`. Uzak renkler arası gradient için `"space": "oklab"` (gri-çamur geçişi olmaz).
 - **Dolgu yığını:** `fill` liste olabilir (alttan üste); her katmana ayrı `blend` verilebilir (gradient + `overlay` ile parlaklık).
 - **Karışım modu:** gölge `multiply`, ışık `screen` (yumuşak) ya da `add` (neon, enerji), canlandırmak için `overlay` / `soft-light`.
@@ -254,7 +257,17 @@ Hazır animasyon yok: hangi özelliğin ne zaman, hangi değere, hangi ivmeyle g
 - Motorun kendisinin canlandırabildiği hareket (konum, ölçek, dönme, opaklık, renk): `format="json"` + parçalar için `export_layers`. JSON her ease'in Roblox ve DOTween adını verir; motor kodunu bu veriden yaz.
 - Uygulama, web ve Lottie oynatıcıları: `format="lottie"`. Sade şekiller ve yazı gerçek vektör katman olur (her boyutta keskin, renk değişimi doğal animasyon); efektli parçalar resim olarak hareket eder; glow / şekil değişen parçalar kare kare gider. Sonuçtaki listelere bak; kare kare giden çoksa efekti sadeleştir.
 - Motorun canlandıramadığı efektler (kırpılmış parlama, şekil değiştiren yay, dash akışı): `format="spritesheet"`, fps 12-24, kısa süre. Hızlı dönen ya da kayan şeylerde `motion_blur: 4-6`.
-- Göstermek için `gif`; kalite ve saydamlık için `apng` / `webp`.
+- Göstermek için `gif`; kalite ve saydamlık için `apng` / `webp`. Fragman, mağaza sayfası, sosyal medya için `mp4` (opak) ya da `webm` (saydam); döngüde `repeat` ile birkaç tur. ffmpeg gerekir; yoksa hata mesajı kurulumu söyler.
+
+## Etkileşim (durum makinesi)
+
+Animasyonlar ve durumlar tek başına sadece görünüştür; ne zaman oynayacaklarını `set_interaction(canvas, id, trigger, action, ...)` belirler. Kurallar `export_web` ve `export_react` çıktısında çalışır, `export_animation(format="json")` içinde motor kodu için listelenir.
+
+- **id:** eleman, `"group:ad"` ya da `"canvas"` (load / key / end için).
+- **trigger:** `load`, `hover`, `leave`, `press`, `release`, `click`, `key:Escape` gibi tuşlar, `end:<animasyon>` (zincirleme).
+- **action:** `play` / `stop` (animasyon; bir kural oynatınca o animasyon kendiliğinden başlamaz), `set_state` / `clear_state` / `toggle_state` (`set_state` ile tanımlanmış görünüş: selected, open, muted...), `navigate` / `overlay` (başka canvas), `back`, `url`. `delay` saniye.
+- **Tipik buton:** hover → play `hover_in`; leave → play `hover_out`; press → set_state `pressed`; release → clear_state `pressed`; click → navigate `settings`, delay 0.15. Sekme / onay kutusu: click → toggle_state. Açılış: canvas load → play `intro`, `end:intro` → play `idle`.
+- Tarayıcıda dene: `export_web` klasöründeki index.html. Gerçek oyunda kuralları json'daki `interactions` listesinden motor koduyla kur.
 
 ## 9-slice kuralları (panel, buton, tooltip, bar)
 
@@ -282,9 +295,11 @@ Hazır dolgular yetmiyorsa formülü kendin yaz: `{"type":"shader","code":"...",
 | Mobil uygulama / web görseli | `export_png(preset="ios" | "android" | "web")`, ikon için `format="ico"` ya da `sizes` |
 | Figma / Penpot / Illustrator'da düzenleme, sınırsız büyütme | `export_svg` (`embedded_as_image` resim olanları söyler; büyük baskıda `image_scale: 4`) |
 | Baskı, müşteri sunumu, kit kitabı | `export_pdf([...])` (çok sayfa, yazı vektör) |
+| React / Next.js / Vite projesi | `export_react([...])`: her canvas `<Ad>.jsx` + `.css`, görseller import edilir, etkileşimler çalışır, gezinme `onNavigate(canvasId, mode)` prop'u ile |
 | Çalışan web sitesi / prototip | `export_web([...], layout="fit" | "responsive")`: linkler (`set_link`, `mode: "overlay"`), hover CSS, CSS animasyon, sayfa geçişi |
 | Görsel düzenleyicide devam | `export_psd` |
-| Geliştiriciye ölçü ve token | `export_spec`, `export_theme` |
+| Geliştiriciye ölçü ve token | `export_spec`, `export_theme` (css, dtcg, design.md...) |
+| Video (fragman, mağaza, sosyal) | `export_animation(format="mp4" | "webm")` |
 | Animasyon | "Animasyon çıktısı" maddeleri |
 
 **Motor ayrıntıları:**
@@ -324,5 +339,6 @@ Bir şey beklediğin gibi çıkmadıysa `get_canvas(details=true)` ile gerçek d
 - Aynı konturu ve gölgeyi her elemana ayrı ayrı vermek (katman stili kullan); gölge şekillerini elle tabana sığdırmak (clip katmanı kullan).
 - Delik için zemin renginde şekil koymak (`boolean_elements` subtract kullan).
 - Aynı şeyi elle tekrar çizmek (`duplicate_element`, `add_instance`, `flip_x`).
+- Animasyonları yapıp ne zaman oynayacaklarını bağlamamak (`set_interaction`); web / React çıktısında her şey kendiliğinden oynar.
 - Animasyonu film şeridine bakmadan export etmek; her şeye bounce / elastic vermek; motorun tween'leyebileceği basit hareketi sprite sheet'e gömmek.
 - Karakter portresi, illüstrasyon, fotoğraf çizmeye çalışmak: bu aracın işi değil. Yer tutucu çerçeve çiz, görsel verilirse `add_image` ile yerleştir.

@@ -74,7 +74,8 @@ JSON config'te: `"args": ["--from", "game-ui-mcp[gpu] @ git+https://github.com/T
 - **Durum ve veri:** hover / pressed / disabled, tek şablondan onlarca kart, dil tabloları ve sahte (pseudo) dillerle taşma testi
 - **Animasyon:** her özellik keyframe + ease ile; GIF, sprite sheet, kare dizisi ya da motorun tween'i için JSON
 - **Web sitesi:** gerçek HTML / CSS sayfalar: canlı yazı ve fontlar, linkler ve açılır pencereler, hover durumları, CSS animasyonları, sayfalar arası yumuşak geçiş, pencereye sığan ya da duyarlı (responsive) yerleşim
-- **Teslim:** vektör PDF, Lottie animasyon, Figma / Penpot'ta düzenlenebilir vektör SVG, iOS / Android / web boyut setleri (`preset`), PNG / WebP / JPG, katman katman (PNG, JPG, WebP ya da katmanlı SVG), PSD, atlas, bitmap font, uygulama ikonu, tıklanabilir HTML prototip, motor sahneleri
+- **Etkileşim:** durum makinesi (hover, basma, tıklama, tuş, animasyon zinciri), web ve React çıktısında çalışır; tasarım varyasyonları; DESIGN.md içe / dışa aktarma; 23 hazır + kendi materyallerin
+- **Teslim:** React bileşenleri, MP4 / WebM video, vektör PDF, Lottie animasyon, Figma / Penpot'ta düzenlenebilir vektör SVG, iOS / Android / web boyut setleri (`preset`), PNG / WebP / JPG, katman katman (PNG, JPG, WebP ya da katmanlı SVG), PSD, atlas, bitmap font, uygulama ikonu, tıklanabilir HTML prototip, motor sahneleri
 
 Ayrıntılı özellik listesi, stil nesnesi, katmanlar, animasyon ve motor tabloları: **[docs/GUIDE.md](docs/GUIDE.md)**
 
@@ -92,7 +93,7 @@ Ayrıntılı özellik listesi, stil nesnesi, katmanlar, animasyon ve motor tablo
 | Tema ve bilgi | `set_theme`, `get_theme`, `make_palette`, `list_fonts`, `measure_text`, `guide` |
 | Önizleme | `preview`, `preview_resolutions`, `contact_sheet` |
 | Dışa aktarma | `export_png`, `export_svg`, `export_pdf`, `export_web`, `export_asset`, `export_layers`, `export_psd`, `export_atlas`, `export_bitmap_font`, `write_engine_helpers` |
-| Teslim | `export_spec`, `export_theme`, `set_link`, `export_prototype`, `export_screen` |
+| Teslim | `export_spec`, `export_theme`, `set_link`, `set_interaction`, `export_prototype`, `export_screen`, `export_react`, `make_variations` |
 
 Bakmaya yarayan tool'lar (`preview`, `get_*`, `review_canvas`...) salt okunur, `delete_*` ise yıkıcı olarak işaretli; istemciler buna göre onay sorar. Hatalar AI'a neyin yanlış olduğunu ve nasıl düzelteceğini söyler.
 

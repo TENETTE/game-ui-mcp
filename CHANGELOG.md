@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.0 - 2026-11-16
+
+- `set_interaction`: a state machine (hover / press / click / key / animation-end triggers; play, states, navigation) that runs in web and React output and is listed in the animation JSON.
+- `export_react`: React components (JSX + CSS + runtime, images imported).
+- `export_animation` MP4 / WebM video (ffmpeg; `[video]` extra).
+- `make_variations`: alternative palette / shape / type directions with a comparison sheet.
+- DESIGN.md import (`set_theme(tokens=...)`) and export (`export_theme("design.md")`).
+- Custom materials: `set_theme(materials=...)`.
+- Web: state looks now beat inline styles (hover / pressed CSS did not apply before).
+
 ## 0.10.0 - 2026-11-16
 
 - 23 ready materials (`style.material`): metals, wood, stone, marble, leather, fabric, paper, rust, lava, ice, gem, plastic, rubber, jelly, glass, neon, hologram; tintable, seedable, animatable.

@@ -770,10 +770,30 @@ class Store:
 
 
     def set_theme(self, colors: dict | None, styles: dict | None, replace: bool,
-                  modes: dict | None = None, mode: str | None = None, numbers: dict | None = None) -> None:
+                  modes: dict | None = None, mode: str | None = None, numbers: dict | None = None,
+                  materials: dict | None = None) -> None:
         old = copy.deepcopy(self.theme)
         if replace:
             self.theme = {"colors": {}, "styles": {}}
+        if materials:
+            own = self.theme.setdefault("materials", {})
+            for key, value in materials.items():
+                if value is None:
+                    own.pop(key, None)
+                elif not isinstance(value, dict):
+                    self.theme = old
+                    raise ValueError(f"material '{key}' must be a style object, e.g. "
+                                     '{"material": "wood", "color": "#5a3a22"} or {"fill": {"type": "shader", ...}}')
+                else:
+                    own[key] = value
+            try:
+                from .materials import expand
+                for key in materials:
+                    if materials[key] is not None:
+                        expand(key, self.theme)
+            except ValueError:
+                self.theme = old
+                raise
         theme_numbers = self.theme.setdefault("numbers", {})
         for key, value in (numbers or {}).items():
             if value is None:

@@ -45,6 +45,8 @@ from these primitives (icons with add_path / add_svg) and judge the result yours
 
 Workflow: set_theme (colour tokens, named styles, modes) -> create_canvas -> batch / add_* -> preview ->
 review_canvas -> fix with update_element -> export (export_asset, export_png, export_svg, export_layers...).
+Interactive screens: create_animation / set_state, then set_interaction (hover, click, keys) -> export_web
+or export_react. Unsure of a direction? make_variations shows alternatives.
 Always call preview after a group of changes and actually look at the image before exporting.
 
 Coordinates: canvas units = pixels at 1x, origin top-left, y down; later elements draw on top
@@ -1590,11 +1592,39 @@ def preview_animation(canvas: str, animation: str, frames: int = 8, columns: int
     return [Image(data=_png_bytes(sheet.convert("RGB")), format="png"), json.dumps(info)]
 
 
+def _encode_video(images: list, rate: float, path: Path, fmt: str) -> None:
+    import shutil
+    import subprocess
+    exe = shutil.which("ffmpeg")
+    if not exe:
+        try:
+            import imageio_ffmpeg
+            exe = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception:
+            exe = None
+    if not exe:
+        raise ValueError('mp4 / webm export needs ffmpeg: install it (winget install ffmpeg, brew install ffmpeg, '
+                         'apt install ffmpeg) or pip install "game-ui-mcp[video]"')
+    w, h = images[0].size
+    if fmt == "mp4":
+        codec = ["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "16",
+                 "-preset", "slow", "-movflags", "+faststart"]
+    else:
+        codec = ["-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2:color=0x00000000", "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p",
+                 "-b:v", "0", "-crf", "24", "-row-mt", "1", "-auto-alt-ref", "0"]
+    cmd = [exe, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", f"{w}x{h}", "-r", f"{rate:g}",
+           "-i", "-", *codec, str(path)]
+    data = b"".join(im.convert("RGBA").tobytes() for im in images)
+    done = subprocess.run(cmd, input=data, capture_output=True)
+    if done.returncode != 0:
+        raise ValueError("ffmpeg failed: " + done.stderr.decode("utf-8", "replace")[-400:])
+
+
 @tool
 def export_animation(canvas: str, animation: str, format: str = "spritesheet", path: str | None = None,
                      fps: float | None = None, scale: float = 1, background: str | None = None,
                      trim: bool = True, ids: list[str] | None = None, group: str | None = None,
-                     motion_blur: int = 0):
+                     motion_blur: int = 0, repeat: int = 1):
     """Export an animation.
 
     format:
@@ -1607,6 +1637,9 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
       "frames"      numbered PNG files in a folder.
       "gif" / "apng" / "webp"   one animated file to look at or share (GIF: 256 colors, hard edges on
                     transparency; APNG and WebP keep full quality and alpha).
+      "mp4" / "webm" video for trailers, store pages, social posts and video players (H.264 MP4 is opaque,
+                    on the canvas background or `background`; VP9 WebM keeps transparency). Needs ffmpeg
+                    on PATH or pip install "game-ui-mcp[video]". repeat plays a loop several times.
       "lottie"      Lottie JSON for apps, the web (lottie-web), and Lottie players in Unity / Unreal / Godot.
                     Plain shapes and text become real vector shape layers (crisp at any size, solid colour
                     changes animate natively); effects become pictures moved by Lottie; parts whose glow /
@@ -1626,8 +1659,8 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
     st.require_glyphs(c, None)
     key, anim = st.get_animation(c, animation)
     fmt = format.lower()
-    if fmt not in ("json", "spritesheet", "frames", "gif", "apng", "webp", "lottie"):
-        raise ValueError("format must be json, spritesheet, frames, gif, apng, webp or lottie")
+    if fmt not in ("json", "spritesheet", "frames", "gif", "apng", "webp", "lottie", "mp4", "webm"):
+        raise ValueError("format must be json, spritesheet, frames, gif, apng, webp, mp4, webm or lottie")
     base_name = f"{c['id']}_{key}"
     if fmt == "lottie":
         from . import lottie
@@ -1653,6 +1686,8 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
             raise ValueError("json export path must end with .json")
         out.parent.mkdir(parents=True, exist_ok=True)
         data = anim_mod.describe(key, anim, c)
+        if c.get("interactions"):
+            data["interactions"] = c["interactions"]
         ex.write_json(out, data)
         return {"file": str(out), "tracks": len(data["tracks"]), "duration": data["duration"], "loop": data["loop"]}
 
@@ -1661,7 +1696,7 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
     times = anim_mod.frame_times(anim, fps)
     rate = float(fps or anim.get("fps", 30))
     only = {e["id"] for e in st.select(c, ids, group)} if (ids or group) else None
-    own_bg = c.get("background") if fmt in ("gif", "apng", "webp") and not background else None
+    own_bg = c.get("background") if fmt in ("gif", "apng", "webp", "mp4", "webm") and not background else None
     images, warnings = _poses(c, anim, times, float(scale), include_background=bool(own_bg), only=only,
                               motion_blur=motion_blur, fps=rate)
     result: dict = {"animation": key, "frames": len(images), "fps": rate, "duration": anim["duration"],
@@ -1674,7 +1709,7 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
             box = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
             images = [im.crop(box) for im in images]
             offset = (box[0], box[1])
-    if not own_bg and (background or fmt == "gif"):
+    if not own_bg and (background or fmt in ("gif", "mp4")):
         flat = []
         for im in images:
             bg = backdrop(im.size, background or "dark", st.theme.get("colors", {}))
@@ -1716,7 +1751,7 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
             result["note"] = (f"sheet is {sheet.width}x{sheet.height}; Roblox downsizes images over {ex.ROBLOX_MAX}px. "
                               "Lower fps or scale, or tween the property in engine with format='json'.")
     else:
-        suffix = {"gif": ".gif", "apng": ".png", "webp": ".webp"}[fmt]
+        suffix = {"gif": ".gif", "apng": ".png", "webp": ".webp", "mp4": ".mp4", "webm": ".webm"}[fmt]
         st_path = Path(path).expanduser() if path else st.exports_dir / "animations" / f"{base_name}{suffix}"
         if not st_path.is_absolute():
             st_path = st.exports_dir / st_path
@@ -1725,7 +1760,11 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
         st_path.parent.mkdir(parents=True, exist_ok=True)
         ms = max(10, int(round(1000 / rate)))
         loops = 0 if anim.get("loop") else 1
-        if fmt == "gif":
+        if fmt in ("mp4", "webm"):
+            reps = max(1, min(100, int(repeat))) if anim.get("loop") else 1
+            _encode_video(images * reps, rate, st_path, fmt)
+            result["bytes"] = st_path.stat().st_size
+        elif fmt == "gif":
             frames_p = [im.convert("RGB").quantize(colors=255, method=PILImage.Quantize.MEDIANCUT,
                                                    dither=PILImage.Dither.FLOYDSTEINBERG) for im in images]
             frames_p[0].save(st_path, save_all=True, append_images=frames_p[1:], duration=ms, loop=0, disposal=1,
@@ -1748,7 +1787,7 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
 @tool
 def set_theme(colors: dict | None = None, styles: dict | None = None, replace: bool = False,
               modes: dict | None = None, mode: str | None = None, numbers: dict | None = None,
-              tokens: dict | str | None = None):
+              tokens: dict | str | None = None, materials: dict | None = None):
     """Define the design tokens shared by every canvas, so a whole UI kit stays consistent.
 
     modes: Figma-style variable modes - named sets of colour overrides, e.g.
@@ -1761,7 +1800,13 @@ def set_theme(colors: dict | None = None, styles: dict | None = None, replace: b
       A mode may override them too: modes={"compact": {"space-md": 10}}.
     tokens: import a W3C design-tokens (DTCG) JSON - a dict or a .json path - as exported by Tokens Studio,
       Penpot or Style Dictionary: colours become colour tokens, dimensions / numbers become number tokens,
-      {group.name} aliases become $group-name.
+      {group.name} aliases become $group-name. A DESIGN.md path (Google Stitch and other AI design tools)
+      imports its colours, typography (as text styles), rounded / spacing (as radius-* / space-* numbers).
+    materials: your own named materials, used like the built-in ones as style {"material": "name"}. Each is a
+      style object: build on a built-in one ({"material": "wood", "color": "#5a3a22", "scale": 2,
+      "light": {...}}) or write it from scratch with a shader fill ({"fill": {"type": "shader", "code": ...,
+      "params": {"c": "$primary", "t": 0}}, "light": {...}, "noise": 0.05}). A use like {"material":
+      {"name": "mine", "color": ..., "scale": ..., "t": ...}} feeds those into its shader params (c, sc, t).
     colors: {"bg": "#0d0b14", "primary": "#8b5cf6", ...} -> use anywhere as "$primary" or "$primary@0.5".
     styles: named style objects, usable as style="panel" or {"use": "panel", ...overrides}. A style can
       hold any style key plus text defaults (font, weight, size, letter_spacing, uppercase), e.g.
@@ -1772,14 +1817,25 @@ def set_theme(colors: dict | None = None, styles: dict | None = None, replace: b
     """
     st = store()
     colors, numbers = _maybe_json(colors), _maybe_json(numbers)
+    styles = _maybe_json(styles)
     if tokens is not None:
-        from .tokens import read_dtcg
-        got_colors, got_numbers = read_dtcg(_maybe_json(tokens))
+        tok = _maybe_json(tokens)
+        if isinstance(tok, str) and tok.strip().lower().endswith(".md"):
+            from .tokens import read_design_md
+            md = Path(tok).expanduser()
+            if not md.is_file():
+                raise ValueError(f"DESIGN.md not found: {md}")
+            got_colors, got_numbers, got_styles = read_design_md(md.read_text(encoding="utf-8"))
+            styles = {**got_styles, **(styles or {})}
+        else:
+            from .tokens import read_dtcg
+            got_colors, got_numbers = read_dtcg(tok)
         colors = {**got_colors, **(colors or {})}
         numbers = {**got_numbers, **(numbers or {})}
-    st.set_theme(colors, _maybe_json(styles), replace, _maybe_json(modes), mode, numbers)
+    st.set_theme(colors, styles, replace, _maybe_json(modes), mode, numbers, _maybe_json(materials))
     return {"colors": st.theme["colors"], "numbers": st.theme.get("numbers", {}), "styles": sorted(st.theme["styles"]),
-            "modes": sorted(st.theme.get("modes") or {}), "mode": st.theme.get("mode")}
+            "modes": sorted(st.theme.get("modes") or {}), "mode": st.theme.get("mode"),
+            "materials": sorted(st.theme.get("materials") or {})}
 
 
 @tool
@@ -2407,6 +2463,32 @@ def export_web(canvases: list[str] | str, out_dir: str | None = None, layout: st
     report = webexport.build(st, pages, folder, layout, language, include_background, image_scale)
     result: dict = {"folder": str(folder), "open": str(folder / "index.html"), "pages": report["pages"],
                     "embedded_as_image": report["picture"]}
+    if report["notes"]:
+        result["notes"] = report["notes"]
+    return result
+
+
+@tool
+def export_react(canvases: list[str] | str, out_dir: str | None = None, language: str | None = None,
+                 include_background: bool = True, image_scale: float = 2):
+    """Export canvases as React components (JSX + CSS) for a React / Next.js / Vite codebase: one
+    <Name>.jsx and <Name>.css per canvas, a shared styles.css, gameui-runtime.js and an assets folder
+    (images are imported, so the bundler handles them). Same rendering as export_web: real text, CSS boxes,
+    inline SVG, hover / pressed CSS, keyframe animations and set_interaction rules. Navigation calls the
+    component's onNavigate(canvasId, mode) prop. Copy the folder into the project and import a component."""
+    from . import webexport
+    st = store()
+    names = [canvases] if isinstance(canvases, str) and not canvases.strip().startswith("[") else (_maybe_json(canvases) or [])
+    if not names:
+        raise ValueError("canvases must name at least one canvas")
+    pages = [st.get(n) for n in names]
+    for c in pages:
+        st.require_glyphs(c, language)
+    folder = _out_dir(out_dir, f"react/{pages[0]['id']}")
+    report = webexport.build_react(st, pages, folder, language, include_background, image_scale)
+    result: dict = {"folder": str(folder), "components": report["components"],
+                    "embedded_as_image": report["picture"],
+                    "usage": f"import {report['components'][0][:-4]} from './{folder.name}/{report['components'][0]}';"}
     if report["notes"]:
         result["notes"] = report["notes"]
     return result

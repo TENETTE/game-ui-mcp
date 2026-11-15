@@ -639,7 +639,7 @@ def test_preview_and_export_animation(ws):
     assert key["ease"] == "quad-out" and key["roblox"]["EasingStyle"] == "Quad" and key["dotween"] == "OutQuad"
     assert desc["tracks"][0]["layers"] == ["base"]
     with pytest.raises(ValueError):
-        s.export_animation("a", "bounce", format="mp4")
+        s.export_animation("a", "bounce", format="avi")
 
 
 def test_batch_animation_ops_and_undo(ws):

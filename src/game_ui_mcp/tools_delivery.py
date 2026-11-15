@@ -25,7 +25,11 @@ from .server import (Image, _gradient_blocks, _label_font, _maybe_json, _out_dir
                      backdrop, store, tool)
 from .store import slugify
 
-__all__ = ["preview_nine_slice", "export_spec", "export_theme", "set_link", "export_prototype", "export_screen"]
+__all__ = ["preview_nine_slice", "export_spec", "export_theme", "set_link", "set_interaction", "export_prototype",
+           "export_screen"]
+
+_TRIGGERS = ("load", "hover", "leave", "press", "release", "click")
+_ACTIONS = ("play", "stop", "set_state", "clear_state", "toggle_state", "navigate", "overlay", "back", "url")
 
 
 
@@ -260,12 +264,14 @@ def export_theme(format: str = "json", path: str | None = None):
     format: "json", "css" (custom properties + text classes), "uss" (Unity UI Toolkit variables +
     classes), "csharp" (static Color32 class), "gdscript" (Godot constants), "luau" (Roblox module with
     Color3 + transparency), "dtcg" (W3C design tokens JSON for Tokens Studio, Penpot, Style Dictionary;
-    modes go into $extensions). Text styles (theme styles with font / size / weight) become typography tokens.
+    modes go into $extensions), "design.md" (DESIGN.md for AI design / coding agents such as Google Stitch:
+    YAML front-matter tokens plus readable colour, type, spacing and component sections).
+    Text styles (theme styles with font / size / weight) become typography tokens.
     """
     st = store()
     fmt = format.lower()
     ext = {"json": ".json", "css": ".css", "uss": ".uss", "csharp": ".cs", "gdscript": ".gd", "luau": ".luau",
-           "dtcg": ".tokens.json"}
+           "dtcg": ".tokens.json", "design.md": ".md"}
     if fmt not in ext:
         raise ValueError(f"format must be one of {', '.join(ext)}")
     colors = st.theme.get("colors", {})
@@ -287,7 +293,13 @@ def export_theme(format: str = "json", path: str | None = None):
                 except ValueError:
                     pass
     lines: list[str] = []
-    if fmt == "dtcg":
+    if fmt == "design.md":
+        from .tokens import write_design_md
+        title = Path(path).stem.replace("DESIGN", "").strip("_- ") if path else ""
+        text = write_design_md(title or "UI kit", {k: to_hex(v) if v[3] == 255 else _rgba_hex(v) for k, v in rgba.items()},
+                               numbers, text_styles, {m: {k: to_hex(v) for k, v in vals.items()} for m, vals in modes.items()},
+                               st.theme.get("styles", {}))
+    elif fmt == "dtcg":
         from .tokens import write_dtcg
         text = json.dumps(write_dtcg({k: to_hex(v) if v[3] == 255 else _rgba_hex(v) for k, v in rgba.items()}, numbers,
                                      text_styles, {m: {k: to_hex(v) for k, v in vals.items()} for m, vals in modes.items()},
@@ -357,7 +369,7 @@ def export_theme(format: str = "json", path: str | None = None):
             lines.append(f"\t{_ident(name, 'snake')} = {{ size = {ts.get('size', 16)}, font = \"{ts.get('font', 'Inter')}\" }},")
         lines += ["}", "", "return Theme"]
         text = "\n".join(lines) + "\n"
-    out = _out_path(path, "ui_theme" + ext[fmt], suffixes=tuple(ext.values()))
+    out = _out_path(path, "DESIGN.md" if fmt == "design.md" else "ui_theme" + ext[fmt], suffixes=tuple(ext.values()))
     out.write_text(text, encoding="utf-8")
     result = {"file": str(out), "colors": len(rgba), "text_styles": len(text_styles), "modes": sorted(modes)}
     if modes and fmt in ("csharp", "gdscript", "luau"):
@@ -395,6 +407,73 @@ def set_link(canvas: str, id: str, target: str | None, mode: str = "navigate"):
         c.pop("links", None)
     st.save_canvas(c)
     return {"canvas": c["id"], "links": c.get("links", {})}
+
+
+@tool
+def set_interaction(canvas: str, id: str, trigger: str, action: str, animation: str | None = None,
+                    state: str | None = None, target: str | None = None, delay: float = 0, remove: bool = False):
+    """A state machine for the canvas: when `trigger` happens on `id`, do `action`. Rules run in
+    export_web and export_react and are listed in export_animation(format="json") for engine code.
+
+    id: an element id, "group:<name>", or "canvas" (for load / key / end triggers).
+    trigger: "load", "hover", "leave", "press", "release", "click", "key:<Key>" (e.g. "key:Escape",
+      "key:ArrowDown"), or "end:<animation>" (when that animation finishes - chain animations).
+    action: "play" / "stop" an animation (it no longer autoplays once a rule plays it; restarts on each
+      play), "set_state" / "clear_state" / "toggle_state" a canvas state (set_state looks: selected, open,
+      muted, tab=2...), "navigate" / "overlay" to another canvas, "back", or "url" (target = https link).
+    delay: seconds before the action. Several rules may share a trigger (click: play "press" + navigate
+      after 0.2 s). remove=true deletes the rule with this id + trigger + action.
+    Example - a menu button: hover -> play "hover_in"; leave -> play "hover_out"; press -> set_state
+    "pressed"; release -> clear_state "pressed"; click -> navigate "settings" with delay 0.15."""
+    st = store()
+    c = st.get(canvas)
+    if id != "canvas":
+        if id.startswith("group:"):
+            if not any(e.get("group") == id[6:] for e in c["elements"]):
+                raise ValueError(f"no group '{id[6:]}' on canvas '{c['id']}'")
+        else:
+            id = st.find(c, id)["id"]
+    trigger = str(trigger).strip()
+    if trigger not in _TRIGGERS and not re.match(r"^(key:.+|end:.+)$", trigger):
+        raise ValueError(f"trigger must be one of {', '.join(_TRIGGERS)}, key:<Key> or end:<animation>")
+    if trigger.startswith("end:"):
+        trigger = "end:" + st.get_animation(c, trigger[4:])[0]
+    action = str(action).lower()
+    if action not in _ACTIONS:
+        raise ValueError(f"action must be one of {', '.join(_ACTIONS)}")
+    rule: dict = {"id": id, "trigger": trigger, "action": action}
+    if action in ("play", "stop"):
+        if not animation:
+            raise ValueError(f'action "{action}" needs animation=<name>')
+        rule["animation"] = st.get_animation(c, animation)[0]
+    elif action.endswith("_state"):
+        if not state:
+            raise ValueError(f'action "{action}" needs state=<name> (define its look with set_state)')
+        if state not in (c.get("states") or {}):
+            known = ", ".join(sorted(c.get("states") or {})) or "(none)"
+            raise ValueError(f"no state '{state}' on canvas '{c['id']}' - define it with set_state first. States: {known}")
+        rule["state"] = state
+    elif action in ("navigate", "overlay"):
+        if not target:
+            raise ValueError(f'action "{action}" needs target=<canvas id>')
+        rule["target"] = st.get(target)["id"]
+    elif action == "url":
+        if not target or not re.match(r"^(https?://|mailto:)", str(target)):
+            raise ValueError("action url needs target starting with https://, http:// or mailto:")
+        rule["target"] = str(target)
+    if delay:
+        rule["delay"] = max(0.0, float(delay))
+    key = (id, trigger, action, rule.get("animation"), rule.get("state"))
+    rows = [r for r in (c.get("interactions") or [])
+            if (r["id"], r["trigger"], r["action"], r.get("animation"), r.get("state")) != key]
+    if not remove:
+        rows.append(rule)
+    if rows:
+        c["interactions"] = rows
+    else:
+        c.pop("interactions", None)
+    st.save_canvas(c)
+    return {"canvas": c["id"], "interactions": rows}
 
 
 def _data_uri(img: PILImage.Image) -> str:

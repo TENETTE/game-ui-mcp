@@ -115,7 +115,7 @@ def resolve_style(style: Any, theme: dict) -> dict:
             out[key] = value
     if out.get("material"):
         from .materials import expand
-        out = {**expand(out.pop("material")), **out}
+        out = {**expand(out.pop("material"), theme), **out}
     return out
 
 

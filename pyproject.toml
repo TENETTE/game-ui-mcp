@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "game-ui-mcp"
-version = "0.10.0"
+version = "0.11.0"
 description = "Let your AI agent design, animate and export game and app UI. Local MCP server, no image model."
 readme = "README.md"
 license = "MIT"
@@ -35,6 +35,8 @@ Issues = "https://github.com/TENETTE/game-ui-mcp/issues"
 # pip install "game-ui-mcp[gpu]": shader fills and big blurs on an NVIDIA GPU (CUDA 12); falls back to the CPU
 gpu = ["cupy-cuda12x[ctk]>=13.4"]
 cpu = []
+# pip install "game-ui-mcp[video]": MP4 / WebM export without a system ffmpeg
+video = ["imageio-ffmpeg>=0.5"]
 dev = ["pytest>=7"]
 
 [project.scripts]

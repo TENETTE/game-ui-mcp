@@ -15,6 +15,7 @@ import json
 import math
 import re
 import shutil
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -463,8 +464,9 @@ def _anchor(css: dict, el: dict, W: float, H: float) -> None:
         css["top"], css["height"] = f"{_n(top / H * 100)}%", f"{_n(h / H * 100)}%"
 
 
-def _css_decl(css: dict) -> str:
-    return ";".join(f"{k}:{v}" for k, v in css.items())
+def _css_decl(css: dict, important: bool = False) -> str:
+    """Inline-style text; important=True lets state rules win over the element's inline style."""
+    return ";".join(f"{k}:{v}{'!important' if important else ''}" for k, v in css.items())
 
 
 def _keyframes(ctx: _Ctx, canvas: dict, name: str, anim: dict, ids: set[str]) -> tuple[str, dict[str, str]]:
@@ -532,6 +534,11 @@ def build(store, canvases: list[dict], out: Path, layout: str, language: str | N
         states = c.get("states") or {}
         focus = {eid: i + 1 for i, eid in enumerate(c.get("focus_order") or [])}
         open_group = None
+        ix = c.get("interactions") or []
+        ix_ids = {rule["id"] for rule in ix}
+        played = {rule["animation"] for rule in ix if rule.get("animation")}
+        used_states = {rule["state"] for rule in ix if rule.get("state")}
+        clickable = {rule["id"] for rule in ix if rule["trigger"] in ("click", "press", "release")}
         for lay, elements in r.stack():
             props = r.layer_props(lay) if lay else None
             if props and not props["visible"]:
@@ -568,6 +575,7 @@ def build(store, canvases: list[dict], out: Path, layout: str, language: str | N
                         if grp in groups_with_links:
                             target = links[next(e["id"] for e in c["elements"] if e.get("group") == grp and e["id"] in links)]
                             attrs = _link_attrs(target, pages, focus.get(grp, 0))
+                        attrs += _ix_attrs(f"group:{grp}", ix_ids, clickable, attrs, focus.get(grp, 0))
                         body.append(f'<div class="g g-{_ident(grp)}"{attrs}>')
                     open_group = grp
                 got = _element(ctx, el, svg_doc)
@@ -576,6 +584,7 @@ def build(store, canvases: list[dict], out: Path, layout: str, language: str | N
                 extra_attrs = ""
                 if el["id"] in links and not grp:
                     extra_attrs = _link_attrs(links[el["id"]], pages, focus.get(el["id"], 0))
+                extra_attrs += _ix_attrs(el["id"], ix_ids, clickable, extra_attrs, focus.get(el["id"], 0))
                 if el.get("note"):
                     extra_attrs += f' title="{html.escape(str(el["note"]))}"'
                 if got is None:
@@ -606,9 +615,8 @@ def build(store, canvases: list[dict], out: Path, layout: str, language: str | N
                 open_group = None
             if layer_open:
                 body.append("</div>")
-        for state, pseudo in _STATE_PSEUDO.items():
-            if state not in states:
-                continue
+        for state in [s for s in states if s in _STATE_PSEUDO or s in used_states]:
+            pseudo = _STATE_PSEUDO.get(state)
             posed = apply_state(c, state)
             pr = store.renderer(posed, 1.0, language=language)
             pctx = _Ctx(pr, theme, out, ctx.scale)
@@ -624,15 +632,19 @@ def build(store, canvases: list[dict], out: Path, layout: str, language: str | N
                 diff = {k: v for k, v in b[1].items() if a[1].get(k) != v}
                 if not diff:
                     continue
-                sel = (f".g-{_ident(base_el['group'])}{pseudo} #{_ident(eid)}" if base_el.get("group")
-                       else f"#{_ident(eid)}{pseudo}")
-                page_css.append(f"{sel}{{{_css_decl(diff)};transition:all .15s ease}}")
+                if pseudo:
+                    sel = (f".g-{_ident(base_el['group'])}{pseudo} #{_ident(eid)}" if base_el.get("group")
+                           else f"#{_ident(eid)}{pseudo}")
+                    page_css.append(f"{sel}{{{_css_decl(diff, True)};transition:all .15s ease}}")
+                if state in used_states:
+                    page_css.append(f".page.s-{_ident(state)} #{_ident(eid)}{{{_css_decl(diff, True)};transition:all .15s ease}}")
         for name, anim in (c.get("animations") or {}).items():
             rules, decls = _keyframes(ctx, c, name, anim, {e["id"] for e in c["elements"]})
             if rules:
                 page_css.append(rules)
                 for eid, decl in decls.items():
-                    page_css.append(f"#{_ident(eid)}{{animation:{decl}}}")
+                    sel = f".page.p-{_ident(name)} #{_ident(eid)}" if name in played else f"#{_ident(eid)}"
+                    page_css.append(f"{sel}{{animation:{decl}}}")
         bg = c.get("background") if include_background else None
         bg_css = ""
         if bg and not _is_none(bg):
@@ -649,13 +661,19 @@ def build(store, canvases: list[dict], out: Path, layout: str, language: str | N
             f"@font-face{{font-family:'{fam}';src:url(assets/fonts/{file});font-weight:{'100 900' if var else w};font-display:swap}}"
             for fam, (file, w, var) in ctx.fonts.items())
         all_fonts.update(ctx.fonts)
+        cfg = _ix_config(c, ix, pages)
+        ix_script = ("<script>window.GAMEUI_IX=" + json.dumps(cfg, ensure_ascii=False).replace("</", "<\\/")
+                     + "</script>") if ix else ""
+        report.setdefault("parts", {})[c["id"]] = {
+            "file": pages[c["id"]], "fonts_css": fonts_css, "size": size, "bg_css": bg_css,
+            "page_css": "".join(page_css), "body": "\n".join(body), "W": W, "H": H, "ix": cfg}
         doc = (f"<!doctype html>\n<html lang=\"{html.escape(language or 'en')}\"><head><meta charset=\"utf-8\">"
                f"<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
                f"<title>{html.escape(str(c.get('name') or c['id']))}</title>"
                f"<link rel=\"stylesheet\" href=\"styles.css\"><style>{fonts_css}"
                f".page{{{size};{bg_css}}}{''.join(page_css)}</style></head>"
                f"<body class=\"{layout}\"><main class=\"page\" data-w=\"{_n(W)}\" data-h=\"{_n(H)}\">"
-               + "\n".join(body) + "</main><script src=\"app.js\"></script></body></html>\n")
+               + "\n".join(body) + f"</main>{ix_script}<script src=\"app.js\"></script></body></html>\n")
         (out / pages[c["id"]]).write_text(doc, encoding="utf-8")
         report["pages"].append(pages[c["id"]])
         report["picture"] += [f"{c['id']}:{i}" for i in ctx.raster]
@@ -673,6 +691,36 @@ def _hex(value: Any, theme_colors: Any) -> str:
     return f"#{r:02x}{g:02x}{b:02x}" if a == 255 else f"rgba({r}, {g}, {b}, {_n(a / 255)})"
 
 
+def _ix_attrs(key: str, ix_ids: set, clickable: set, existing: str, tab: int) -> str:
+    if key not in ix_ids:
+        return ""
+    attr = f' data-ix="{html.escape(key)}"'
+    if key in clickable and "tabindex" not in existing:
+        attr += f' role="button" tabindex="{tab or 0}"'
+    return attr
+
+
+def _ix_config(c: dict, ix: list, pages: dict) -> dict:
+    """The page's interaction rules for the runtime (gameuiAttach)."""
+    rules = []
+    for rule in ix:
+        r = dict(rule)
+        if r.get("animation"):
+            r["animKey"] = _ident(r["animation"])
+        if r.get("state"):
+            r["stateKey"] = _ident(r["state"])
+        if r["action"] in ("navigate", "overlay"):
+            r["href"], r["to"] = pages.get(r["target"], f"{_ident(r['target'])}.html"), r["target"]
+        elif r["action"] == "back":
+            r["href"] = "#back"
+        elif r["action"] == "url":
+            r["href"] = r["target"]
+        rules.append(r)
+    anims = {k: {"duration": float(a.get("duration", 1)), "loop": bool(a.get("loop"))}
+             for k, a in (c.get("animations") or {}).items()}
+    return {"rules": rules, "anims": anims}
+
+
 def _link_attrs(target: Any, pages: dict, tab: int) -> str:
     if isinstance(target, dict):
         mode, dest = str(target.get("mode", "navigate")), target.get("target") or target.get("url")
@@ -685,6 +733,8 @@ def _link_attrs(target: Any, pages: dict, tab: int) -> str:
     else:
         href = pages.get(str(dest), f"{_ident(str(dest))}.html")
     attr = f' data-href="{html.escape(href)}" data-mode="{html.escape(mode)}" role="link" tabindex="{tab or 0}"'
+    if mode != "url" and dest != "back":
+        attr += f' data-to="{html.escape(str(dest))}"'
     return attr
 
 
@@ -707,7 +757,51 @@ body.fit .page{transform-origin:center center}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 """
 
-_APP_JS = """// game-ui-mcp web export: fit-to-window scaling, links, overlays
+RUNTIME_JS = """function gameuiAttach(root, cfg, go) {
+  cfg = cfg || {};
+  var rules = cfg.rules || [], anims = cfg.anims || {}, timers = [];
+  function act(r) {
+    var run = function () {
+      var a = r.action;
+      if (a === 'play') {
+        var cls = 'p-' + r.animKey;
+        root.classList.remove(cls); void root.offsetWidth; root.classList.add(cls);
+        var info = anims[r.animation];
+        if (info && !info.loop) timers.push(setTimeout(function () { fire(null, 'end:' + r.animation); }, info.duration * 1000));
+      } else if (a === 'stop') root.classList.remove('p-' + r.animKey);
+      else if (a === 'set_state') root.classList.add('s-' + r.stateKey);
+      else if (a === 'clear_state') root.classList.remove('s-' + r.stateKey);
+      else if (a === 'toggle_state') root.classList.toggle('s-' + r.stateKey);
+      else go(r.href, a, r.to);
+    };
+    if (r.delay) timers.push(setTimeout(run, r.delay * 1000)); else run();
+  }
+  function fire(id, trigger) {
+    rules.forEach(function (r) { if (r.trigger === trigger && (id === null || r.id === id)) act(r); });
+  }
+  function on(type, trigger, edge) {
+    root.addEventListener(type, function (e) {
+      var el = e.target && e.target.closest ? e.target.closest('[data-ix]') : null;
+      if (el && (!edge || !el.contains(e.relatedTarget))) fire(el.dataset.ix, trigger);
+    });
+  }
+  on('pointerover', 'hover', true); on('pointerout', 'leave', true);
+  on('pointerdown', 'press'); on('pointerup', 'release'); on('click', 'click');
+  root.addEventListener('click', function (e) {
+    var el = e.target && e.target.closest ? e.target.closest('[data-href]') : null;
+    if (el) go(el.dataset.href, el.dataset.mode, el.dataset.to);
+  });
+  root.addEventListener('keydown', function (e) {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-href],[data-ix]')) { e.preventDefault(); e.target.click(); }
+  });
+  function key(e) { fire(null, 'key:' + e.key); }
+  document.addEventListener('keydown', key);
+  fire(null, 'load');
+  return function () { timers.forEach(clearTimeout); document.removeEventListener('keydown', key); };
+}
+"""
+
+_APP_JS = """// game-ui-mcp web export: fit-to-window scaling, links, overlays, interactions
 (function () {
   const page = document.querySelector('.page');
   function fit() {
@@ -733,7 +827,134 @@ _APP_JS = """// game-ui-mcp web export: fit-to-window scaling, links, overlays
     location.href = href;
   }
   addEventListener('message', e => { if (e.data === 'close-overlay') document.querySelectorAll('.overlay').forEach(o => o.remove()); });
-  document.addEventListener('click', e => { const el = e.target.closest('[data-href]'); if (el) go(el); });
-  document.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-href]')) { e.preventDefault(); go(e.target); } });
-})();
+  if (page) gameuiAttach(page, window.GAMEUI_IX, (href, mode) => go({ dataset: { href: href, mode: mode } }));
+""" + RUNTIME_JS + """})();
 """
+
+
+_VOID = {"img", "br", "hr", "input", "source", "meta", "link"}
+_JSX_ATTR = {"class": "className", "for": "htmlFor", "tabindex": "tabIndex", "srcset": "srcSet",
+             "crossorigin": "crossOrigin", "readonly": "readOnly", "maxlength": "maxLength",
+             "contenteditable": "contentEditable", "spellcheck": "spellCheck"}
+
+
+def _style_object(css: str) -> str:
+    parts, depth, cur = [], 0, ""
+    for ch in css:
+        depth += (ch == "(") - (ch == ")")
+        if ch == ";" and depth == 0:
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    parts.append(cur)
+    items = []
+    for part in parts:
+        prop, _, val = part.partition(":")
+        prop, val = prop.strip(), val.strip()
+        if prop and val:
+            key = prop if prop.startswith("--") else re.sub(r"-([a-z])", lambda m: m.group(1).upper(), prop)
+            items.append(f"{json.dumps(key)}: {json.dumps(val)}")
+    return "{{" + ", ".join(items) + "}}"
+
+
+class _Jsx(HTMLParser):
+    """HTML (from the web export) -> JSX: className, style objects, self-closing tags, imported images."""
+
+    def __init__(self, images: dict) -> None:
+        super().__init__(convert_charrefs=True)
+        self.out: list[str] = []
+        self.images = images
+
+    def _attrs(self, tag: str, attrs: list) -> str:
+        res = []
+        for name, value in attrs:
+            if name == "data-gsvg":
+                res.append(f"dangerouslySetInnerHTML={{{{ __html: SVG_{value} }}}}")
+            elif name == "style":
+                res.append(f"style={_style_object(value or '')}")
+            elif tag == "img" and name == "src" and value and value.startswith("assets/"):
+                var = self.images.setdefault(value, f"img{len(self.images)}")
+                res.append(f"src={{{var}}}")
+            else:
+                key = _JSX_ATTR.get(name, name)
+                res.append(key if value is None else f"{key}={{{json.dumps(value, ensure_ascii=False)}}}")
+        return (" " + " ".join(res)) if res else ""
+
+    def handle_starttag(self, tag, attrs):
+        self.out.append(f"<{tag}{self._attrs(tag, attrs)}{' />' if tag in _VOID else '>'}")
+
+    def handle_startendtag(self, tag, attrs):
+        self.out.append(f"<{tag}{self._attrs(tag, attrs)} />")
+
+    def handle_endtag(self, tag):
+        if tag not in _VOID:
+            self.out.append(f"</{tag}>")
+
+    def handle_data(self, data):
+        if data and not data.isspace():
+            self.out.append("{" + json.dumps(data, ensure_ascii=False) + "}")
+        elif data and "\n" not in data:
+            self.out.append('{" "}')
+
+
+def to_jsx(body: str) -> tuple[str, dict, list[str]]:
+    """(jsx, {asset path: import name}, [svg markup]) for a page body."""
+    svgs: list[str] = []
+
+    def keep(m: re.Match) -> str:
+        svgs.append(m.group(2))
+        return f'{m.group(1)} data-gsvg="{len(svgs) - 1}"></div>'
+    body = re.sub(r'(<div class="el vec"[^>]*)>(<svg.*?</svg>)</div>', keep, body, flags=re.S)
+    images: dict = {}
+    p = _Jsx(images)
+    p.feed(body)
+    p.close()
+    return "\n      ".join(p.out), images, svgs
+
+
+def build_react(store, canvases: list[dict], out: Path, language: str | None, include_background: bool,
+                image_scale: float) -> dict:
+    report = build(store, canvases, out, "fit", language, include_background, image_scale)
+    used: set[str] = set()
+    components = []
+    for c in canvases:
+        part = report["parts"][c["id"]]
+        name = re.sub(r"[^0-9a-zA-Z]+", " ", str(c["id"])).title().replace(" ", "") or "Screen"
+        if not name[0].isalpha():
+            name = "Screen" + name
+        while name in used:
+            name += "X"
+        used.add(name)
+        cls = f"page-{_ident(c['id'])}"
+        (out / f"{name}.css").write_text(part["fonts_css"] + f".{cls}{{{part['size']};{part['bg_css']}}}"
+                                         + part["page_css"] + "\n", encoding="utf-8")
+        jsx, images, svgs = to_jsx(part["body"])
+        lines = ["import { useEffect, useRef } from 'react';", "import './styles.css';", f"import './{name}.css';",
+                 "import { gameuiAttach } from './gameui-runtime.js';"]
+        lines += [f"import {var} from './{path}';" for path, var in images.items()]
+        lines += ["", f"const IX = {json.dumps(part['ix'], ensure_ascii=False)};"]
+        lines += [f"const SVG_{i} = {json.dumps(s, ensure_ascii=False)};" for i, s in enumerate(svgs)]
+        lines += ["", f"export default function {name}({{ onNavigate }}) {{",
+                  "  const ref = useRef(null);",
+                  "  useEffect(() => gameuiAttach(ref.current, IX, (href, mode, to) => {",
+                  "    if (onNavigate) return onNavigate(to || href, mode);",
+                  "    if (mode === 'url') window.open(href, '_blank', 'noopener');",
+                  "  }), [onNavigate]);",
+                  "  return (",
+                  f'    <main ref={{ref}} className="page {cls}" data-w="{_n(part["W"])}" data-h="{_n(part["H"])}">',
+                  f"      {jsx}",
+                  "    </main>",
+                  "  );",
+                  "}", ""]
+        (out / f"{name}.jsx").write_text("\n".join(lines), encoding="utf-8")
+        (out / part["file"]).unlink(missing_ok=True)
+        components.append(f"{name}.jsx")
+    (out / "app.js").unlink(missing_ok=True)
+    css = (out / "styles.css").read_text(encoding="utf-8")
+    css = "\n".join(line for line in css.splitlines() if not line.startswith(("html,body", "body.fit", "@view-transition")))
+    (out / "styles.css").write_text(css + "\n", encoding="utf-8")
+    (out / "gameui-runtime.js").write_text("export " + RUNTIME_JS, encoding="utf-8")
+    (out / "index.js").write_text("".join(f"export {{ default as {cmp[:-4]} }} from './{cmp}';\n" for cmp in components),
+                                  encoding="utf-8")
+    return {"components": components, "picture": report["picture"], "notes": report["notes"]}

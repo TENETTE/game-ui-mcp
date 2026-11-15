@@ -109,3 +109,135 @@ def write_dtcg(colors: dict, numbers: dict, text_styles: dict, modes: dict, mode
             m: {**{k: v for k, v in modes.get(m, {}).items()}, **{k: v for k, v in mode_numbers.get(m, {}).items()}}
             for m in sorted(set(modes) | set(mode_numbers))}}}
     return doc
+
+
+def _yaml_scalar(text: str) -> Any:
+    text = text.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+        return text[1:-1]
+    try:
+        return float(text) if "." in text else int(text)
+    except ValueError:
+        return text
+
+
+def _front_matter(text: str) -> dict:
+    """The YAML front matter of a DESIGN.md (nested maps of scalars - the subset DESIGN.md files use)."""
+    m = re.match(r"﻿?---\s*\n(.*?)\n---\s*(\n|$)", text, re.S)
+    if not m:
+        return {}
+    root: dict = {}
+    stack: list[tuple[int, dict]] = [(-1, root)]
+    for raw in m.group(1).splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        key, _, value = raw.strip().partition(":")
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+        parent = stack[-1][1]
+        key = _yaml_scalar(key)
+        if value.strip():
+            parent[str(key)] = _yaml_scalar(value.split(" #")[0])
+        else:
+            parent[str(key)] = {}
+            stack.append((indent, parent[str(key)]))
+    return root
+
+
+def read_design_md(text: str) -> tuple[dict, dict, dict]:
+    """(colors, numbers, styles) from a DESIGN.md: YAML front matter (colors, typography, rounded, spacing,
+    other number maps), or failing that "| name | #hex |" table rows and "- name: #hex" lines."""
+    fm = _front_matter(text)
+    colors: dict = {}
+    numbers: dict = {}
+    styles: dict = {}
+    for key, value in (fm.get("colors") or {}).items():
+        col = _color(value) if not isinstance(value, dict) else None
+        if col and col.startswith("{"):
+            col = "$" + _name([col.strip("{}").split(".")[-1]])
+        if col:
+            colors[_name([str(key)])] = col
+    prefixes = {"rounded": "radius", "radius": "radius", "spacing": "space", "space": "space"}
+    for group, values in fm.items():
+        if group in ("colors", "typography") or not isinstance(values, dict):
+            continue
+        for key, value in values.items():
+            num = _dimension(value)
+            if num is not None:
+                numbers[f"{prefixes.get(group, _name([group]))}-{_name([str(key)])}"] = num
+    for key, spec in (fm.get("typography") or {}).items():
+        if not isinstance(spec, dict):
+            continue
+        style: dict = {}
+        if spec.get("fontFamily"):
+            style["font"] = str(spec["fontFamily"]).split(",")[0].strip().strip("'\"")
+        for src, dst in (("fontSize", "size"), ("letterSpacing", "letter_spacing")):
+            num = _dimension(spec.get(src))
+            if num is not None:
+                style[dst] = num
+        if spec.get("fontWeight") is not None:
+            style["weight"] = spec["fontWeight"]
+        if spec.get("color"):
+            col = _color(spec["color"]) or (f"${_name([str(spec['color']).strip('{}').split('.')[-1]])}"
+                                             if str(spec["color"]).startswith("{") else None)
+            if col:
+                style["fill"] = col
+        if style:
+            styles[_name([str(key)])] = style
+    if not fm:
+        for name, value in re.findall(r"^\|\s*`?([\w .-]+?)`?\s*\|\s*`?(#[0-9a-fA-F]{3,8})`?", text, re.M) + \
+                re.findall(r"^[-*]\s*\**`?([\w .-]+?)`?\**\s*[:=-]\s*`?(#[0-9a-fA-F]{3,8})\b", text, re.M):
+            colors[_name(name.strip().lower().split())] = value.lower()
+    if not (colors or numbers or styles):
+        raise ValueError("no design tokens found in this DESIGN.md (expected YAML front matter with colors / "
+                         "typography / rounded / spacing, or '| name | #hex |' rows)")
+    return colors, numbers, styles
+
+
+def write_design_md(name: str, colors: dict, numbers: dict, text_styles: dict, modes: dict, styles: dict) -> str:
+    """A DESIGN.md: YAML front matter tokens for tools and agents, then readable sections for people."""
+    def q(v: Any) -> str:
+        return f'"{v}"' if isinstance(v, str) else f"{v:g}" if isinstance(v, float) else str(v)
+    groups: dict[str, dict] = {"rounded": {}, "spacing": {}, "numbers": {}}
+    for key, value in numbers.items():
+        if key.startswith("radius-"):
+            groups["rounded"][key[7:]] = f"{value:g}px"
+        elif key.startswith("space-"):
+            groups["spacing"][key[6:]] = f"{value:g}px"
+        else:
+            groups["numbers"][key] = value
+    fm = ["---", f"name: {q(name)}", "colors:"] + [f"  {k}: {q(v)}" for k, v in colors.items()]
+    if text_styles:
+        fm.append("typography:")
+        for key, ts in text_styles.items():
+            fm.append(f"  {key}:")
+            for src, dst, unit in (("font", "fontFamily", ""), ("size", "fontSize", "px"), ("weight", "fontWeight", ""),
+                                   ("letter_spacing", "letterSpacing", "px"), ("color", "color", "")):
+                if ts.get(src) is not None:
+                    v = ts[src]
+                    fm.append(f"    {dst}: {q(f'{v:g}{unit}' if unit and isinstance(v, (int, float)) else v)}")
+    for group, values in groups.items():
+        if values:
+            fm.append(f"{group}:")
+            fm += [f"  {k}: {q(v)}" for k, v in values.items()]
+    fm.append("---")
+    body = ["", f"# {name} design system", "",
+            "Tokens above are the source of truth (generated by game-ui-mcp). Use them by name; never hand-type colours.",
+            "", "## Colors", "", "| Token | Value |", "| --- | --- |"]
+    body += [f"| `{k}` | `{v}` |" for k, v in colors.items()]
+    for mode, vals in modes.items():
+        body += ["", f"### Mode: {mode}", "", "| Token | Value |", "| --- | --- |"]
+        body += [f"| `{k}` | `{v}` |" for k, v in vals.items()]
+    if text_styles:
+        body += ["", "## Typography", "", "| Style | Font | Size | Weight |", "| --- | --- | --- | --- |"]
+        body += [f"| `{k}` | {ts.get('font', '')} | {ts.get('size', '')} | {ts.get('weight', '')} |"
+                 for k, ts in text_styles.items()]
+    if numbers:
+        body += ["", "## Spacing and shape", ""] + [f"- `{k}`: {v:g}" for k, v in numbers.items()]
+    comp = {k: v for k, v in styles.items() if k not in text_styles}
+    if comp:
+        body += ["", "## Component styles", ""]
+        body += [f"- `{k}`: " + ", ".join(f"{a} {json.dumps(b, ensure_ascii=False)}" for a, b in v.items())
+                 for k, v in comp.items()]
+    return "\n".join(fm + body) + "\n"

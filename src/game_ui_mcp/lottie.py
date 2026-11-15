@@ -312,5 +312,6 @@ def build(store, canvas: dict, anim: dict, name: str, fps: float | None, scale: 
     for i, layer in enumerate(reversed(layers), 1):
         layer["ind"] = i
     doc = {"v": "5.7.4", "fr": rate, "ip": 0, "op": n, "w": round(canvas["width"] * k), "h": round(canvas["height"] * k),
-           "nm": name, "ddd": 0, "assets": assets.items, "layers": list(reversed(layers))}
+           "nm": name, "ddd": 0, "assets": assets.items, "layers": list(reversed(layers)),
+           "markers": [{"tm": 0, "cm": name, "dr": n}]}
     return doc, report

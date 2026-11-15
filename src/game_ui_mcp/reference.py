@@ -22,7 +22,9 @@ Ready materials: style {"material": "gold"} or {"material": {"name": "wood", "co
   "seed": 2, "t": 0}} adds a procedural fill plus lighting; your own style keys override it. Names: bronze,
   chrome, copper, fabric, gem, glass, gold, hologram, ice, iron, jelly, lava, leather, marble, neon, paper,
   plastic, rubber, rust, silver, steel, stone, wood. Animate lava / jelly / hologram with "style.material.t".
-  From scratch: write a shader fill (guide("shader")).
+  From scratch: write a shader fill (guide("shader")), or save your own named materials with
+  set_theme(materials={"dark_oak": {"material": "wood", "color": "#4a2c18", "scale": 2},
+  "slime": {"fill": {"type": "shader", ...}, "light": {...}}}) and use them the same way.
 Images: add_image takes crop, cutout (removes a flat background), zoom / focus (pan and zoom), animated
   GIF / APNG / WebP or sheet {"cols", "rows", "count"} with frame (keyframe "frame" to play it). Images move
   with sub-pixel precision, so slow pans and slides stay smooth.
@@ -150,6 +152,11 @@ property "motion" travels along a path: values 0..1, path {"d": "M 0 0 C ...", "
 export_animation motion_blur 4-8 averages sub-frames (camera shutter) for fast spins and swipes.
 Lottie: plain shapes and text become vector shape layers; effects move as pictures; animated glow /
 shape becomes one picture per frame (the result lists which).
+Interactions (a state machine): set_interaction(canvas, id, trigger, action) - triggers load, hover, leave,
+press, release, click, key:<Key>, end:<animation>; actions play / stop an animation, set / clear / toggle a
+canvas state, navigate / overlay / back / url, with an optional delay. They run in export_web and
+export_react and are listed in the json animation export for engine code.
+export_animation "mp4" / "webm" writes video (needs ffmpeg); repeat plays a loop several times.
 """,
     "export": """\
 Which export to use:
@@ -163,12 +170,15 @@ Which export to use:
                  CSS animations, smart-animate page transitions; layout "fit" or "responsive" (pins).
   export_layers  one image per layer or group (+ layout JSON with positions and pivots); format png | webp |
                  jpg | svg (one layered SVG). For engine-animated parts (needles, fills, glows).
+  export_react   React components (JSX + CSS + runtime) with the same rendering and interactions as export_web.
   export_psd     layered Photoshop file (opens in Photopea, Krita, GIMP).
   export_atlas   many canvases packed into one texture + frame JSON.
   export_animation  sprite sheet, frames, GIF / APNG / WebP, Lottie JSON (apps, web, Lottie players), or
                  keyframe JSON for engine tweens.
   export_screen  a whole screen as an engine scene: Godot .tscn, Roblox LocalScript, Unity UXML + USS;
                  texts stay live engine text, pins become anchors.
+  make_variations  2-8 alternative directions of a canvas (palette, shape, type) + a comparison sheet.
+  export_theme("design.md") / set_theme(tokens="DESIGN.md"): DESIGN.md for AI design and coding agents.
   export_spec / export_theme / export_prototype / export_bitmap_font: developer spec, design tokens
                  (CSS, USS, C#, GDScript, Luau, JSON with modes), clickable HTML prototype, BMFont.
 Relative paths go to the workspace exports folder; absolute paths are used as given.

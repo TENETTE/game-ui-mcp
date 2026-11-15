@@ -95,15 +95,42 @@ _MATERIALS: dict[str, dict] = {
 NAMES = sorted(_MATERIALS)
 
 
-def expand(spec: Any) -> dict:
-    """Style keys for a material reference (a name or {"name", "color", "scale", "seed", "t", ...})."""
+def _own(name: str, spec: dict, custom: dict, theme: dict, depth: int) -> dict:
+    """A theme material: any style keys, optionally built on another material ("material": "wood")."""
+    out = dict(custom[name])
+    base = out.pop("material", None)
+    if base is not None:
+        if depth > 8:
+            raise ValueError(f"material '{name}' refers to itself")
+        base_spec = dict(base) if isinstance(base, dict) else {"name": base}
+        base_spec.update({k: out.pop(k) for k in ("color", "scale", "seed", "t") if k in out})
+        out = {**expand(base_spec, theme, depth + 1), **out}
+    over = {k: v for k, v in spec.items() if k != "name"}
+    fill = out.get("fill")
+    if over and isinstance(fill, dict) and str(fill.get("type")).lower() == "shader":
+        params = dict(fill.get("params") or {})
+        for key, value in over.items():
+            params["c" if key == "color" else "sc" if key == "scale" else key] = value
+        out["fill"] = {**fill, "params": params}
+    elif "color" in over and not isinstance(fill, dict):
+        out["fill"] = over["color"]
+    return out
+
+
+def expand(spec: Any, theme: dict | None = None, depth: int = 0) -> dict:
+    """Style keys for a material reference (a name or {"name", "color", "scale", "seed", "t", ...}).
+    Theme materials (set_theme(materials=...)) come first, then the built-in ones."""
     if isinstance(spec, str):
         spec = {"name": spec}
+    custom = (theme or {}).get("materials") or {}
     if not isinstance(spec, dict) or not spec.get("name"):
-        raise ValueError(f'material must be a name or {{"name": ...}}. Materials: {", ".join(NAMES)}')
-    name = str(spec["name"]).lower()
+        raise ValueError(f'material must be a name or {{"name": ...}}. Materials: {", ".join(sorted(custom) + NAMES)}')
+    name = str(spec["name"])
+    if name in custom:
+        return _own(name, spec, custom, theme or {}, depth)
+    name = name.lower()
     if name not in _MATERIALS:
-        raise ValueError(f"Unknown material '{name}'. Materials: {', '.join(NAMES)}")
+        raise ValueError(f"Unknown material '{name}'. Materials: {', '.join(sorted(custom) + NAMES)}")
     m = _MATERIALS[name]
     color = spec.get("color", m.get("color"))
     if "style" in m:
