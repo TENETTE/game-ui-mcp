@@ -858,8 +858,15 @@ def add_instance(canvas: str, source: str, x: float, y: float, width: float | No
                  style: str | dict | None = None, rotation: float = 0, origin: list[float] | None = None,
                  flip_x: bool = False, flip_y: bool = False, vars: dict | None = None, state: str | None = None,
                  colors: dict | None = None, id: str | None = None, group: str | None = None,
-                 clip: str | None = None, layer: str | None = None):
+                 clip: str | None = None, layer: str | None = None, variant: dict | None = None,
+                 hide: list[str] | None = None, show: list[str] | None = None, slots: dict | None = None):
     """Place another canvas inside this one as a live, re-rendered copy (a component instance).
+
+    Component properties (Figma variants, boolean props, slots): variant {"size": "large", "state": "hover"}
+    applies the source's states named "size=large" then "state=hover" (define them with set_state - a full
+    variant matrix on one component); hide / show [element ids] toggle optional parts (icon, badge, close
+    button); slots {"placeholder_id": "other_canvas"} swap a placeholder rect / ellipse in the source for
+    an instance of another canvas, fitted inside it (an item icon in a slot frame, content in a card).
 
     Build a part once on its own canvas (a gem, a slot frame, a key cap, a medal) and stamp it many times:
     edit the source canvas and every instance follows. It is drawn as vectors at the size it is placed,
@@ -882,7 +889,8 @@ def add_instance(canvas: str, source: str, x: float, y: float, width: float | No
                                          tint=tint, style=style, rotation=rotation or None, origin=origin,
                                          flip_x=flip_x or None, flip_y=flip_y or None, vars=_maybe_json(vars),
                                          state=state, colors=_maybe_json(colors), id=id, group=group,
-                                         clip=clip, layer=layer))
+                                         clip=clip, layer=layer, variant=_maybe_json(variant),
+                                         hide=_maybe_json(hide), show=_maybe_json(show), slots=_maybe_json(slots)))
 
 
 def _svg_elements(c: dict, svg: str, x: float, y: float, width: float | None, height: float | None,

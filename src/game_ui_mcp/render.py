@@ -1864,7 +1864,7 @@ class Renderer:
         return shape, masks
 
     def _instance_image(self, el: dict, tw: int, th: int) -> Image.Image:
-        src = self._source_canvas(el)
+        src = _component_overrides(self._source_canvas(el), el, self.lookup)
         fit = str(el.get("fit", "stretch")).lower()
         sx, sy = tw / float(src["width"]), th / float(src["height"])
         scale = max(sx, sy) if fit in ("stretch", "cover") else min(sx, sy)
@@ -2340,6 +2340,48 @@ def text_vars(canvas: dict, language: str | None, strings: dict, extra: dict | N
     out.update(canvas.get("vars") or {})
     out.update(extra or {})
     return out
+
+
+def _component_overrides(src: dict, el: dict, lookup) -> dict:
+    """Per-instance component properties: variant {prop: value} (states named "prop=value"),
+    hide / show [ids] (boolean properties) and slots {placeholder_id: canvas_id} (Figma slots / instance swap)."""
+    variant, hide, show, slots = el.get("variant"), el.get("hide"), el.get("show"), el.get("slots")
+    if not (variant or hide or show or slots):
+        return src
+    import copy as _copy
+    if variant:
+        if not isinstance(variant, dict):
+            raise ValueError('variant must be like {"size": "large", "state": "hover"}')
+        for prop, value in variant.items():
+            # same naming as set_state, which stores "size=large" as "size_large"
+            name = re.sub(r"[^\w-]+", "_", f"{prop}={value}".strip().replace("İ", "i")).strip("_").lower()
+            src = apply_state(src, name)
+    else:
+        src = _copy.deepcopy(src)
+    by_id = {e["id"]: e for e in src["elements"]}
+    for ids, flag in ((hide, False), (show, True)):
+        for eid in ids or []:
+            if eid not in by_id:
+                raise ValueError(f"component '{src.get('id')}' has no element '{eid}' to hide / show")
+            by_id[eid]["visible"] = flag
+    for slot_id, canvas_id in (slots or {}).items():
+        if slot_id not in by_id:
+            raise ValueError(f"component '{src.get('id')}' has no slot element '{slot_id}'")
+        holder = by_id[slot_id]
+        x, y = float(holder.get("x", holder.get("cx", 0))), float(holder.get("y", holder.get("cy", 0)))
+        w = float(holder.get("width") or 2 * float(holder.get("rx", 0)) or 0)
+        h = float(holder.get("height") or 2 * float(holder.get("ry", holder.get("rx", 0))) or 0)
+        if holder["type"] == "ellipse":
+            x, y = x - w / 2, y - h / 2
+        if w <= 0 or h <= 0:
+            raise ValueError(f"slot '{slot_id}' needs a size (use a rect or ellipse as the placeholder)")
+        swapped = {"id": slot_id, "type": "instance", "source": str(canvas_id), "x": x, "y": y, "width": w,
+                   "height": h, "fit": holder.get("fit", "contain"), "background": False}
+        for keep in ("layer", "group", "rotation", "origin", "clip"):
+            if keep in holder:
+                swapped[keep] = holder[keep]
+        src["elements"][src["elements"].index(holder)] = swapped
+    return src
 
 
 def apply_state(canvas: dict, state: str) -> dict:

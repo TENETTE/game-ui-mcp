@@ -79,6 +79,9 @@ class Store:
                 continue
 
     def save_canvas(self, canvas: dict) -> None:
+        if any(isinstance(e.get("layout"), dict) for e in canvas.get("elements", [])):
+            from .autolayout import reflow
+            reflow(self, canvas)                     # live auto layout follows every change
         if self.persist:
             path = self.projects_dir / f"{canvas['id']}.json"
             path.write_text(json.dumps(canvas, ensure_ascii=False, indent=1), encoding="utf-8")

@@ -346,8 +346,8 @@ def _wrap_rows(r, elements, mode, gap, cont_el, padding, max_width, origin, alig
 def arrange_elements(canvas: str, mode: str = "row", ids: list[str] | None = None, group: str | None = None,
                      gap: float = 8, columns: int | None = None, origin: list[float] | None = None,
                      container: str | None = None, padding: float = 0, align: str = "center",
-                     justify: str = "start", hug: bool = False, wrap: bool = False,
-                     max_width: float | None = None):
+                     justify: str = "start", hug: bool | str = False, wrap: bool = False,
+                     max_width: float | None = None, live: bool = False):
     """Lay elements out in a row, column or grid (like auto-layout), measured by their real bounds.
 
     ids are placed in the order given (or a group in draw order). gap: space between items.
@@ -360,9 +360,37 @@ def arrange_elements(canvas: str, mode: str = "row", ids: list[str] | None = Non
     width (or max_width without a container), like Figma auto-layout wrap / CSS flex-wrap - inventory
     slots, tag chips, skill icons. Lines are `gap` apart; justify start / center / end aligns each line.
     To move multi-part widgets as units, give each widget a group and arrange instances or use offsets.
+
+    live=true (with a container) turns this into a real auto-layout frame, like Figma / Penpot: the layout is
+    stored on the container and re-applied after every change - edit a label and its button grows, add an
+    item and the list re-flows. ids may then include "group:<name>" to move multi-part widgets as one item;
+    padding may be [top, right, bottom, left]; hug may be true, "width" or "height". Per child, set with
+    update_element: layout_size {"width": "fill" | number, "height": "fill" | number, min_width, max_width,
+    min_height, max_height}, span [columns, rows] in grids, absolute true to opt out. Remove with
+    update_element(container, {"layout": null}).
     """
     st = store()
     c = st.get(canvas)
+    if live:
+        if not container:
+            raise ValueError("live layout needs a container (the frame that holds and re-flows the items)")
+        cont = st.find(c, container)
+        refs = [str(i) for i in (_maybe_json(ids) or [])] or ([f"group:{group}"] if group else [])
+        if not refs:
+            raise ValueError("give ids (element ids or 'group:<name>' entries) or a group for the live layout")
+        for ref in refs:
+            if not ref.startswith("group:"):
+                st.find(c, ref)
+        st.checkpoint(c)
+        cont["layout"] = {"mode": mode, "children": refs, "gap": gap, "padding": _maybe_json(padding),
+                          "align": align, "justify": justify, "wrap": bool(wrap), "hug": hug,
+                          **({"columns": columns} if columns else {})}
+        try:
+            st.save_canvas(c)                          # saving re-flows
+        except Exception:
+            st.drop_checkpoint(c)
+            raise
+        return {"container": _summary(st, c, cont), "layout": cont["layout"]}
     elements = st.select(c, ids, group)
     r = st.renderer(c)
     box = None
