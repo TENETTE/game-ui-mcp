@@ -26,13 +26,34 @@ from .fonts import FontLibrary, load_font, missing_glyphs, parse_weight
 SS = 4
 MAX_MASK_PIXELS = 40_000_000
 MAX_OUTPUT_PIXELS = 140_000_000      # 16K x 8K; larger renders exhaust RAM before Python can raise MemoryError
-TEXT_STYLE_KEYS = ("font", "weight", "size", "letter_spacing", "line_height", "uppercase", "italic", "case")
+TEXT_STYLE_KEYS = ("font", "weight", "size", "letter_spacing", "line_height", "uppercase", "italic", "case",
+                   "features", "axes", "paragraph_spacing", "indent", "trim")
+
+
+def _ot_features(spec: Any, case: str) -> dict:
+    """OpenType features for HarfBuzz: {"smcp": 1, "tnum": 1} or ["smcp", "tnum"]; small caps from case."""
+    if spec is None or spec is False:
+        feats: dict = {}
+    elif isinstance(spec, dict):
+        feats = {str(k): int(v) if not isinstance(v, bool) else int(v) for k, v in spec.items()}
+    elif isinstance(spec, (list, tuple)):
+        feats = {str(k): 1 for k in spec}
+    else:
+        raise ValueError('features must be like ["smcp", "tnum"] or {"liga": 0, "ss01": 1}')
+    for tag in feats:
+        if len(tag) != 4:
+            raise ValueError(f"OpenType feature tags have 4 letters (smcp, tnum, liga, ss01...), got '{tag}'")
+    if case in ("small-caps", "all-small-caps"):
+        feats.setdefault("smcp", 1)
+        if case == "all-small-caps":
+            feats.setdefault("c2sc", 1)
+    return feats
 
 
 def _letter_case(text: str, case: str) -> str:
     """Non-destructive letter case like Figma's: upper, lower, title (Capitalize), tr-upper / tr-lower."""
-    if not case or case == "none":
-        return text
+    if not case or case in ("none", "small-caps", "all-small-caps"):
+        return text                              # small caps come from the font's smcp feature
     if case == "upper":
         return text.upper()
     if case == "tr-upper":
@@ -658,7 +679,24 @@ class TextLayout:
         self.lang, lang_warn = shaping.guess_lang(text, lang or el.get("lang"))
         self.warnings = [f"{el.get('id')}: {lang_warn}"] if lang_warn else []
         self._fonts = fonts
-        self._shaped = bool(self.path) and shaping.needs_shaping(text, shaping._face(self.path)[1].__contains__)
+        self.features = _ot_features(el.get("features", st.get("features")), case)
+        axes = el.get("axes", st.get("axes")) or {}
+        if not isinstance(axes, dict):
+            raise ValueError('axes must be an object of variable-font axes, e.g. {"wdth": 75, "slnt": -8}')
+        self.axes = tuple(sorted((str(k), float(v)) for k, v in axes.items())) or None
+        self.paragraph_spacing = float(el.get("paragraph_spacing", st.get("paragraph_spacing", 0)) or 0)
+        self.indent = float(el.get("indent", st.get("indent", 0)) or 0)
+        self.list_style = str(el.get("list") or "none").lower()
+        if self.list_style not in ("none", "bullet", "number"):
+            raise ValueError("list must be 'bullet', 'number' or 'none'")
+        self._shaped = bool(self.path) and (bool(self.features) or bool(self.axes) or shaping.needs_shaping(
+            text, shaping._face(self.path)[1].__contains__))
+        if self.features and self.path:
+            missing = shaping.unsupported_features(self.path, self.features)
+            if missing:
+                self.warnings.append(f"{el.get('id')}: font '{self.family or 'Inter'}' has no OpenType "
+                                     f"{', '.join(missing)} - pick a font that has it (for small caps without one: "
+                                     "case 'upper' at a smaller size)")
 
         self._load()
         if fit_width:
@@ -672,6 +710,7 @@ class TextLayout:
         self.lines = self._wrap(text, float(max_width) * ppu if max_width else None)
         self.text = text
         self.truncated = False
+        self.trim = bool(el.get("trim", st.get("trim", False)))
         max_lines = el.get("max_lines")
         if max_lines:
             keep = int(max_lines)
@@ -685,6 +724,7 @@ class TextLayout:
                 while last and self._width(last + "\u2026") > limit:
                     last = last[:-1].rstrip()
                 self.lines = self.lines[:keep - 1] + [(last + "\u2026", self._width(last + "\u2026"))]
+                self._indents, self._gaps = self._indents[:keep], self._gaps[:keep]
                 self.truncated = True
         self.decoration = str(el.get("decoration") or "none").lower()
         if self.decoration not in ("none", "underline", "strikethrough"):
@@ -692,17 +732,23 @@ class TextLayout:
 
         n = max(1, len(self.lines))
         step = self.size * ppu * self.line_height
+        gaps = (self._gaps + [0.0] * n)[:n]
+        extra = sum(gaps[1:])
         x, y = float(el.get("x", 0)) * ppu, float(el.get("y", 0)) * ppu
         if self.v == "top":
             b0 = y + self.cap
         elif self.v == "middle":
-            b0 = y + self.cap / 2 - (n - 1) * step / 2
+            b0 = y + self.cap / 2 - ((n - 1) * step + extra) / 2
         elif self.v == "bottom":
-            b0 = y - (n - 1) * step - self.descent
+            b0 = y - (n - 1) * step - extra - (0.0 if self.trim else self.descent)
         else:
-            b0 = y - (n - 1) * step
-        self.baselines = [b0 + i * step for i in range(n)]
-        self.block_w = max((w for _, w in self.lines), default=0.0)
+            b0 = y - (n - 1) * step - extra
+        self.baselines, acc = [], 0.0
+        for i in range(n):
+            acc += gaps[i] if i else 0.0
+            self.baselines.append(b0 + i * step + acc)
+        indents = (self._indents + [0.0] * n)[:n]
+        self.block_w = max((w + ind for (_, w), ind in zip(self.lines, indents)), default=0.0)
         if self.h == "left":
             bx = x
         elif self.h == "center":
@@ -711,26 +757,133 @@ class TextLayout:
             bx = x - self.block_w
         self.block_x = bx
         self.line_x = []
-        for _, w in self.lines:
+        for (_, w), ind in zip(self.lines, indents):
             if self.align == "center":
                 self.line_x.append(bx + (self.block_w - w) / 2)
             elif self.align == "right":
                 self.line_x.append(bx + self.block_w - w)
             else:
-                self.line_x.append(bx)
+                self.line_x.append(bx + ind)
         # visual box in px at this density
         top, bottom = self.cap, self.descent
         if self.shaper:          # fallback fonts (Thai, Devanagari...) reach higher and lower than the primary
             used = [self.shaper.chain[i] for i in self.shaper.used]
             top = max([top] + [f.ascent for f in used])
             bottom = max([bottom] + [f.descent for f in used])
+        if self.trim:                    # vertical trim: the box hugs cap height to baseline (Figma "vertical trim")
+            top, bottom = self.cap, 0.0
         self.box_px = (bx, self.baselines[0] - top, bx + self.block_w, self.baselines[-1] + bottom)
         self.arc = None
-        if el.get("arc"):
+        if el.get("arc") or el.get("path"):
             if self.shaper:
-                raise ValueError("text on an arc supports Latin, Greek and Cyrillic only; this text needs "
+                raise ValueError("text on an arc or path supports Latin, Greek and Cyrillic only; this text needs "
                                  "shaping or fallback fonts (draw it straight, or bake it as an image)")
-            self._layout_arc(el["arc"])
+            if el.get("arc"):
+                self._layout_arc(el["arc"])
+            else:
+                self._layout_path(el["path"])
+
+    def _layout_path(self, spec: Any) -> None:
+        """Place glyphs upright along any path (Figma "text on a path"). spec: {"d": svg path} or
+        {"points": [[x, y], ...]}, optional "start" (units along the path) and "offset" (distance off it)."""
+        if not isinstance(spec, dict) or not (spec.get("d") or spec.get("points")):
+            raise ValueError('path must be {"d": "M 0 100 C ..."} or {"points": [[x, y], ...]}')
+        if len(self.lines) != 1:
+            raise ValueError("text on a path must be a single line (no newlines, no max_width wrapping)")
+        ppu = self.ppu
+        if spec.get("d"):
+            subs = geo.parse_svg_path(str(spec["d"]), 8.0)
+            if not subs:
+                raise ValueError("path d has no drawable segments")
+            pts = subs[0][0]
+        else:
+            pts = [(float(p[0]), float(p[1])) for p in spec["points"]]
+        pts = [(px * ppu, py * ppu) for px, py in pts]
+        if len(pts) < 2:
+            raise ValueError("the text path needs at least 2 points")
+        seg = [math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(pts, pts[1:])]
+        length = sum(seg)
+        text = self.lines[0][0]
+        advances = [float(self.font.getlength(ch)) for ch in text]
+        total = sum(advances) + self.spacing * ppu * max(0, len(text) - 1)
+        if total > length * 1.001:
+            raise ValueError(f"text is longer than the path ({total / ppu:.0f} vs {length / ppu:.0f} units); "
+                             "use a smaller size or a longer path")
+        start = float(spec.get("start", 0)) * ppu
+        if self.h == "center":
+            s = start + (length - start - total) / 2
+        elif self.h == "right":
+            s = length - total
+        else:
+            s = start
+        offset = float(spec.get("offset", 0)) * ppu
+        shift = {"top": -self.cap, "middle": -self.cap / 2, "bottom": self.descent}.get(self.v, 0.0)
+
+        def at(dist: float):
+            d = max(0.0, min(length, dist))
+            for (a, b), L in zip(zip(pts, pts[1:]), seg):
+                if d <= L or (a, b) == (pts[-2], pts[-1]):
+                    t = d / L if L else 0.0
+                    ux, uy = ((b[0] - a[0]) / L, (b[1] - a[1]) / L) if L else (1.0, 0.0)
+                    return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, ux, uy
+                d -= L
+            return pts[-1][0], pts[-1][1], 1.0, 0.0
+
+        glyphs, corners = [], []
+        for ch, adv in zip(text, advances):
+            mid = s + adv / 2
+            px, py, ux, uy = at(mid)
+            nx, ny = uy, -ux                                  # "up" for the glyph, left of the direction of travel
+            lift = offset - shift
+            gx, gy = px + nx * lift, py + ny * lift
+            rot = math.degrees(math.atan2(uy, ux))
+            glyphs.append((ch, gx, gy, rot, adv))
+            ca, sa = math.cos(math.radians(rot)), math.sin(math.radians(rot))
+            for lx, ly in ((-adv / 2, -self.cap * 1.25), (adv / 2, -self.cap * 1.25),
+                           (-adv / 2, self.descent), (adv / 2, self.descent)):
+                corners.append((gx + lx * ca - ly * sa, gy + lx * sa + ly * ca))
+            s += adv + self.spacing * ppu
+        self.arc = glyphs
+        xs, ys = [q[0] for q in corners], [q[1] for q in corners]
+        self.box_px = (min(xs), min(ys), max(xs), max(ys))
+
+    def color_layer(self, size: tuple[int, int], ox: float, oy: float):
+        """RGBA picture of the colour emoji in this text (None when there are none)."""
+        if not self.shaper or self.arc is not None:
+            return None
+        if not self.chain_has_color:
+            return None
+        img = None
+        for (line, _), lx, by in zip(self.lines, self.line_x, self.baselines):
+            if not line:
+                continue
+            self.shaper.shape(line)
+            if self.shaper.color_runs.get(line):
+                if img is None:
+                    img = Image.new("RGBA", size, (0, 0, 0, 0))
+                self.shaper.draw_color(img, line, lx - ox, by - oy, self.size * self.ppu)
+        return img
+
+    @property
+    def chain_has_color(self) -> bool:
+        return any(f.color for f in self.shaper.chain) if self.shaper else False
+
+    def outline_polys_units(self) -> list[list[tuple[float, float]]]:
+        """Every glyph outline of this text as polygons in canvas units (text to vector paths)."""
+        if self.arc is not None:
+            raise ValueError("text on an arc or path cannot be converted to a path yet - draw it straight")
+        shaper = self.shaper or shaping.ShapedText(
+            shaping.fallback_chain(self._fonts, self.path, self.var_weight, self.weight, self.size * self.ppu,
+                                   self.lang, self.axes), self.lang, self.spacing * self.ppu, self.features)
+        out = []
+        lean = math.tan(math.radians(self.skew)) if self.skew else 0.0
+        mid = (self.box_px[1] + self.box_px[3]) / 2
+        for (line, _), lx, by in zip(self.lines, self.line_x, self.baselines):
+            for poly in shaper.outline_polys(line, lx, by):
+                if lean:
+                    poly = np.column_stack((poly[:, 0] + (mid - poly[:, 1]) * lean, poly[:, 1]))
+                out.append([(float(px) / self.ppu, float(py) / self.ppu) for px, py in poly])
+        return out
 
     def _layout_arc(self, spec: Any) -> None:
         """Place each glyph upright along a circle. spec: {cx, cy, radius, angle, side}. ``radius`` is
@@ -834,8 +987,8 @@ class TextLayout:
         self.shaper = None
         if self._shaped:
             chain = shaping.fallback_chain(self._fonts, self.path, self.var_weight, self.weight,
-                                           self.size * self.ppu, self.lang)
-            self.shaper = shaping.ShapedText(chain, self.lang, self.spacing * self.ppu)
+                                           self.size * self.ppu, self.lang, self.axes)
+            self.shaper = shaping.ShapedText(chain, self.lang, self.spacing * self.ppu, self.features)
 
     def fallback_note(self) -> str | None:
         """Which characters the chosen font lacked and which fallback font drew them."""
@@ -862,23 +1015,44 @@ class TextLayout:
         return float(self.font.getlength(s)) + self.spacing * self.ppu * max(0, len(s) - 1)
 
     def _wrap(self, text: str, max_px: float | None) -> list[tuple[str, float]]:
+        """Lines with their widths; also fills self._indents (px) and self._gaps (extra px before a line)."""
         lines: list[tuple[str, float]] = []
-        for para in text.split("\n"):
-            if max_px is None:
-                lines.append((para, self._width(para)))
-                continue
-            if self.shaper:
-                lines += [(ln, self._width(ln)) for ln in self.shaper.wrap(para, max_px)]
-                continue
-            cur = ""
-            for word in para.split(" "):
-                trial = word if not cur else cur + " " + word
-                if cur and self._width(trial) > max_px:
-                    lines.append((cur, self._width(cur)))
-                    cur = word
+        self._indents, self._gaps = [], []
+        number = 0
+        para_gap = self.paragraph_spacing * self.ppu
+        for pi, para in enumerate(text.split("\n")):
+            marker = ""
+            if self.list_style != "none" and para.strip():
+                number += 1
+                marker = "\u2022  " if self.list_style == "bullet" else f"{number}.  "
+            hang = self._width(marker) if marker else 0.0
+            first = hang if marker else self.indent * self.ppu
+            avail = None if max_px is None else max(1.0, max_px - max(first, hang))
+            body = self._wrap_para(para, avail)
+            for li, (ln, w) in enumerate(body):
+                if li == 0 and marker:
+                    lines.append((marker + ln, self._width(marker + ln)))
+                    self._indents.append(0.0)
                 else:
-                    cur = trial
-            lines.append((cur, self._width(cur)))
+                    lines.append((ln, w))
+                    self._indents.append(first if li == 0 else hang)
+                self._gaps.append(para_gap if (li == 0 and pi > 0) else 0.0)
+        return lines
+
+    def _wrap_para(self, para: str, max_px: float | None) -> list[tuple[str, float]]:
+        if max_px is None:
+            return [(para, self._width(para))]
+        if self.shaper:
+            return [(ln, self._width(ln)) for ln in self.shaper.wrap(para, max_px)]
+        lines, cur = [], ""
+        for word in para.split(" "):
+            trial = word if not cur else cur + " " + word
+            if cur and self._width(trial) > max_px:
+                lines.append((cur, self._width(cur)))
+                cur = word
+            else:
+                cur = trial
+        lines.append((cur, self._width(cur)))
         return lines
 
     def box_units(self) -> Box:
@@ -1565,6 +1739,7 @@ class Renderer:
             return img
 
         shape = glyphs(0)
+        color = layout.color_layer(big, px0 * ss, py0 * ss)
         masks = []
         for spec in strokes:
             # text outlines always sit outside the glyphs; an offset leaves a gap before the outline starts
@@ -1580,6 +1755,8 @@ class Renderer:
             matrix = (1, lean, -lean * mid, 0, 1, 0)       # output (x, y) samples input (x + lean * (y - mid), y)
             shape = shape.transform(big, Image.AFFINE, matrix, resample=Image.BICUBIC)
             masks = [m.transform(big, Image.AFFINE, matrix, resample=Image.BICUBIC) for m in masks]
+            if color is not None:
+                color = color.transform(big, Image.AFFINE, matrix, resample=Image.BICUBIC)
         rot = float(el.get("rotation", 0) or 0)
         if rot:
             if el.get("origin"):
@@ -1589,9 +1766,14 @@ class Renderer:
                 cx, cy = (bx0 + bx1) / 2 - px0 * ss, (by0 + by1) / 2 - py0 * ss
             shape = shape.rotate(-rot, resample=Image.BICUBIC, center=(cx, cy))
             masks = [m.rotate(-rot, resample=Image.BICUBIC, center=(cx, cy)) for m in masks]
+            if color is not None:
+                color = color.rotate(-rot, resample=Image.BICUBIC, center=(cx, cy))
         if ss > 1:
             shape = shape.reduce(ss)
             masks = [m.reduce(ss) for m in masks]
+            if color is not None:
+                color = color.reduce(ss)
+        self._text_color = color
         return shape, masks
 
     def _instance_image(self, el: dict, tw: int, th: int) -> Image.Image:
@@ -1789,6 +1971,7 @@ class Renderer:
         if t == "text":
             layer = draw_strokes(layer, reversed(drawn))      # outlines sit behind the glyphs, widest at the back
             drawn = []
+        emoji = self.__dict__.pop("_text_color", None) if t == "text" else None
 
         if has_fill:
             if color_layer is not None:
@@ -1809,6 +1992,8 @@ class Renderer:
                 fill_img = Image.fromarray(arr.astype(np.uint8), "RGBA")
             if fill_img is not None:
                 layer = Image.alpha_composite(layer, fill_img)
+            if emoji is not None:
+                layer = Image.alpha_composite(layer, emoji)
             if st.get("light"):
                 layer = Image.alpha_composite(layer, fxlib.emboss(shape, st["light"], self.colors, k))
             layer = _inner_effects(layer, shape, fx, k)

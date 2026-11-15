@@ -781,7 +781,9 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
              origin: list[float] | None = None, arc: dict | None = None, id: str | None = None,
              group: str | None = None, clip: str | None = None, layer: str | None = None,
              lang: str | None = None, max_lines: int | None = None, decoration: str | None = None,
-             case: str | None = None, note: str | None = None):
+             case: str | None = None, note: str | None = None, features: list[str] | dict | None = None,
+             axes: dict | None = None, paragraph_spacing: float | None = None, indent: float | None = None,
+             list: str | None = None, trim: bool | None = None, path: dict | None = None):
     """Add text.
 
     (x, y) is where `anchor` sits: "top-left", "center" (centre of a button), "middle-left",
@@ -794,7 +796,15 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
     max_lines (with max_width): cut longer text and end the last line with "..." (player names, item
       titles, chat previews; 1 = single line). decoration: "underline" or "strikethrough" (old prices).
     letter_spacing: extra px between letters. uppercase: true, or "tr" for Turkish i -> İ rules.
-    case: "upper", "lower", "title", "tr-upper", "tr-lower" (non-destructive letter case; the text stays as typed).
+    case: "upper", "lower", "title", "tr-upper", "tr-lower", "small-caps", "all-small-caps" (non-destructive).
+    features: OpenType features, e.g. ["tnum"] (equal-width digits for timers and scores), ["smcp"], ["ss01"],
+      {"liga": 0}. axes: variable-font axes, e.g. {"wdth": 75, "slnt": -10, "opsz": 32} (fonts that have them).
+    paragraph_spacing: extra px between paragraphs ("
+"); indent: first-line indent; list: "bullet" | "number"
+      (each paragraph becomes a list item with a hanging indent). trim: true makes the box hug the capital
+      height and baseline (vertical trim), so centring in buttons and layouts is exact.
+    path: run the text along any path - {"d": "M 20 120 C 80 20 200 20 260 120"} or {"points": [...]}, with
+      optional "start" and "offset" (units). Colour emoji are drawn in colour.
     italic: use the family's italic (Barlow Condensed has one); other fonts are slanted automatically.
     skew: extra slant in degrees.
     arc: set text along a circle instead of a straight line (badges, emblems, round gauges):
@@ -818,7 +828,9 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
                                      italic=italic or None, skew=skew or None, stroke=stroke, style=style,
                                      rotation=rotation or None, origin=origin, arc=arc, id=id, group=group,
                                      clip=clip, layer=layer, lang=lang, max_lines=max_lines,
-                                     decoration=decoration, case=case, note=note))
+                                     decoration=decoration, case=case, note=note, features=features, axes=axes,
+                                     paragraph_spacing=paragraph_spacing, indent=indent, list=list, trim=trim,
+                                     path=path))
 
 
 @tool

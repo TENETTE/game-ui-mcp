@@ -467,10 +467,30 @@ def path_ops(canvas: str, id: str, action: str = "flatten", distance: float = 2,
         raise ValueError("action must be 'flatten', 'offset', 'outline_stroke' or 'simplify'")
     if join not in ("round", "miter", "bevel"):
         raise ValueError("join must be 'round', 'miter' or 'bevel'")
-    if el["type"] not in VECTOR_TYPES:
-        raise ValueError(f"'{id}' is a {el['type']}; path_ops works on shapes and lines (not text, images, instances)")
+    if el["type"] not in VECTOR_TYPES and el["type"] != "text":
+        raise ValueError(f"'{id}' is a {el['type']}; path_ops works on shapes, lines and text (not images, instances)")
     style = resolve_style(el.get("style"), st.theme)
-    if el["type"] in LINE_TYPES:
+    if el["type"] == "text":
+        if act not in ("flatten", "offset"):
+            raise ValueError("text supports action 'flatten' (text to vector outlines) or 'offset'")
+        from .render import TextLayout
+        r = st.renderer(c)
+        layout = TextLayout(el, style, st.fonts, 4.0, r.text_of(el), r.text_lang(el))
+        shape = layout.outline_polys_units()
+        rot = float(el.get("rotation", 0) or 0)
+        if rot:
+            bx = layout.box_units()
+            cx, cy = r._pivot(el, bx)
+            cs, sn = math.cos(math.radians(rot)), math.sin(math.radians(rot))
+            shape = [[(cx + (x - cx) * cs - (y - cy) * sn, cy + (x - cx) * sn + (y - cy) * cs) for x, y in p] for p in shape]
+        import pyclipper
+        merged = pyclipper.SimplifyPolygons(_ints(shape), pyclipper.PFT_NONZERO)    # glyph holes use winding
+        polys = merged if act == "flatten" else _offset(_floats(merged), float(distance), join)
+        keep_keys = ("fill", "stroke", "shadow", "glow", "inner_shadow", "inner_glow", "bevel", "light", "opacity",
+                     "blend", "blur", "mask", "adjust")
+        new_style = {k: v for k, v in style.items() if k in keep_keys} or {"fill": "#ffffff"}
+        replace_source = not keep_original
+    elif el["type"] in LINE_TYPES:
         if act != "outline_stroke":
             raise ValueError(f"'{id}' is a {el['type']} (a stroke): use action='outline_stroke' to turn it into a shape")
         polys = _line_outline(vector_geometry(el, 8.0), join)

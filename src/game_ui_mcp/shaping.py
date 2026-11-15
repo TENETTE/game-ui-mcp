@@ -12,6 +12,7 @@ import unicodedata
 from functools import lru_cache
 
 import numpy as np
+from pathlib import Path
 import uharfbuzz as hb
 from PIL import Image
 from bidi import algorithm as _bidi
@@ -31,6 +32,19 @@ _CJK = {
 }
 _SYSTEM = ["Segoe UI", "Nirmala UI", "Leelawadee UI", "Kohinoor Devanagari", "Thonburi", "Noto Sans",
            "DejaVu Sans", "Segoe UI Symbol", "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji"]
+# colour emoji fonts: their glyphs are painted in colour by Pillow instead of filled with the text colour
+COLOR_FONTS = ("seguiemj.ttf", "applecoloremoji.ttc", "notocoloremoji.ttf")
+
+
+def is_color_font(path: str) -> bool:
+    return Path(path).name.lower() in COLOR_FONTS
+
+
+def _is_emoji(text: str, i: int) -> bool:
+    cp = ord(text[i])
+    nxt = text[i + 1] if i + 1 < len(text) else ""
+    return (0x1F000 <= cp <= 0x1FAFF or (0x2600 <= cp <= 0x27BF and nxt == "\ufe0f")
+            or (0x2B00 <= cp <= 0x2BFF and nxt == "\ufe0f") or cp in (0x2B50, 0x2B55, 0x231A, 0x231B, 0x23F0))
 
 # Characters that may not start a CJK line (kinsoku) and ones that may not end it.
 _NO_START = set("、。，．・：；？！ー）」』】〕〉》〙〗｝］’”ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヵヶ々〻…‥")
@@ -91,14 +105,17 @@ def _face(path: str):
 
 
 class _Font:
-    def __init__(self, path: str, var_weight: int | None, size_px: float):
+    def __init__(self, path: str, var_weight: int | None, size_px: float, axes: tuple | None = None):
         self.path = path
         self.face, self.cmap = _face(path)
         self.font = hb.Font(self.face)
         self.var = None
-        if var_weight is not None:
-            self.var = {"wght": float(var_weight), "opsz": float(size_px)}
+        var = {"wght": float(var_weight), "opsz": float(size_px)} if var_weight is not None else {}
+        var.update(dict(axes or ()))                        # width, slant, optical size... of variable fonts
+        if var:
+            self.var = var
             self.font.set_variations(self.var)
+        self.color = is_color_font(path)
         self.scale = size_px / self.face.upem
         ext = self.font.get_font_extents("ltr")
         self.ascent, self.descent = ext.ascender * self.scale, -ext.descender * self.scale
@@ -106,10 +123,10 @@ class _Font:
 
 @lru_cache(maxsize=128)
 def fallback_chain(fonts, primary_path: str | None, var_weight: int | None, weight: int, size_px: float,
-                   lang: str | None) -> tuple[_Font, ...]:
+                   lang: str | None, axes: tuple | None = None) -> tuple[_Font, ...]:
     chain = []
     if primary_path:
-        chain.append(_Font(primary_path, var_weight, size_px))
+        chain.append(_Font(primary_path, var_weight, size_px, axes))
     bold = weight >= 600
     for script in _NOTO:
         p = NOTO_DIR / f"NotoSans{script}-{'Bold' if bold else 'Regular'}.ttf"
@@ -189,10 +206,12 @@ def _levels(text: str) -> list[int]:
 class ShapedText:
     """Shapes lines of one text element through a fallback chain. Positions are in pixels."""
 
-    def __init__(self, chain: list[_Font], lang: str | None, spacing_px: float):
+    def __init__(self, chain: list[_Font], lang: str | None, spacing_px: float, features: dict | None = None):
         self.chain = chain
         self.lang = lang
         self.spacing = spacing_px
+        self.features = dict(features or {})
+        self.color_runs: dict[str, list[tuple[float, str, int]]] = {}    # text -> [(x px, emoji text, font idx)]
         self.missing: set[str] = set()
         self.used: set[int] = set()
         self.fallback: dict[int, set[str]] = {}       # chain index -> characters the primary font lacked
@@ -208,7 +227,11 @@ class ShapedText:
                                      or (cat[0] != "L" and cp in self.chain[prev].cmap)):
                 out.append(prev)
                 continue
-            idx = next((i for i, f in enumerate(self.chain) if cp in f.cmap), None)
+            idx = None
+            if _is_emoji(text, len(out)):                    # colour emoji before monochrome symbol fonts
+                idx = next((i for i, f in enumerate(self.chain) if f.color and cp in f.cmap), None)
+            if idx is None:
+                idx = next((i for i, f in enumerate(self.chain) if cp in f.cmap), None)
             if idx is None:
                 if not ch.isspace() and cat not in ("Cf", "Cc"):
                     self.missing.add(ch)
@@ -252,18 +275,21 @@ class ShapedText:
                 else:
                     i += 1
         glyphs: list[tuple[int, int, float, float]] = []
+        colored: list[tuple[float, str, int]] = []
         x = 0.0
         for ri in order:
             s, e, lvl, fi = runs[ri]
             f = self.chain[fi]
             self.used.add(fi)
+            if f.color:
+                colored.append((x, text[s:e], fi))
             buf = hb.Buffer()
             buf.add_str(text, s, e - s)
             buf.guess_segment_properties()
             buf.direction = "rtl" if lvl % 2 else "ltr"
             if self.lang:
                 buf.language = self.lang
-            hb.shape(f.font, buf, {})
+            hb.shape(f.font, buf, self.features)
             prev_cluster = None
             for info, pos in zip(buf.glyph_infos, buf.glyph_positions):
                 if info.codepoint == 0:
@@ -275,6 +301,7 @@ class ShapedText:
                 prev_cluster = info.cluster
                 glyphs.append((fi, info.codepoint, x + pos.x_offset * f.scale, pos.y_offset * f.scale))
                 x += pos.x_advance * f.scale
+        self.color_runs[text] = colored
         return glyphs, x
 
     def width(self, text: str) -> float:
@@ -342,6 +369,8 @@ class ShapedText:
         pad = stroke_px + 2
         for fi, gid, gx, gy in glyphs:
             f = self.chain[fi]
+            if f.color and stroke_px == 0:
+                continue                                   # painted in colour by draw_color
             var = tuple(sorted(f.var.items())) if f.var else None
             contours = _outline(f.path, var, gid)
             if not contours:
@@ -361,6 +390,53 @@ class ShapedText:
             box = (x0, y0, x1, y1)
             under = np.asarray(img.crop(box))
             img.paste(Image.fromarray(np.maximum(under, cov), "L"), box)
+
+
+    def draw_color(self, img, text: str, x: float, baseline: float, size_px: float) -> None:
+        """Paint colour emoji of ``text`` into the RGBA ``img`` (already offset)."""
+        from PIL import ImageDraw, ImageFont
+        self.shape(text)
+        for gx, part, fi in self.color_runs.get(text, []):
+            font = _pil_font(self.chain[fi].path, max(1, int(round(size_px))))
+            ImageDraw.Draw(img).text((x + gx, baseline), part, font=font, anchor="ls", embedded_color=True)
+
+    def outline_polys(self, text: str, x: float, baseline: float) -> list:
+        """Glyph outlines of ``text`` as polygons in pixels (text to vector paths)."""
+        glyphs, _ = self.shape(text)
+        out = []
+        for fi, gid, gx, gy in glyphs:
+            f = self.chain[fi]
+            var = tuple(sorted(f.var.items())) if f.var else None
+            for c in _outline(f.path, var, gid):
+                out.append(np.column_stack((x + gx + c[:, 0] * f.scale, baseline - gy - c[:, 1] * f.scale)))
+        return out
+
+
+@lru_cache(maxsize=256)
+def _font_features(path: str) -> frozenset:
+    """OpenType feature tags the font's GSUB / GPOS tables offer."""
+    face = _face(path)[0]
+    tags = set()
+    for table in ("GSUB", "GPOS"):
+        try:
+            for si in range(len(face.get_table_script_tags(table))):
+                tags |= set(face.get_language_feature_tags(table, si, 0xFFFF))   # 0xFFFF = default language
+        except Exception:                          # very old uharfbuzz: skip the check rather than fail
+            return frozenset({"*"})
+    return frozenset(tags)
+
+
+def unsupported_features(path: str, features: dict) -> list[str]:
+    have = _font_features(path)
+    if "*" in have:
+        return []
+    return [t for t, on in features.items() if on and t not in have and t not in ("kern", "liga", "calt")]
+
+
+@lru_cache(maxsize=32)
+def _pil_font(path: str, size: int):
+    from PIL import ImageFont
+    return ImageFont.truetype(path, size)
 
 
 # --------------------------------------------------------------------------- engine hand-off
