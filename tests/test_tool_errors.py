@@ -46,3 +46,10 @@ def test_look_only_tools_are_marked_read_only_and_deletes_destructive():
     assert hint["preview"]["readOnlyHint"] and hint["review_canvas"]["readOnlyHint"]
     assert not hint["add_rect"]["readOnlyHint"]
     assert hint["delete_canvas"]["destructiveHint"] and not hint["undo"]["destructiveHint"]
+
+
+def test_every_public_tool_is_registered_and_no_helper_leaks():
+    import asyncio
+    names = {t.name for t in asyncio.run(s.mcp.list_tools())}
+    assert {"export_theme", "export_pdf", "vectorize_image", "guide", "restyle", "path_ops"} <= names
+    assert not any(n.startswith("_") for n in names)

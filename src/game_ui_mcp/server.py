@@ -2332,6 +2332,38 @@ def export_svg(canvas: str, path: str | None = None, include_background: bool = 
 
 
 @tool
+def export_pdf(canvases: list[str] | str, path: str | None = None, include_background: bool = True,
+               image_scale: float = 2, language: str | None = None, state: str | None = None):
+    """Save one or more canvases as a vector PDF (one page each): print, client review, a kit book.
+
+    Shapes, booleans, lines and text are real vectors (text as glyph outlines, so the PDF needs no fonts),
+    with solid and linear / radial gradient fills and exact strokes; shadows and glows sit underneath as a
+    picture. Effects PDF cannot show the same way (shader / pattern fills, light, inner effects, blur,
+    glass, special blends, styled layers, images, colour emoji) are embedded as a picture of that element,
+    at image_scale (2 = crisp at 200%; 4 for large prints). The result lists which ids stayed vector.
+    """
+    from . import pdfexport
+    st = store()
+    names = [canvases] if isinstance(canvases, str) and not canvases.strip().startswith("[") else (_maybe_json(canvases) or [])
+    if not names:
+        raise ValueError("canvases must name at least one canvas")
+    renderers = []
+    for name in names:
+        c = st.get(name)
+        st.require_glyphs(c, language)
+        renderers.append(st.renderer(c, 1.0, state=state, language=language))
+    data, report = pdfexport.canvases_pdf(renderers, include_background, image_scale)
+    out = _out_path(path, f"{renderers[0].canvas['id']}.pdf", suffixes=(".pdf",))
+    out.write_bytes(data)
+    result: dict = {"file": str(out), "pages": len(renderers), "vector": report["vector"],
+                    "embedded_as_image": report["raster"]}
+    warnings = sorted({w for r in renderers for w in r.warnings})
+    if warnings:
+        result["warnings"] = warnings
+    return result
+
+
+@tool
 def export_png(canvas: str, path: str | None = None, scales: list[float] | None = None, trim: bool = False,
                padding: int = 0, include_background: bool = False, ids: list[str] | None = None,
                group: str | None = None, format: str = "png", state: str | None = None,

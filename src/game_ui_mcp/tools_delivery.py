@@ -246,7 +246,6 @@ def _ident(name: str, case: str) -> str:
     return ("_" + out) if out[0].isdigit() else out
 
 
-@tool
 def _num(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
@@ -255,6 +254,7 @@ def _rgba_hex(v) -> str:
     return "#" + "".join(f"{c:02x}" for c in v[:4])
 
 
+@tool
 def export_theme(format: str = "json", path: str | None = None):
     """Export the theme as design tokens for the engine or a web / app codebase, so code uses exactly
     the colours and text styles the art was drawn with.

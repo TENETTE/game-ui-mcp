@@ -15,7 +15,7 @@ from .reference import TOPICS
 from .render import LINE_TYPES, VECTOR_TYPES, _placed_polys, _stroke_specs, resolve_style, vector_geometry
 from .server import _maybe_json, _prepare_update, _summary, slugify, store, tool
 
-__all__ = ["guide", "make_palette", "restyle", "path_ops", "find_elements"]
+__all__ = ["guide", "make_palette", "restyle", "path_ops", "find_elements", "vectorize_image"]
 
 
 # --------------------------------------------------------------------------- reference
@@ -545,3 +545,53 @@ def path_ops(canvas: str, id: str, action: str = "flatten", distance: float = 2,
     out = _summary(st, c, made, warnings)
     out["points"] = sum(len(p) for p in polys)
     return out
+
+
+# --------------------------------------------------------------------------- vectorize
+
+@tool
+def vectorize_image(canvas: str, path: str, x: float = 0, y: float = 0, width: float | None = None,
+                    colors: int = 6, detail: float = 1.0, smooth: int = 1, group: str | None = None,
+                    layer: str | None = None):
+    """Turn a picture (logo, sketch, icon, flat illustration, pixel art) into editable vector paths, like
+    Figma's "vectorize": the colours are reduced to `colors` (2-32), each colour region becomes one path
+    (holes kept), largest first. detail 0.5-2 sets how finely edges are followed; smooth 0-3 rounds
+    corners (0 keeps pixel-art steps). The paths land at x, y, scaled to `width` (default: the image width),
+    in one group so they move together; then restyle, boolean, light or animate them like any shape.
+    Works best on flat art; photos become posterised shapes.
+    """
+    from pathlib import Path as _Path
+    from PIL import Image as _PIL
+    from .vectorize import trace
+    st = store()
+    c = st.get(canvas)
+    src = _Path(path).expanduser()
+    if not src.is_file():
+        raise ValueError(f"image not found: {src.resolve()} - use an absolute path")
+    try:
+        img = _PIL.open(src)
+        img.load()
+    except Exception as exc:
+        raise ValueError(f"could not open {src.name} as an image: {exc}") from exc
+    regions = trace(img, colors, max(0.25, min(2.0, float(detail))), max(0, min(3, int(smooth))))
+    if not regions:
+        raise ValueError("nothing to trace (the image is empty or fully transparent)")
+    s = float(width) / img.width if width else 1.0
+    grp = slugify(group or f"vector_{src.stem}", "vector")
+    st.checkpoint(c)
+    made = []
+    try:
+        for i, (rgba, polys, _) in enumerate(regions):
+            d = " ".join("M" + " L".join(f"{x + px * s:.2f} {y + py * s:.2f}" for px, py in poly) + " Z" for poly in polys)
+            props = {"d": d, "fill_rule": "evenodd", "group": grp, "style": {"fill": "#%02x%02x%02x" % rgba[:3]},
+                     "id": f"{grp}_{i + 1}"}
+            if layer:
+                props["layer"] = layer
+            el, _ = st.add_element(c, "path", props, checkpoint=False)
+            made.append(el["id"])
+    except Exception:
+        st.drop_checkpoint(c)
+        raise
+    st.save_canvas(c)
+    return {"group": grp, "paths": made, "colors": ["#%02x%02x%02x" % r[0][:3] for r in regions],
+            "size": [round(img.width * s, 2), round(img.height * s, 2)]}
