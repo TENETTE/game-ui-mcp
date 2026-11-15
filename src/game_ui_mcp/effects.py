@@ -145,7 +145,8 @@ def emboss(alpha: Image.Image, spec: dict, colors: dict, k: float) -> Image.Imag
 # --------------------------------------------------------------------------- color adjustment
 
 def adjust(img: Image.Image, spec: dict, colors: dict) -> Image.Image:
-    """brightness, contrast, saturation (-1..1), hue (degrees), tint (color; its alpha is the amount), invert."""
+    """brightness, contrast, saturation, exposure, temperature, shadows, highlights (-1..1), hue (degrees),
+    tint (color; its alpha is the amount), invert."""
     if not isinstance(spec, dict):
         raise ValueError("adjust must be an object like {brightness, contrast, saturation, hue, tint}")
     arr = np.asarray(img, dtype=np.float64).copy()
@@ -168,6 +169,17 @@ def adjust(img: Image.Image, spec: dict, colors: dict) -> Image.Image:
     contrast = float(spec.get("contrast", 0) or 0)
     if contrast:
         rgb = (rgb - 127.5) * max(0.0, 1.0 + contrast) + 127.5
+    exposure = float(spec.get("exposure", 0) or 0)
+    if exposure:
+        rgb = rgb * (2.0 ** exposure)                    # photographic stops
+    temp = float(spec.get("temperature", 0) or 0)
+    if temp:
+        rgb = rgb + np.array([1.0, 0.25, -1.0]) * temp * 40.0       # warm (+) / cool (-)
+    shadows = float(spec.get("shadows", 0) or 0)
+    highlights = float(spec.get("highlights", 0) or 0)
+    if shadows or highlights:
+        lum = np.clip((0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]) / 255.0, 0, 1)[..., None]
+        rgb = rgb + shadows * 110.0 * (1 - lum) ** 2 + highlights * 110.0 * lum ** 2
     if spec.get("invert"):
         rgb = 255.0 - rgb
     if spec.get("tint"):
@@ -245,3 +257,147 @@ def decode_space(values: np.ndarray, space: str) -> np.ndarray:
         return _from_linear(values)
     lms = values @ _M2_INV.T
     return _from_linear((lms ** 3) @ _M1_INV.T)
+
+
+# --------------------------------------------------------------------------- blur, noise, texture, glass
+
+def blur_amount(spec) -> tuple[float, dict | None]:
+    """(largest radius, progressive spec or None) of a style.blur / backdrop_blur value."""
+    if isinstance(spec, dict):
+        return max(0.0, float(spec.get("radius", 8))), spec
+    return max(0.0, float(spec or 0)), None
+
+
+def progressive_t(size: tuple[int, int], spec: dict, box_px) -> np.ndarray:
+    """0..1 blur strength across the box: 0 at `start`, full at `end` along `angle` (like a linear gradient)."""
+    w, h = size
+    x0, y0, x1, y1 = box_px
+    bw, bh = max(1e-6, x1 - x0), max(1e-6, y1 - y0)
+    ang = math.radians(float(spec.get("angle", 90)))
+    ca, sa = math.cos(ang), math.sin(ang)
+    ys, xs = np.mgrid[0:h, 0:w].astype(np.float64)
+    proj = ((xs + 0.5 - (x0 + x1) / 2) * ca + (ys + 0.5 - (y0 + y1) / 2) * sa) / (abs(bw * ca) + abs(bh * sa)) + 0.5
+    start, end = float(spec.get("start", 0)), float(spec.get("end", 1))
+    if abs(end - start) < 1e-6:
+        end = start + 1e-6
+    return np.clip((proj - start) / (end - start), 0, 1)
+
+
+def blur_image(img: Image.Image, radius_px: float, t: np.ndarray | None = None) -> Image.Image:
+    """Gaussian blur in premultiplied space; with ``t`` the radius varies per pixel (progressive blur)."""
+    from PIL import ImageFilter
+    if radius_px <= 0:
+        return img
+    pre = img.convert("RGBa")
+    if t is None:
+        return pre.filter(ImageFilter.GaussianBlur(radius_px)).convert("RGBA")
+    levels = 6
+    stack = [np.asarray(pre, dtype=np.float64)]
+    for i in range(1, levels):
+        stack.append(np.asarray(pre.filter(ImageFilter.GaussianBlur(radius_px * i / (levels - 1))), dtype=np.float64))
+    f = t * (levels - 1)
+    i0 = np.clip(np.floor(f).astype(int), 0, levels - 2)
+    wgt = (f - i0)[..., None]
+    out = np.zeros_like(stack[0])
+    for i in range(levels - 1):
+        m = i0 == i
+        if m.any():
+            out[m] = (stack[i][m] * (1 - wgt[m]) + stack[i + 1][m] * wgt[m])
+    return Image.fromarray(np.clip(out + 0.5, 0, 255).astype(np.uint8), "RGBa").convert("RGBA")
+
+
+def apply_noise(img: Image.Image, spec, seed: int, k: float, colors: dict) -> Image.Image:
+    """Grain on a painted fill. A number = mono grain (as before); an object = Figma-style noise:
+    {amount, mode: mono | duo | multi, size (grain size in units), colors: [c1, c2] (duo), density (duo)}."""
+    arr = np.asarray(img, dtype=np.float64).copy()
+    h, w = arr.shape[:2]
+    rng = np.random.default_rng(seed)
+    if not isinstance(spec, dict):
+        arr[..., :3] = np.clip(arr[..., :3] + rng.normal(0, float(spec) * 128, (h, w, 1)), 0, 255)
+        return Image.fromarray(arr.astype(np.uint8), "RGBA")
+    amount = max(0.0, min(1.0, float(spec.get("amount", 0.3))))
+    mode = str(spec.get("mode", "mono")).lower()
+    if mode not in ("mono", "duo", "multi"):
+        raise ValueError("noise.mode must be 'mono', 'duo' or 'multi'")
+    cell = max(1, int(round(float(spec.get("size", 1)) * k)))
+    gh, gw = -(-h // cell), -(-w // cell)
+
+    def grid(channels: int) -> np.ndarray:
+        g = rng.normal(0, 1, (gh, gw, channels))
+        return np.repeat(np.repeat(g, cell, 0), cell, 1)[:h, :w]
+
+    if mode == "mono":
+        arr[..., :3] += grid(1) * amount * 128
+    elif mode == "multi":
+        arr[..., :3] += grid(3) * amount * 128
+    else:
+        cols = spec.get("colors") or ["#000000", "#ffffff"]
+        c1 = np.array(parse_color(cols[0], colors)[:3], dtype=np.float64)
+        c2 = np.array(parse_color(cols[1] if len(cols) > 1 else "#ffffff", colors)[:3], dtype=np.float64)
+        density = max(0.0, min(1.0, float(spec.get("density", 0.5))))
+        u = np.repeat(np.repeat(rng.random((gh, gw)), cell, 0), cell, 1)[:h, :w]
+        speck = np.where((u < density)[..., None], c1, c2)
+        arr[..., :3] = arr[..., :3] * (1 - amount) + speck * amount
+    arr[..., :3] = np.clip(arr[..., :3], 0, 255)
+    return Image.fromarray((arr + 0.5).astype(np.uint8), "RGBA")
+
+
+def roughen(mask: Image.Image, spec, k: float, origin: tuple[float, float]) -> Image.Image:
+    """Figma "texture": distress the shape's edge. spec: number (edge movement in units) or
+    {amount, size (feature size in units), seed}."""
+    if not isinstance(spec, dict):
+        spec = {"amount": float(spec)}
+    amount = max(0.1, float(spec.get("amount", 2)))
+    size = max(0.5, float(spec.get("size", 4)))
+    seed = float(spec.get("seed", 1))
+    a = np.asarray(mask, dtype=np.float64)
+    soft = blur_float(a, amount * k) / 255.0
+    h, w = a.shape
+    ys, xs = np.mgrid[0:h, 0:w].astype(np.float64)
+    n = fractal_noise((xs + 0.5) / k + origin[0], (ys + 0.5) / k + origin[1], size, 3, seed)
+    out = np.clip((soft + (n - 0.5) * 0.9 - 0.5) * (amount * k * 2) + 0.5, 0, 1)
+    return Image.fromarray((out * 255 + 0.5).astype(np.uint8), "L")
+
+
+def _bilinear(arr: np.ndarray, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
+    h, w = arr.shape[:2]
+    xs, ys = np.clip(xs, 0, w - 1.001), np.clip(ys, 0, h - 1.001)
+    x0, y0 = np.floor(xs).astype(int), np.floor(ys).astype(int)
+    fx, fy = (xs - x0)[..., None], (ys - y0)[..., None]
+    a, b = arr[y0, x0], arr[y0, x0 + 1]
+    c, d = arr[y0 + 1, x0], arr[y0 + 1, x0 + 1]
+    return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy
+
+
+def glass(backdrop: Image.Image, mask: Image.Image, spec, k: float, colors: dict) -> Image.Image:
+    """Figma-style glass: bends (refraction), splits (dispersion) and frosts what is behind the shape and
+    catches light on its rim. spec: true or {refraction 0..1, depth (units), dispersion 0..1, frost (units),
+    light (angle, deg), intensity 0..1}."""
+    if not isinstance(spec, dict):
+        spec = {}
+    refraction = float(spec.get("refraction", 0.6))
+    depth = max(1.0, float(spec.get("depth", 14))) * k
+    dispersion = max(0.0, float(spec.get("dispersion", 0.25)))
+    frost = max(0.0, float(spec.get("frost", 0))) * k
+    intensity = max(0.0, float(spec.get("intensity", 0.5)))
+    ang = math.radians(float(spec.get("light", 225)))
+    m = np.asarray(mask, dtype=np.float64)
+    height = blur_float(m, depth) / 255.0
+    gy, gx = np.gradient(height)
+    src = backdrop.convert("RGBa")
+    if frost > 0:
+        from PIL import ImageFilter
+        src = src.filter(ImageFilter.GaussianBlur(frost / 2))
+    arr = np.asarray(src, dtype=np.float64)
+    h, w = m.shape
+    ys, xs = np.mgrid[0:h, 0:w].astype(np.float64)
+    push = refraction * depth * 6.0                     # edge slope (~1/depth per px) times this = displacement
+    out = np.empty_like(arr)
+    for ch, f in enumerate((1 - dispersion, 1.0, 1 + dispersion)):
+        sample = _bilinear(arr, xs + gx * push * f, ys + gy * push * f)
+        out[..., ch] = sample[..., ch]
+    out[..., 3] = _bilinear(arr, xs + gx * push, ys + gy * push)[..., 3]
+    rim = np.clip(-(gx * math.cos(ang) + gy * math.sin(ang)) * depth * 2.5, 0, 1) * intensity
+    out[..., :3] = out[..., :3] + rim[..., None] * (255.0 - out[..., :3]) * (out[..., 3:4] / 255.0)
+    out = Image.fromarray(np.clip(out + 0.5, 0, 255).astype(np.uint8), "RGBa").convert("RGBA")
+    return Image.composite(out, backdrop, mask)

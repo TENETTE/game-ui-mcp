@@ -594,7 +594,8 @@ def add_line(canvas: str, points: list[list[float]], width: float = 2, color: st
              cap: str = "round", closed: bool = False, dash: list[float] | None = None,
              style: str | dict | None = None,
              id: str | None = None, group: str | None = None, clip: str | None = None, layer: str | None = None,
-             start_cap: str | None = None, end_cap: str | None = None, cap_size: float | None = None):
+             start_cap: str | None = None, end_cap: str | None = None, cap_size: float | None = None,
+             taper: str | None = None, width_profile: list[float] | None = None, wiggle: dict | float | None = None):
     """Add a line or polyline through points [[x, y], ...] (dividers, accents, brackets, ticks).
 
     width: thickness. cap: "round" or "butt". color may be a color or a gradient object.
@@ -604,11 +605,14 @@ def add_line(canvas: str, points: list[list[float]], width: float = 2, color: st
     start_cap / end_cap: line endings - "arrow", "triangle", "circle", "square", "diamond", "bar" (arrows,
       connectors, sliders, timelines); cap_size: their size as a multiple of the width (default 3).
       add_arc takes them too through update_element.
+    taper: "start" | "end" | "both" (brush-like pointed ends); width_profile: width multipliers along the
+      line, e.g. [0.3, 1, 1, 0.3]; wiggle: {"amount": 3, "frequency": 6, "seed": 1} for a hand-drawn,
+      wobbly line (Figma variable-width and dynamic strokes).
     """
     return _add(canvas, "line", dict(points=points, width=width, cap=None if cap == "round" else cap,
                                      closed=closed or None, dash=dash, color=color, style=style, id=id,
                                      group=group, clip=clip, layer=layer, start_cap=start_cap, end_cap=end_cap,
-                                     cap_size=cap_size))
+                                     cap_size=cap_size, taper=taper, width_profile=width_profile, wiggle=wiggle))
 
 
 @tool

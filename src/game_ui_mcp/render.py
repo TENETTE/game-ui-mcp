@@ -533,12 +533,30 @@ def _inner_effects(layer: Image.Image, shape: Image.Image, fx: "Effects", k: flo
     return layer
 
 
-def _soft_mask(size: tuple[int, int], spec: Any, box_px: Box, colors: dict, k: float) -> Image.Image:
-    """Alpha of a paint spec over the whole region: the fade mask for style.mask."""
+def _soft_mask(size: tuple[int, int], spec: Any, box_px: Box, colors: dict, k: float,
+               mode: str = "alpha") -> Image.Image:
+    """The fade mask for style.mask: the paint's alpha, or its brightness with mask_mode "luminance"."""
     painted = paint(Image.new("L", size, 255), spec, box_px, colors, k)
     if painted is None:
         return Image.new("L", size, 255)
+    if str(mode).lower() == "luminance":
+        return ImageChops.multiply(painted.convert("L"), painted.getchannel("A"))
+    if str(mode).lower() != "alpha":
+        raise ValueError("mask_mode must be 'alpha' or 'luminance'")
     return painted.getchannel("A")
+
+
+def _fill_blend(spec: Any) -> tuple[Any, str]:
+    """A fill-stack entry may carry its own blend: {"type": ..., "blend": "multiply"} or {"color": c, "blend": ...}."""
+    if isinstance(spec, dict) and "blend" in spec:
+        spec = dict(spec)
+        blend = str(spec.pop("blend")).lower()
+        if blend not in BLENDS:
+            raise ValueError(f"fill blend must be one of {', '.join(BLENDS)}")
+        if "type" not in spec and "color" in spec:
+            spec = spec["color"]
+        return spec, blend
+    return spec, "normal"
 
 
 def _tint(mask: Image.Image, color: tuple[int, int, int, int], strength: float = 1.0) -> Image.Image:
@@ -1156,7 +1174,10 @@ def vector_geometry(el: dict, res: float) -> Geometry:
         width = max(0.25, float(el.get("width", 2)))
         closed = bool(el.get("closed", False))
         pts = _line_ends(g, el, pts, width, closed)
-        g.lines = _dashed(el, pts, closed, width, str(el.get("cap", "round")).lower()) + g.lines
+        if el.get("width_profile") or el.get("taper") or el.get("wiggle"):
+            g.fills += _variable_stroke(pts + ([pts[0]] if closed else []), width, el)
+        else:
+            g.lines = _dashed(el, pts, closed, width, str(el.get("cap", "round")).lower()) + g.lines
         x0, y0, x1, y1 = geo.bbox_of([pts] + g.fills + [p for p, _, _, _ in g.lines])
         g.box = (x0 - width / 2, y0 - width / 2, x1 + width / 2, y1 + width / 2)
     elif t == "arc":
@@ -1294,6 +1315,61 @@ def _side_strips(rect: tuple, sides: list[str], d0: float, d1: float) -> list[li
 
 
 END_CAPS = ("none", "arrow", "triangle", "circle", "square", "diamond", "bar")
+
+
+def _variable_stroke(pts: list, width: float, el: dict) -> list:
+    """A line drawn as a filled outline whose width varies (Figma variable-width / dynamic strokes).
+    width_profile: multipliers along the line, e.g. [0.2, 1, 0.4]; taper: "start" | "end" | "both";
+    wiggle: {"amount": units, "frequency": waves per 100 units, "seed"} for hand-drawn wobble."""
+    arr = np.asarray(pts, dtype=np.float64)
+    seg = np.hypot(*np.diff(arr, axis=0).T)
+    total = float(seg.sum())
+    if total <= 0:
+        return []
+    step = max(0.4, width / 3)
+    n = max(2, int(total / step) + 1)
+    s_pts = np.concatenate([[0.0], np.cumsum(seg)])
+    s = np.linspace(0, total, n)
+    xy = np.column_stack((np.interp(s, s_pts, arr[:, 0]), np.interp(s, s_pts, arr[:, 1])))
+    d = np.gradient(xy, axis=0)
+    d /= np.maximum(1e-9, np.hypot(d[:, 0], d[:, 1]))[:, None]
+    normal = np.column_stack((-d[:, 1], d[:, 0]))
+    u = s / total
+    profile = el.get("width_profile")
+    taper = str(el.get("taper") or "").lower()
+    if profile:
+        vals = [float(v) for v in profile]
+        mult = np.interp(u, np.linspace(0, 1, len(vals)), vals) if len(vals) > 1 else np.full(n, vals[0])
+    elif taper in ("start", "end", "both"):
+        mult = np.ones(n)
+        if taper in ("start", "both"):
+            mult = np.minimum(mult, np.clip(u / 0.35, 0.05, 1))
+        if taper in ("end", "both"):
+            mult = np.minimum(mult, np.clip((1 - u) / 0.35, 0.05, 1))
+    elif taper:
+        raise ValueError("taper must be 'start', 'end' or 'both'")
+    else:
+        mult = np.ones(n)
+    wig = el.get("wiggle")
+    if wig:
+        if not isinstance(wig, dict):
+            wig = {"amount": float(wig)}
+        amount = float(wig.get("amount", width))
+        freq = max(0.01, float(wig.get("frequency", 6))) / 100.0
+        rng = np.random.default_rng(int(wig.get("seed", 1)))
+        phases = rng.uniform(0, 2 * np.pi, 2)
+        wob = (np.sin(2 * np.pi * freq * s + phases[0]) + 0.3 * np.sin(2 * np.pi * freq * 1.7 * s + phases[1])) / 1.3
+        xy = xy + normal * (wob * amount)[:, None]
+    half = np.maximum(0.05, width * mult / 2)[:, None]
+    left, right = xy + normal * half, xy - normal * half
+    polys = [list(map(tuple, np.vstack((left, right[::-1]))))]
+    cap = str(el.get("cap", "round")).lower()
+    if cap == "round":
+        for i in (0, -1):
+            r = float(half[i, 0])
+            if r > 0.3:
+                polys.append(geo.ellipse_path(float(xy[i, 0]), float(xy[i, 1]), r, r, 8.0))
+    return polys
 
 
 def _line_ends(g, el: dict, pts: list, width: float, closed: bool) -> list:
@@ -1592,7 +1668,17 @@ class Renderer:
         path = Path(str(el.get("path", ""))).expanduser()
         if not path.is_file():
             raise ValueError(f"Image file not found: {path.resolve()} - use an absolute path (relative paths resolve against the server's working folder, not yours)")
-        return Image.open(path).convert("RGBA")
+        img = Image.open(path).convert("RGBA")
+        crop = el.get("crop")
+        if crop:
+            try:
+                cx, cy, cw, ch = (float(v) for v in crop)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("crop must be [x, y, width, height] in source-image pixels") from exc
+            if cw <= 0 or ch <= 0:
+                raise ValueError("crop width and height must be > 0")
+            img = img.crop((int(cx), int(cy), int(cx + cw), int(cy + ch)))
+        return img
 
     def _region(self, box: Box, pad: float, clip: bool = True) -> tuple[int, int, int, int] | None:
         """Pixel region (x0, y0, w, h) covering ``box`` + pad, limited to the padded canvas."""
@@ -1634,7 +1720,8 @@ class Renderer:
                 arr[:, 0] += (mid_y - arr[:, 1]) * lean
             return arr * f - offset
 
-        rule = str(el.get("fill_rule", "evenodd")).lower() if el["type"] == "path" else "evenodd"
+        rule = (str(el.get("fill_rule", "evenodd")).lower() if el["type"] == "path"
+                else "nonzero" if el["type"] in LINE_TYPES else "evenodd")
         if rule not in ("evenodd", "nonzero"):
             raise ValueError("fill_rule must be 'evenodd' or 'nonzero'")
 
@@ -1920,7 +2007,7 @@ class Renderer:
                 grow = max(grow, reach)
         gbox = (box[0] - grow, box[1] - grow, box[2] + grow, box[3] + grow)
         rot = float(el.get("rotation", 0) or 0)
-        soften = max(0.0, float(st.get("blur", 0) or 0))
+        soften, soften_prog = fxlib.blur_amount(st.get("blur"))
         pad = fx.pad() + soften * 1.5 + (3 if t == "text" else 1)
         pivot = self._pivot(el, box)
         if rot:
@@ -1946,6 +2033,10 @@ class Renderer:
             smasks = []
         else:
             raise ValueError(f"Unknown element type '{t}'")
+        if not _is_none(st.get("texture")):        # distressed, rough edges (Figma texture effect)
+            origin = (px0 / k, py0 / k)
+            shape = fxlib.roughen(shape, st["texture"], k, origin)
+            smasks = [fxlib.roughen(m, st["texture"], k, origin) for m in smasks]
         drawn = list(zip(strokes, smasks))        # line-like elements ignore style.stroke, so this may be empty
 
         fill_spec = st.get("fill", "#ffffff" if (not strokes or t in LINE_TYPES or t == "text") else None)
@@ -1977,19 +2068,23 @@ class Renderer:
             if color_layer is not None:
                 fill_img = color_layer
             elif _is_fill_stack(fill_spec):
-                fill_img = None                # Figma-style fill stack: bottom to top, each with its own alpha
+                fill_img = None                # Figma-style fill stack: bottom to top, each with its own blend
                 for one in fill_spec:
+                    one, fill_blend = _fill_blend(one)
                     one_img = paint(shape, one, box_px, self.colors, k)
-                    if one_img is not None:
-                        fill_img = one_img if fill_img is None else Image.alpha_composite(fill_img, one_img)
+                    if one_img is None:
+                        continue
+                    if fill_img is None:
+                        fill_img = one_img
+                    elif fill_blend == "normal":
+                        fill_img = Image.alpha_composite(fill_img, one_img)
+                    else:
+                        composite(fill_img, one_img, 0, 0, fill_blend)
             else:
                 fill_img = paint(shape, fill_spec, box_px, self.colors, k)
-            noise = float(st.get("noise", 0) or 0)
-            if noise > 0 and fill_img is not None:
-                arr = np.asarray(fill_img, dtype=np.float64).copy()
-                rng = np.random.default_rng(zlib.crc32(el["id"].encode()))
-                arr[..., :3] = np.clip(arr[..., :3] + rng.normal(0, noise * 128, (h, w, 1)), 0, 255)
-                fill_img = Image.fromarray(arr.astype(np.uint8), "RGBA")
+            noise = st.get("noise")
+            if fill_img is not None and not _is_none(noise) and (isinstance(noise, dict) or float(noise) > 0):
+                fill_img = fxlib.apply_noise(fill_img, noise, zlib.crc32(el["id"].encode()), k, self.colors)
             if fill_img is not None:
                 layer = Image.alpha_composite(layer, fill_img)
             if emoji is not None:
@@ -2003,17 +2098,24 @@ class Renderer:
         if st.get("adjust"):
             layer = fxlib.adjust(layer, st["adjust"], self.colors)
         if soften > 0:
-            # blur in premultiplied space so transparent pixels do not bleed dark fringes
-            layer = layer.convert("RGBa").filter(ImageFilter.GaussianBlur(soften * k / 2)).convert("RGBA")
+            # blur in premultiplied space so transparent pixels do not bleed dark fringes; a progressive
+            # blur ({radius, angle, start, end}) ramps from sharp to soft across the element
+            prog = fxlib.progressive_t((w, h), soften_prog, box_px) if soften_prog else None
+            layer = fxlib.blur_image(layer, soften * k / 2, prog)
         if not _is_none(st.get("mask")):
-            layer.putalpha(ImageChops.multiply(layer.getchannel("A"), _soft_mask((w, h), st["mask"], box_px, self.colors, k)))
+            layer.putalpha(ImageChops.multiply(layer.getchannel("A"),
+                                               _soft_mask((w, h), st["mask"], box_px, self.colors, k,
+                                                          st.get("mask_mode", "alpha"))))
 
         clip_id = el.get("clip")
         if clip_id:
             target = self._by_id.get(clip_id)
             if target is None:
                 raise ValueError(f"clip target '{clip_id}' does not exist on this canvas")
-            cm = self.shape_mask(target, region)
+            if str(el.get("clip_mode", "alpha")).lower() == "luminance":
+                cm = self._luminance_mask(target, region)
+            else:
+                cm = self.shape_mask(target, region)
             layer.putalpha(ImageChops.multiply(layer.getchannel("A"), cm))
         if opacity < 1:
             layer.putalpha(layer.getchannel("A").point(lambda v: int(v * opacity + 0.5)))
@@ -2061,25 +2163,46 @@ class Renderer:
             if result is None:
                 continue
             layer, ox, oy, blend = result
-            frost = float(resolve_style(el.get("style"), self.theme).get("backdrop_blur", 0) or 0)
-            if frost > 0:
-                self._backdrop_blur(img, el, (ox, oy, layer.width, layer.height), margin, frost)
+            st_el = self._nums(resolve_style(el.get("style"), self.theme))
+            if st_el.get("backdrop_blur") or st_el.get("glass"):
+                self._backdrop(img, el, (ox, oy, layer.width, layer.height), margin, st_el)
             composite(img, layer, ox + margin, oy + margin, blend)
 
-    def _backdrop_blur(self, img: Image.Image, el: dict, region, margin: int, radius: float) -> None:
-        """Figma "background blur": blur what is already drawn beneath the element, inside its shape."""
+    def _backdrop(self, img: Image.Image, el: dict, region, margin: int, st: dict) -> None:
+        """Figma "background blur" and "glass": rework what is already drawn beneath the element, inside its shape."""
         ox, oy, w, h = region
+        radius, prog = fxlib.blur_amount(st.get("backdrop_blur"))
         r_px = radius * self.k / 2
-        pad = int(math.ceil(r_px * 3)) + 1                  # blur from a larger patch so edges do not darken
+        glass = st.get("glass")
+        reach = r_px * 3 + (float(glass.get("depth", 14)) * self.k * 2 if isinstance(glass, dict) else 30 * self.k)
+        pad = int(math.ceil(reach if glass else r_px * 3)) + 1     # work on a larger patch so edges stay clean
         x0, y0 = max(0, ox + margin - pad), max(0, oy + margin - pad)
         x1, y1 = min(img.width, ox + margin + w + pad), min(img.height, oy + margin + h + pad)
         if x1 <= x0 or y1 <= y0:
             return
         patch = img.crop((x0, y0, x1, y1))
-        soft = patch.convert("RGBa").filter(ImageFilter.GaussianBlur(r_px)).convert("RGBA")
         mask = Image.new("L", patch.size, 0)
         mask.paste(self.shape_mask(el, region), (ox + margin - x0, oy + margin - y0))
-        img.paste(Image.composite(soft, patch, mask), (x0, y0))
+        out = patch
+        if r_px > 0:
+            box = mask.getbbox() or (0, 0, patch.width, patch.height)
+            t = fxlib.progressive_t(patch.size, prog, box) if prog else None
+            out = fxlib.blur_image(patch, r_px, t)
+        if glass:
+            out = fxlib.glass(out, mask, glass, self.k, self.colors)
+        img.paste(Image.composite(out, patch, mask), (x0, y0))
+
+    def _luminance_mask(self, target: dict, region) -> Image.Image:
+        """Brightness of the rendered target element as a mask (Figma luminance mask)."""
+        px0, py0, w, h = region
+        out = Image.new("L", (w, h), 0)
+        result = self.render_element(target)
+        if result is None:
+            return out
+        layer, ox, oy, _ = result
+        lum = ImageChops.multiply(layer.convert("L"), layer.getchannel("A"))
+        out.paste(lum, (ox - px0, oy - py0))
+        return out
 
     def _style_layer(self, content: Image.Image, st: dict, box_px: Box) -> Image.Image:
         """Apply layer-level effects to the merged content of a layer, using its alpha as the silhouette."""
@@ -2106,11 +2229,13 @@ class Renderer:
             img = paint(m, spec["paint"], box_px, self.colors, k)
             if img is not None:
                 out = Image.alpha_composite(out, img)
-        soften = max(0.0, float(st.get("blur", 0) or 0))
+        soften, soften_prog = fxlib.blur_amount(st.get("blur"))
         if soften > 0:
-            out = out.convert("RGBa").filter(ImageFilter.GaussianBlur(soften * k / 2)).convert("RGBA")
+            prog = fxlib.progressive_t(out.size, soften_prog, box_px) if soften_prog else None
+            out = fxlib.blur_image(out, soften * k / 2, prog)
         if not _is_none(st.get("mask")):
-            out.putalpha(ImageChops.multiply(out.getchannel("A"), _soft_mask(out.size, st["mask"], box_px, self.colors, k)))
+            out.putalpha(ImageChops.multiply(out.getchannel("A"), _soft_mask(out.size, st["mask"], box_px, self.colors, k,
+                                                                             st.get("mask_mode", "alpha"))))
         return out
 
     def layer_image(self, layer: dict | None, elements: list[dict], clip_alpha: Image.Image | None = None,
