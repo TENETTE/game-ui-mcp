@@ -124,6 +124,7 @@ Tipik yığın (alttan üste): `ground` (bulanık zemin gölgesi) → `body` (an
 - **Bulanıklık:** `blur` bütün elemanı yumuşatır; `{"radius", "angle", "start", "end"}` ile kademeli bulanıklık (keskinden yumuşağa). `feather` yalnızca kenarı yumuşatır (yumuşak ışık lekesi, sis, ışık hüzmesi).
 - **Doku ve gren:** `noise` (sayı ya da `{mode: mono | duo | multi, amount, size}`) film / baskı hissi; `texture` kenarları pürüzlendirir (yıpranmış, damga, yırtık); `clouds`, `hex`, `carbon`, `brushed` dolguları; kendi görselin `{"type":"image","path":...,"fit":"tile"}`. Dokuyu düşük alfayla, tercihen clip katmanında kullan.
 - **Maske:** `mask` elemanı gradient ile söndürür (yalnızca alfa önemli); `mask_mode: "luminance"` parlaklığı kullanır. Bir elemanı başka bir şekle kırpmak için `clip`, parlaklığa göre kırpmak için `clip_mode: "luminance"`.
+- **Hazır materyal:** `style: {"material": "gold"}` ya da `{"material": {"name": "wood", "color": "$primary", "scale": 1.5, "seed": 3}}`. Seçenekler: gold, silver, chrome, bronze, copper, steel, iron, rust, wood, stone, marble, leather, fabric, paper, lava, ice, gem, plastic, rubber, jelly, glass, neon, hologram. Işık ve dolguyu birlikte verir; kendi yazdığın anahtarlar (ör. `light`, `stroke`) üstüne yazar. Lava, jelly ve hologram `style.material.t` ile canlanır. Hiçbiri uymuyorsa sıfırdan shader yaz ("Shader dolgusu").
 - **Renk:** `adjust` yeniden çizmeden düzeltir (brightness, contrast, saturation, exposure, temperature, shadows, highlights, hue, tint). Hover `brightness: 0.08`, disabled `saturation: -0.8`. Uzak renkler arası gradient için `"space": "oklab"` (gri-çamur geçişi olmaz).
 - **Dolgu yığını:** `fill` liste olabilir (alttan üste); her katmana ayrı `blend` verilebilir (gradient + `overlay` ile parlaklık).
 - **Karışım modu:** gölge `multiply`, ışık `screen` (yumuşak) ya da `add` (neon, enerji), canlandırmak için `overlay` / `soft-light`.
@@ -177,6 +178,7 @@ Düz tek dikdörtgen "programcı işi" görünür. Bir yüzey alttan üste: göv
 - **Köşeler:** `radius` (tek ya da dört köşe), `corner: "cut"` (kesik, sci-fi), `smoothing: 0.6` (iOS tarzı yumuşak köşe). Çokgen ve path konturu varsayılan keskindir (`join: "miter"`); yumuşak için `"round"`.
 - **Çizgiler:** `start_cap` / `end_cap` (arrow, triangle, circle, square, diamond, bar) bağlantı ve kaydırıcılar için; `taper`, `width_profile`, `wiggle` fırça ve el çizimi hissi için; `dash` kesikli.
 - **Tekrar:** `duplicate_element` ile doğrusal (`count`, `dx`) ve dairesel dizi (`rotate`, `pivot`); simetrik parçanın ikinci yarısı için `flip_x` / `flip_y` (ışık yönü korunur); serpiştirme için `scatter`.
+- **Görseller:** `add_image` ile `crop` (parçasını al), `cutout: true` (düz arka planı sil), `fit: "cover"` + `zoom` / `focus` (çerçeve içinde kaydır, yakınlaştır). Görseli herhangi bir şeklin içine koymak için şekle `fill: {"type": "image", "path": ..., "zoom", "focus"}` ver ya da `clip` kullan. Görseller alt-piksel hassasiyetle hareket eder.
 - **Dışarıdan:** logo ya da ikon SVG'si `add_svg`; düz renkli bir çizim, logo ya da piksel sanatını düzenlenebilir vektöre `vectorize_image(path, colors=...)` çevirir (fotoğraf posterize olur).
 - **Toplu değişiklik:** "maviyi mor yap", "fontu değiştir", "Play yerine Start yaz" gibi isteklerde `restyle(replace_colors=..., replace_fonts=..., replace_text=...)`; önce `dry_run=true`. Benzer elemanları bulmak için `find_elements(like=id)`.
 
@@ -231,6 +233,7 @@ Hazır animasyon yok: hangi özelliğin ne zaman, hangi değere, hangi ivmeyle g
 - Sıralı giriş: grup hedefinde `stagger: 0.05-0.08`.
 - Bir grubu tek parça gibi büyütmek / döndürmek için `target: "group:ad"` ve ortak `pivot`.
 - Ölçek 0'dan başlamaz (0.5-0.85) ve opaklıkla birlikte gelir. Döngüde ilk ve son değer aynıdır.
+- Kare kare görsel: animasyonlu GIF / APNG / WebP ya da `sheet: {"cols", "rows", "count"}` ile sprite sheet; `frame` özelliğini 0'dan kare sayısına keyframe'le (döngüye girer). Fotoğrafta yavaş kaydırma / yakınlaştırma için `zoom` ve `focus` keyframe'le.
 - Yol boyunca hareket (HUD'a uçan coin, yörüngedeki ikon): `property: "motion"`, değerler 0 → 1, `path: {"d": "M 0 0 C ...", "rotate": true}`.
 - Hareket canvas dışına taşıyorsa canvas'ta pay bırak.
 

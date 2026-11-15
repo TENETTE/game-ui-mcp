@@ -836,14 +836,25 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
 def add_image(canvas: str, path: str, x: float, y: float, width: float | None = None, height: float | None = None,
               fit: str = "stretch", radius: float | list[float] = 0, tint: str | None = None,
               style: str | dict | None = None, rotation: float = 0, id: str | None = None,
-              group: str | None = None, clip: str | None = None, layer: str | None = None):
-    """Place an existing image file (PNG/JPG/WebP) from disk, e.g. a character portrait, a logo, or a
-    PNG exported earlier. Give width and/or height (the missing one keeps the aspect ratio).
+              group: str | None = None, clip: str | None = None, layer: str | None = None,
+              crop: list[float] | None = None, zoom: float | None = None, focus: list[float] | None = None,
+              cutout: bool | dict | None = None, sheet: dict | None = None, frame: float | None = None):
+    """Place an existing image file (PNG / JPG / WebP / GIF) from disk, e.g. a character portrait, a logo,
+    a photo, or a PNG exported earlier. Give width and/or height (the missing one keeps the aspect ratio).
     fit: "stretch", "contain" or "cover". radius rounds the corners. tint recolors using the alpha
-    (handy for white icons). style can add shadow / glow / opacity."""
+    (handy for white icons). style can add shadow / glow / light / adjust / mask like any shape.
+
+    crop [x, y, w, h] in source pixels uses part of the file. cutout: true (or {"tolerance": 40}) removes a
+    flat background colour around the subject. zoom (>= 1) and focus [fx, fy] (0..1 of the picture) pan and
+    zoom inside the box (keyframe them for a Ken Burns move). Put a picture into any shape exactly: draw the
+    shape and give it fill {"type": "image", "path": ..., "zoom", "focus"}, or clip the image to a shape.
+
+    Animated pictures: an animated GIF / APNG / WebP, or a sprite sheet with sheet {"cols", "rows", "count"};
+    frame picks the picture (keyframe "frame" from 0 to count over time to play it, it loops)."""
     return _add(canvas, "image", dict(path=str(Path(path).expanduser()), x=x, y=y, width=width, height=height,
                                       fit=None if fit == "stretch" else fit, radius=radius or None, tint=tint,
-                                      style=style, rotation=rotation or None, id=id, group=group, clip=clip, layer=layer))
+                                      style=style, rotation=rotation or None, id=id, group=group, clip=clip, layer=layer,
+                                      crop=crop, zoom=zoom, focus=focus, cutout=cutout, sheet=sheet, frame=frame))
 
 
 @tool

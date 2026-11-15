@@ -17,6 +17,15 @@ Fill: a color, or a gradient/pattern object:
   {"type":"image","path":"C:/textures/metal.png","fit":"cover"|"stretch"|"tile","scale":1}   (your own texture)
   Gradients take "space":"oklab" for vivid, even blends between distant hues (default "srgb").
   A list of fills stacks them bottom to top (Figma fill stack): [gradient, {"type":"stripes",...}, "#fff@0.1"].
+  Image fill also takes "zoom" (>= 1) and "focus" [fx, fy] to frame a photo inside any shape.
+Ready materials: style {"material": "gold"} or {"material": {"name": "wood", "color": "$primary", "scale": 1,
+  "seed": 2, "t": 0}} adds a procedural fill plus lighting; your own style keys override it. Names: bronze,
+  chrome, copper, fabric, gem, glass, gold, hologram, ice, iron, jelly, lava, leather, marble, neon, paper,
+  plastic, rubber, rust, silver, steel, stone, wood. Animate lava / jelly / hologram with "style.material.t".
+  From scratch: write a shader fill (guide("shader")).
+Images: add_image takes crop, cutout (removes a flat background), zoom / focus (pan and zoom), animated
+  GIF / APNG / WebP or sheet {"cols", "rows", "count"} with frame (keyframe "frame" to play it). Images move
+  with sub-pixel precision, so slow pans and slides stay smooth.
 """,
     "shader": """\
 Shader fill (a fill object):

@@ -113,6 +113,9 @@ def resolve_style(style: Any, theme: dict) -> dict:
             out.pop(key, None)
         else:
             out[key] = value
+    if out.get("material"):
+        from .materials import expand
+        out = {**expand(out.pop("material")), **out}
     return out
 
 
@@ -453,13 +456,7 @@ def _image_fill(mask: Image.Image, spec: dict, box_px: Box, k: float) -> Image.I
             for tx in range(ox, w, tile.width):
                 out.paste(tile, (tx, ty))
     elif fit in ("cover", "stretch"):
-        if fit == "stretch":
-            img = src.resize((bw, bh), Image.LANCZOS)
-        else:
-            ratio = max(bw / src.width, bh / src.height)
-            img = src.resize((max(1, int(round(src.width * ratio))), max(1, int(round(src.height * ratio)))), Image.LANCZOS)
-            left, top = (img.width - bw) // 2, (img.height - bh) // 2
-            img = img.crop((left, top, left + bw, top + bh))
+        img = src.resize((bw, bh), Image.LANCZOS, box=view_box(src.size, (bw, bh), fit, spec))
         out.paste(img, (int(round(x0)), int(round(y0))))
     else:
         raise ValueError("image fill: fit must be 'cover', 'stretch' or 'tile'")
@@ -467,6 +464,79 @@ def _image_fill(mask: Image.Image, spec: dict, box_px: Box, k: float) -> Image.I
     alpha = ImageChops.multiply(out.getchannel("A"), mask)
     out.putalpha(alpha if opacity >= 1 else alpha.point(lambda v: int(v * opacity + 0.5)))
     return out
+
+
+def view_box(size: tuple[int, int], target: tuple[float, float], fit: str, spec: dict) -> tuple[float, float, float, float]:
+    """Source rectangle shown in a target box: cover / stretch, then zoom (>= 1 zooms in) around focus
+    [fx, fy] (0..1 of the picture). Float edges keep pan / zoom animation smooth."""
+    sw, sh = float(size[0]), float(size[1])
+    vw, vh = sw, sh
+    if fit == "cover":
+        aspect = target[0] / max(1e-6, target[1])
+        vw, vh = (sh * aspect, sh) if sw / sh > aspect else (sw, sw / aspect)
+    zoom = max(1.0, float(spec.get("zoom", 1) or 1))
+    vw, vh = vw / zoom, vh / zoom
+    fx, fy = (spec.get("focus") or (0.5, 0.5))[:2]
+    x0 = min(max(float(fx) * sw - vw / 2, 0.0), sw - vw)
+    y0 = min(max(float(fy) * sh - vh / 2, 0.0), sh - vh)
+    return x0, y0, x0 + vw, y0 + vh
+
+
+def _cutout(img: Image.Image, spec: Any) -> Image.Image:
+    """Remove a flat background: flood from the four corners within a colour tolerance, soft edge."""
+    tol = float(spec.get("tolerance", 40)) if isinstance(spec, dict) else 40.0
+    rgb = img.convert("RGB")
+    probe = rgb.copy()
+    mark = (255, 0, 254)
+    for xy in ((0, 0), (rgb.width - 1, 0), (0, rgb.height - 1), (rgb.width - 1, rgb.height - 1)):
+        if probe.getpixel(xy) != mark:
+            ImageDraw.floodfill(probe, xy, mark, thresh=tol)
+    bg = np.all(np.asarray(probe) == mark, axis=-1) & np.any(np.asarray(rgb) != mark, axis=-1)
+    keep = Image.fromarray(np.where(bg, 0, 255).astype(np.uint8), "L").filter(ImageFilter.GaussianBlur(0.7))
+    out = img.copy()
+    out.putalpha(ImageChops.multiply(img.getchannel("A"), keep))
+    return out
+
+
+_FRAMES: dict[tuple, Image.Image] = {}
+
+
+def load_frame(path: Path, el: dict) -> Image.Image:
+    """One picture of an image element: its animation frame (GIF / APNG / WebP, or a sprite sheet
+    {"cols", "rows", "count"}), then crop and cutout. Cached per file version."""
+    sheet = el.get("sheet")
+    frame = int(math.floor(float(el.get("frame", 0) or 0)))
+    key = (str(path), path.stat().st_mtime, frame, repr(sheet), repr(el.get("crop")), repr(el.get("cutout")))
+    if key in _FRAMES:
+        return _FRAMES[key]
+    src = Image.open(path)
+    if sheet:
+        cols, rows = max(1, int(sheet.get("cols", 1))), max(1, int(sheet.get("rows", 1)))
+        count = max(1, min(cols * rows, int(sheet.get("count", cols * rows))))
+        i = frame % count
+        cw, ch = src.width / cols, src.height / rows
+        img = src.convert("RGBA").crop((int(round(i % cols * cw)), int(round(i // cols * ch)),
+                                         int(round((i % cols + 1) * cw)), int(round((i // cols + 1) * ch))))
+    else:
+        n = int(getattr(src, "n_frames", 1) or 1)
+        if n > 1:
+            src.seek(frame % n)
+        img = src.convert("RGBA")
+    crop = el.get("crop")
+    if crop:
+        try:
+            cx, cy, cw, ch = (float(v) for v in crop)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("crop must be [x, y, width, height] in source-image pixels") from exc
+        if cw <= 0 or ch <= 0:
+            raise ValueError("crop width and height must be > 0")
+        img = img.crop((int(cx), int(cy), int(cx + cw), int(cy + ch)))
+    if el.get("cutout"):
+        img = _cutout(img, el["cutout"])
+    if len(_FRAMES) > 256:
+        _FRAMES.clear()
+    _FRAMES[key] = img
+    return img
 
 
 _DITHER: dict[tuple[int, int], np.ndarray] = {}
@@ -1645,17 +1715,7 @@ class Renderer:
         path = Path(str(el.get("path", ""))).expanduser()
         if not path.is_file():
             raise ValueError(f"Image file not found: {path.resolve()} - use an absolute path (relative paths resolve against the server's working folder, not yours)")
-        img = Image.open(path).convert("RGBA")
-        crop = el.get("crop")
-        if crop:
-            try:
-                cx, cy, cw, ch = (float(v) for v in crop)
-            except (TypeError, ValueError) as exc:
-                raise ValueError("crop must be [x, y, width, height] in source-image pixels") from exc
-            if cw <= 0 or ch <= 0:
-                raise ValueError("crop width and height must be > 0")
-            img = img.crop((int(cx), int(cy), int(cx + cw), int(cy + ch)))
-        return img
+        return load_frame(path, el)
 
     def _region(self, box: Box, pad: float, clip: bool = True) -> tuple[int, int, int, int] | None:
         """Pixel region (x0, y0, w, h) covering ``box`` + pad, limited to the padded canvas."""
@@ -1859,9 +1919,11 @@ class Renderer:
         tw, th = max(1, int(round(uw * k))), max(1, int(round(uh * k)))
         src = self._instance_image(el, tw, th) if el["type"] == "instance" else self._load_image(el)
         fit = str(el.get("fit", "stretch")).lower()
-        if fit == "stretch":
-            img = src if src.size == (tw, th) else src.resize((tw, th), Image.LANCZOS)
-        elif fit in ("contain", "cover"):
+        if fit == "stretch" and src.size == (tw, th) and not el.get("zoom") and not el.get("focus"):
+            img = src
+        elif fit in ("stretch", "cover"):
+            img = src.resize((tw, th), Image.LANCZOS, box=view_box(src.size, (tw, th), fit, el))
+        elif fit == "contain":
             ratio = (min if fit == "contain" else max)(tw / src.width, th / src.height)
             rs = src.resize((max(1, int(round(src.width * ratio))), max(1, int(round(src.height * ratio)))), Image.LANCZOS)
             img = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
@@ -1879,12 +1941,19 @@ class Renderer:
             img = Image.new("RGBA", img.size, (r, g, b, 0))
             img.putalpha(alpha if a == 255 else alpha.point(lambda v: v * a // 255))
         layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-        ox = int(round(float(el.get("x", 0)) * k)) - px0
-        oy = int(round(float(el.get("y", 0)) * k)) - py0
+        fx_, fy_ = float(el.get("x", 0)) * k - px0, float(el.get("y", 0)) * k - py0
+        ox, oy = int(math.floor(fx_)), int(math.floor(fy_))
+        sub_x, sub_y = fx_ - ox, fy_ - oy
+        if (sub_x > 0.02 or sub_y > 0.02) and not self.canvas.get("pixel_art"):
+            padded = Image.new("RGBa", (img.width + 3, img.height + 3), (0, 0, 0, 0))
+            padded.paste(img.convert("RGBa"), (1, 1))
+            img = padded.transform(padded.size, Image.AFFINE, (1, 0, -sub_x, 0, 1, -sub_y),
+                                   resample=Image.BICUBIC).convert("RGBA")
+            ox, oy = ox - 1, oy - 1
         layer.paste(img, (ox, oy))
         rot = float(el.get("rotation", 0) or 0)
         if rot:
-            centre = (ox + tw / 2, oy + th / 2)
+            centre = (fx_ + tw / 2, fy_ + th / 2)
             if el.get("origin"):
                 pvx, pvy = self._pivot(el, (0, 0, 0, 0))
                 centre = (pvx * k - px0, pvy * k - py0)

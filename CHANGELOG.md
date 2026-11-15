@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.0 - 2026-11-16
+
+- 23 ready materials (`style.material`): metals, wood, stone, marble, leather, fabric, paper, rust, lava, ice, gem, plastic, rubber, jelly, glass, neon, hologram; tintable, seedable, animatable.
+- Images: `crop`, `cutout` background removal, `zoom` / `focus` pan and zoom (also on image fills), animated GIF / APNG / WebP and sprite sheets via `frame`, sub-pixel placement.
+
 ## 0.9.0 - 2026-11-16
 
 - Lottie: plain shapes and text export as vector shape layers (solid / gradient fill, stroke, animated colour).
