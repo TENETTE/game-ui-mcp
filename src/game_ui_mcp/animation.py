@@ -20,17 +20,17 @@ from typing import Any
 from .colors import parse_color, to_hex
 from .render import shift_element
 
-STYLES = ("linear", "sine", "quad", "cubic", "quart", "quint", "expo", "circ", "back", "elastic", "bounce")
+STYLES = ("linear", "sine", "quad", "cubic", "quart", "quint", "expo", "circ", "back", "elastic", "bounce", "spring")
 VIRTUAL = ("dx", "dy", "scale", "scale_x", "scale_y", "opacity")
 COLOR_KEYS = {"fill", "color", "color2", "highlight", "tint", "background", "from_color", "to_color"}
 MAX_FRAMES = 300
 
 ROBLOX_STYLE = {"linear": "Linear", "sine": "Sine", "quad": "Quad", "cubic": "Cubic", "quart": "Quart",
                 "quint": "Quint", "expo": "Exponential", "circ": "Circular", "back": "Back", "elastic": "Elastic",
-                "bounce": "Bounce"}
+                "bounce": "Bounce", "spring": "Back"}
 DOTWEEN_STYLE = {"linear": "Linear", "sine": "Sine", "quad": "Quad", "cubic": "Cubic", "quart": "Quart",
                  "quint": "Quint", "expo": "Expo", "circ": "Circ", "back": "Back", "elastic": "Elastic",
-                 "bounce": "Bounce"}
+                 "bounce": "Bounce", "spring": "Back"}
 DIRECTION = {"in": "In", "out": "Out", "in-out": "InOut"}
 
 
@@ -76,6 +76,11 @@ def _ease_in(style: str, t: float) -> float:
         return -(2 ** (10 * t - 10)) * math.sin((t * 10 - 10.75) * (2 * math.pi / 3))
     if style == "bounce":
         return 1 - _bounce_out(1 - t)
+    if style == "spring":
+        # damped spring settling on the target (Figma / iOS style); "spring-out" overshoots and settles
+        def out(x: float) -> float:
+            return 1 - math.exp(-6.5 * x) * math.cos(2.6 * math.pi * x)
+        return 1 - out(1 - t) / out(1.0)
     raise ValueError(f"unknown easing style '{style}'")
 
 

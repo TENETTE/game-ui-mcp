@@ -216,6 +216,8 @@ def _vector_element(doc: _Doc, r: Renderer, el: dict, st: dict) -> bool:
         paint = _paint(doc, fill_list[0], paint_ref, colors)
         if paint is None or len(fill_list) > 1:
             return False
+        if shapes:                                       # arrow heads and other filled line ends
+            out.append(f'<path d="{d}" fill="{paint[0]}"' + (f' fill-opacity="{_num(paint[1])}"' if paint[1] < 1 else "") + "/>")
         for pts, closed, width, cap in lines:
             out.append(f'<path d="{_open_d(pts, closed)}" fill="none" stroke="{paint[0]}" stroke-width="{_num(width)}" '
                        f'stroke-linecap="{ "round" if cap == "round" else "butt"}" stroke-linejoin="round"'

@@ -166,7 +166,7 @@ def export_spec(canvas: str, out_dir: str | None = None, name: str | None = None
         style = resolve_style(el.get("style"), st.theme)
         item: dict = {"id": el["id"], "type": el["type"], "x": round(x0, 2), "y": round(y0, 2),
                       "width": round(x1 - x0, 2), "height": round(y1 - y0, 2)}
-        for key in ("group", "layer", "pin", "radius", "rotation"):
+        for key in ("group", "layer", "pin", "radius", "rotation", "note"):
             if el.get(key):
                 item[key] = el[key]
         if el["type"] == "text":
@@ -247,23 +247,36 @@ def _ident(name: str, case: str) -> str:
 
 
 @tool
+def _num(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _rgba_hex(v) -> str:
+    return "#" + "".join(f"{c:02x}" for c in v[:4])
+
+
 def export_theme(format: str = "json", path: str | None = None):
     """Export the theme as design tokens for the engine or a web / app codebase, so code uses exactly
     the colours and text styles the art was drawn with.
 
     format: "json", "css" (custom properties + text classes), "uss" (Unity UI Toolkit variables +
     classes), "csharp" (static Color32 class), "gdscript" (Godot constants), "luau" (Roblox module with
-    Color3 + transparency). Text styles (theme styles with font / size / weight) become typography tokens.
+    Color3 + transparency), "dtcg" (W3C design tokens JSON for Tokens Studio, Penpot, Style Dictionary;
+    modes go into $extensions). Text styles (theme styles with font / size / weight) become typography tokens.
     """
     st = store()
     fmt = format.lower()
-    ext = {"json": ".json", "css": ".css", "uss": ".uss", "csharp": ".cs", "gdscript": ".gd", "luau": ".luau"}
+    ext = {"json": ".json", "css": ".css", "uss": ".uss", "csharp": ".cs", "gdscript": ".gd", "luau": ".luau",
+           "dtcg": ".tokens.json"}
     if fmt not in ext:
         raise ValueError(f"format must be one of {', '.join(ext)}")
     colors = st.theme.get("colors", {})
     rgba = {k: parse_color(v, colors) for k, v in colors.items()}
-    modes = {name: {k: parse_color(v, {**colors, **vals}) for k, v in vals.items()}
+    numbers = st.theme.get("numbers") or {}
+    modes = {name: {k: parse_color(v, {**colors, **vals}) for k, v in vals.items() if not _num(v)}
              for name, vals in (st.theme.get("modes") or {}).items()}
+    mode_numbers = {name: {k: v for k, v in vals.items() if _num(v)}
+                    for name, vals in (st.theme.get("modes") or {}).items()}
     text_styles = {}
     for name in st.theme.get("styles", {}):
         sty = resolve_style(name, st.theme)
@@ -276,14 +289,21 @@ def export_theme(format: str = "json", path: str | None = None):
                 except ValueError:
                     pass
     lines: list[str] = []
-    if fmt == "json":
-        text = json.dumps({"colors": {k: to_hex(v) for k, v in rgba.items()}, "text_styles": text_styles,
+    if fmt == "dtcg":
+        from .tokens import write_dtcg
+        text = json.dumps(write_dtcg({k: to_hex(v) if v[3] == 255 else _rgba_hex(v) for k, v in rgba.items()}, numbers,
+                                     text_styles, {m: {k: to_hex(v) for k, v in vals.items()} for m, vals in modes.items()},
+                                     mode_numbers), ensure_ascii=False, indent=1)
+    elif fmt == "json":
+        text = json.dumps({"colors": {k: to_hex(v) for k, v in rgba.items()}, "numbers": numbers, "text_styles": text_styles,
                            "modes": {m: {k: to_hex(v) for k, v in vals.items()} for m, vals in modes.items()}},
                           ensure_ascii=False, indent=1)
     elif fmt in ("css", "uss"):
         lines.append(":root {")
         for k, v in rgba.items():
             lines.append(f"    --color-{_ident(k, 'kebab')}: {to_hex(v) if fmt == 'css' or v[3] == 255 else f'rgba({v[0]}, {v[1]}, {v[2]}, {round(v[3] / 255, 3)})'};")
+        for k, v in numbers.items():
+            lines.append(f"    --{_ident(k, 'kebab')}: {v:g}px;")
         lines.append("}")
         for mname, vals in modes.items():               # css: <html data-theme="light">, uss: add class theme-light
             sel = f'[data-theme="{_ident(mname, "kebab")}"]' if fmt == "css" else f".theme-{_ident(mname, 'kebab')}"

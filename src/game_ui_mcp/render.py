@@ -26,7 +26,24 @@ from .fonts import FontLibrary, load_font, missing_glyphs, parse_weight
 SS = 4
 MAX_MASK_PIXELS = 40_000_000
 MAX_OUTPUT_PIXELS = 140_000_000      # 16K x 8K; larger renders exhaust RAM before Python can raise MemoryError
-TEXT_STYLE_KEYS = ("font", "weight", "size", "letter_spacing", "line_height", "uppercase", "italic")
+TEXT_STYLE_KEYS = ("font", "weight", "size", "letter_spacing", "line_height", "uppercase", "italic", "case")
+
+
+def _letter_case(text: str, case: str) -> str:
+    """Non-destructive letter case like Figma's: upper, lower, title (Capitalize), tr-upper / tr-lower."""
+    if not case or case == "none":
+        return text
+    if case == "upper":
+        return text.upper()
+    if case == "tr-upper":
+        return _tr_upper(text)
+    if case == "lower":
+        return text.lower()
+    if case == "tr-lower":
+        return text.replace("I", "\u0131").replace("\u0130", "i").lower()
+    if case in ("title", "capitalize"):
+        return " ".join(w[:1].upper() + w[1:] for w in text.split(" "))
+    raise ValueError("case must be 'upper', 'lower', 'title', 'tr-upper', 'tr-lower' or 'none'")
 VECTOR_TYPES = {"rect", "ellipse", "polygon", "line", "path", "arc", "ticks", "boolean"}
 BOOLEAN_OPS = ("union", "subtract", "intersect", "exclude")
 BITMAP_TYPES = {"image", "instance"}
@@ -83,6 +100,26 @@ def _as_list(value: Any) -> list:
     if value is None or value is False:
         return []
     return list(value) if isinstance(value, (list, tuple)) else [value]
+
+
+def _is_number(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+_NO_NUMBER_KEYS = {"text", "code", "font", "id", "group", "layer", "source", "d"}
+
+
+def _sub_numbers(obj: Any, numbers: dict, key: str | None = None) -> Any:
+    if isinstance(obj, str):
+        name = obj.strip()
+        if key not in _NO_NUMBER_KEYS and name.startswith("$") and name[1:] in numbers:
+            return float(numbers[name[1:]])
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sub_numbers(v, numbers, k) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sub_numbers(v, numbers, key) for v in obj]
+    return obj
 
 
 def _is_none(spec: Any) -> bool:
@@ -313,7 +350,7 @@ def paint(mask: Image.Image, spec: Any, box_px: Box, colors: dict, k: float) -> 
         return _image_fill(mask, spec, box_px, k)
     if kind == "shader":
         rgba = shader.evaluate(spec, (w, h), box_px, k, colors)
-    elif kind in ("linear", "radial", "conic"):
+    elif kind in ("linear", "radial", "conic", "diamond"):
         space = str(spec.get("space", "srgb")).lower()
         offs, cols = _stops(spec, colors, space)
         ys, xs = np.mgrid[0:h, 0:w].astype(np.float64)
@@ -324,6 +361,11 @@ def paint(mask: Image.Image, spec: Any, box_px: Box, colors: dict, k: float) -> 
             ca, sa = math.cos(ang), math.sin(ang)
             length = abs(bw * ca) + abs(bh * sa)
             t = ((xs - (x0 + x1) / 2) * ca + (ys - (y0 + y1) / 2) * sa) / max(1e-6, length) + 0.5
+        elif kind == "diamond":
+            cx = x0 + bw * float(spec.get("cx", 0.5))
+            cy = y0 + bh * float(spec.get("cy", 0.5))
+            rad = float(spec.get("r", 0.5))
+            t = np.abs(xs - cx) / max(1e-6, bw * rad) + np.abs(ys - cy) / max(1e-6, bh * rad)
         elif kind == "conic":
             cx = x0 + bw * float(spec.get("cx", 0.5))
             cy = y0 + bh * float(spec.get("cy", 0.5))
@@ -595,9 +637,11 @@ class TextLayout:
     def __init__(self, el: dict, st: dict, fonts: FontLibrary, ppu: float, text: str | None = None,
                  lang: str | None = None):
         text = str(el.get("text", "")) if text is None else text
+        case = str(el.get("case", st.get("case")) or "").lower().replace("_", "-")
         upper = el.get("uppercase", st.get("uppercase"))
-        if upper:
-            text = _tr_upper(text) if str(upper).lower() == "tr" else text.upper()
+        if upper and not case:
+            case = "tr-upper" if str(upper).lower() == "tr" else "upper"
+        text = _letter_case(text, case)
         self.family = el.get("font") or st.get("font")
         self.weight = parse_weight(el.get("weight", st.get("weight")))
         self.size = float(el.get("size") or st.get("size") or 24)
@@ -937,8 +981,9 @@ def vector_geometry(el: dict, res: float) -> Geometry:
             raise ValueError("line needs at least 2 points, like [[0, 0], [100, 0]]")
         width = max(0.25, float(el.get("width", 2)))
         closed = bool(el.get("closed", False))
-        g.lines = _dashed(el, pts, closed, width, str(el.get("cap", "round")).lower())
-        x0, y0, x1, y1 = geo.bbox_of([pts])
+        pts = _line_ends(g, el, pts, width, closed)
+        g.lines = _dashed(el, pts, closed, width, str(el.get("cap", "round")).lower()) + g.lines
+        x0, y0, x1, y1 = geo.bbox_of([pts] + g.fills + [p for p, _, _, _ in g.lines])
         g.box = (x0 - width / 2, y0 - width / 2, x1 + width / 2, y1 + width / 2)
     elif t == "arc":
         cx, cy, radius = float(el["cx"]), float(el["cy"]), float(el["radius"])
@@ -955,8 +1000,10 @@ def vector_geometry(el: dict, res: float) -> Geometry:
         pts = geo.arc_path(cx, cy, radius, start, start + 360 if full else end, res)
         if full:
             pts = pts[:-1]
-        g.lines = _dashed(el, pts, full, width, str(el.get("cap", "butt")).lower())
-        x0, y0, x1, y1 = geo.bbox_of([pts])
+        else:
+            pts = _line_ends(g, el, pts, width, False)
+        g.lines = _dashed(el, pts, full, width, str(el.get("cap", "butt")).lower()) + g.lines
+        x0, y0, x1, y1 = geo.bbox_of([pts] + g.fills + [p for p, _, _, _ in g.lines])
         g.box = (x0 - width / 2, y0 - width / 2, x1 + width / 2, y1 + width / 2)
     elif t == "ticks":
         cx, cy, radius = float(el["cx"]), float(el["cy"]), float(el["radius"])
@@ -1072,6 +1119,56 @@ def _side_strips(rect: tuple, sides: list[str], d0: float, d1: float) -> list[li
     return [[(a, b), (c, b), (c, d), (a, d)] for a, b, c, d in (strips[s] for s in sides)]
 
 
+END_CAPS = ("none", "arrow", "triangle", "circle", "square", "diamond", "bar")
+
+
+def _line_ends(g, el: dict, pts: list, width: float, closed: bool) -> list:
+    """Figma-style line endings: add arrow / triangle / circle / square / diamond / bar shapes at the ends.
+    Filled ends go to g.fills, open ones to g.lines; returns the line points (shortened under solid tips)."""
+    if closed or len(pts) < 2:
+        return pts
+    size = max(1.0, float(el.get("cap_size", 3))) * width
+    pts = list(pts)
+    for which in ("start_cap", "end_cap"):
+        kind = str(el.get(which) or "none").lower()
+        if kind not in END_CAPS:
+            raise ValueError(f"{which} must be one of {', '.join(END_CAPS)}")
+        if kind == "none":
+            continue
+        tip, prev = (pts[0], pts[1]) if which == "start_cap" else (pts[-1], pts[-2])
+        dx, dy = tip[0] - prev[0], tip[1] - prev[1]
+        n = math.hypot(dx, dy) or 1.0
+        ux, uy = dx / n, dy / n
+        nx, ny = -uy, ux
+        bx, by = tip[0] - ux * size, tip[1] - uy * size
+        half = size * 0.6
+        if kind == "triangle":
+            g.fills.append([tip, (bx + nx * half, by + ny * half), (bx - nx * half, by - ny * half)])
+            new_end = (bx + ux * 0.5, by + uy * 0.5)          # the line stops inside the triangle
+            if which == "start_cap":
+                pts[0] = new_end
+            else:
+                pts[-1] = new_end
+        elif kind == "arrow":
+            g.lines.append(([(bx + nx * half, by + ny * half), tip, (bx - nx * half, by - ny * half)],
+                            False, width, "round"))
+        elif kind == "circle":
+            r = size * 0.45
+            g.fills.append(geo.ellipse_path(tip[0], tip[1], r, r, 8.0))
+        elif kind == "square":
+            h = size * 0.4
+            g.fills.append([(tip[0] + (ux + nx) * h, tip[1] + (uy + ny) * h), (tip[0] + (ux - nx) * h, tip[1] + (uy - ny) * h),
+                            (tip[0] - (ux + nx) * h, tip[1] - (uy + ny) * h), (tip[0] - (ux - nx) * h, tip[1] - (uy - ny) * h)])
+        elif kind == "diamond":
+            h = size * 0.5
+            g.fills.append([(tip[0] + ux * h, tip[1] + uy * h), (tip[0] + nx * h, tip[1] + ny * h),
+                            (tip[0] - ux * h, tip[1] - uy * h), (tip[0] - nx * h, tip[1] - ny * h)])
+        else:                                                  # bar
+            g.lines.append(([(tip[0] + nx * size * 0.6, tip[1] + ny * size * 0.6),
+                             (tip[0] - nx * size * 0.6, tip[1] - ny * size * 0.6)], False, width, "butt"))
+    return pts
+
+
 def _dashed(el: dict, pts: list, closed: bool, width: float, cap: str) -> list:
     dash = el.get("dash")
     if not dash:
@@ -1119,9 +1216,14 @@ class Renderer:
         self.language = language
         self.strings = strings or {}
         self.mode = canvas.get("mode") or theme.get("mode")       # Figma-style variable mode (light / dark ...)
-        mode_colors = (theme.get("modes") or {}).get(self.mode) or {} if self.mode else {}
+        mode_vals = ((theme.get("modes") or {}).get(self.mode) or {}) if self.mode else {}
+        mode_colors = {k: v for k, v in mode_vals.items() if not _is_number(v)}
         self.colors = {**theme.get("colors", {}), **mode_colors, **(canvas.get("colors") or {}),
                        **(extra_colors or {})}
+        # number variables (spacing, radius, sizes...): "$space-md" anywhere a number goes
+        self.numbers = {**(theme.get("numbers") or {}), **{k: v for k, v in mode_vals.items() if _is_number(v)},
+                        **(canvas.get("numbers") or {})}
+        self._num_cache: dict[int, tuple] = {}
         self.text_vars = text_vars(canvas, language, self.strings, extra_vars)
         self.fonts = fonts
         self.k = float(scale)
@@ -1158,9 +1260,21 @@ class Renderer:
                 img = Image.alpha_composite(img, layer)
         return self.render_stack(img, only, only_layers)
 
+    def _nums(self, obj):
+        """``obj`` with "$number-token" strings replaced by their values (same object when there are none)."""
+        if not self.numbers:
+            return obj
+        hit = self._num_cache.get(id(obj))
+        if hit is not None and hit[0] is obj:
+            return hit[1]
+        out = _sub_numbers(obj, self.numbers)
+        self._num_cache[id(obj)] = (obj, out)
+        return out
+
     def element_box(self, el: dict) -> Box:
         """Bounds of the element geometry in canvas units (no effects), after rotation."""
-        st = resolve_style(el.get("style"), self.theme)
+        el = self._nums(el)
+        st = self._nums(resolve_style(el.get("style"), self.theme))
         box = self._geom_box(el, st)
         pivot = self._pivot(el, box)
         sx, sy = _scales(el)
@@ -1536,7 +1650,8 @@ class Renderer:
 
     def shape_mask(self, el: dict, region) -> Image.Image:
         """Filled-shape coverage of an element inside ``region`` (used for clipping)."""
-        st = resolve_style(el.get("style"), self.theme)
+        el = self._nums(el)
+        st = self._nums(resolve_style(el.get("style"), self.theme))
         t = el["type"]
         ss = min(2, self._pick_ss(region[2], region[3]))
         if t in VECTOR_TYPES:
@@ -1548,6 +1663,7 @@ class Renderer:
     def render_element(self, el: dict):
         """Render one element to (layer, x, y, blend). Handles scale_x / scale_y, which grow or shrink
         the finished element (effects included) around its pivot, the way an engine scales a widget."""
+        el = self._nums(el)
         sx, sy = _scales(el)
         if sx == 1 and sy == 1:
             return self._render_plain(el)
@@ -1601,7 +1717,8 @@ class Renderer:
         return layer, ox, oy, blend
 
     def _render_plain(self, el: dict, clip_region: bool = True):
-        st = resolve_style(el.get("style"), self.theme)
+        el = self._nums(el)
+        st = self._nums(resolve_style(el.get("style"), self.theme))
         t = el["type"]
         k = self.k
         opacity = float(st.get("opacity", 1.0))
@@ -1729,7 +1846,7 @@ class Renderer:
             raise ValueError(f"layer blend must be one of {', '.join(BLENDS)}")
         return {"name": layer["name"], "opacity": max(0.0, min(1.0, float(layer.get("opacity", 1)))), "blend": blend,
                 "clip": bool(layer.get("clip", False)), "visible": bool(layer.get("visible", True)),
-                "style": resolve_style(layer.get("style"), self.theme)}
+                "style": self._nums(resolve_style(layer.get("style"), self.theme))}
 
     def stack(self, only: set[str] | None = None) -> list[tuple[dict | None, list[dict]]]:
         """Layers bottom to top as (layer | None, elements). None is the implicit base layer that holds

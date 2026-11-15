@@ -15,7 +15,7 @@ from .reference import TOPICS
 from .render import LINE_TYPES, VECTOR_TYPES, _placed_polys, _stroke_specs, resolve_style, vector_geometry
 from .server import _maybe_json, _prepare_update, _summary, slugify, store, tool
 
-__all__ = ["guide", "make_palette", "restyle", "path_ops"]
+__all__ = ["guide", "make_palette", "restyle", "path_ops", "find_elements"]
 
 
 # --------------------------------------------------------------------------- reference
@@ -215,12 +215,14 @@ def _matches(el: dict, where: dict) -> bool:
 
 @tool
 def restyle(canvases: list[str] | None = None, replace_colors: dict | None = None, replace_fonts: dict | None = None,
-            where: dict | None = None, props: dict | None = None, include_theme: bool = True, dry_run: bool = False):
+            where: dict | None = None, props: dict | None = None, include_theme: bool = True, dry_run: bool = False,
+            replace_text: dict | None = None):
     """Change a whole kit at once, like Figma's "selection colours" and "replace fonts".
 
     canvases: which canvases (default all). replace_colors: {"#3b82f6": "$primary", "$accent": "$gold"} -
       every fill, stroke, gradient stop, shadow, glow and tint with that colour gets the new one (the
       original transparency is kept); a "$token" key swaps token references. replace_fonts: {"Inter": "Rajdhani"}.
+    replace_text: {"Play": "Start", "Gold": "Coins"} - find and replace inside text content (exact substrings).
     where: only elements matching all of {"type", "group", "layer", "ids", "style" (theme style name)}.
     props: element properties to set on every matching element (same as update_element props).
     include_theme: also recolour / refont the theme's named styles. dry_run: only report what would change.
@@ -231,8 +233,9 @@ def restyle(canvases: list[str] | None = None, replace_colors: dict | None = Non
     names = _maybe_json(canvases) or list(st.canvases)
     replace_colors, replace_fonts = _maybe_json(replace_colors) or {}, _maybe_json(replace_fonts) or {}
     where, props = _maybe_json(where) or {}, _maybe_json(props)
-    if not (replace_colors or replace_fonts or props):
-        raise ValueError("give replace_colors, replace_fonts or props - otherwise there is nothing to change")
+    texts = {str(k): str(v) for k, v in (_maybe_json(replace_text) or {}).items() if str(k)}
+    if not (replace_colors or replace_fonts or props or texts):
+        raise ValueError("give replace_colors, replace_fonts, replace_text or props - otherwise there is nothing to change")
     for dst in replace_colors.values():
         parse_color(dst, colors)                         # fail before touching anything
     rules = [(_colour_matcher(src, colors), str(dst)) for src, dst in replace_colors.items()]
@@ -256,6 +259,11 @@ def restyle(canvases: list[str] | None = None, replace_colors: dict | None = Non
                 if isinstance(el.get("style"), dict):
                     el["style"], n = _refont(el["style"], fonts)
                     changes += n
+            if texts and isinstance(el.get("text"), str):
+                original = el["text"]
+                for old, new in texts.items():
+                    el["text"] = el["text"].replace(old, new)
+                changes += original != el["text"]
             if props:
                 el.update(_prepare_update(el, props))
                 changes += 1
@@ -293,6 +301,67 @@ def restyle(canvases: list[str] | None = None, replace_colors: dict | None = Non
     if not report["canvases"] and not report.get("theme_styles_changed"):
         report["note"] = "nothing matched - check the colour / font names, or loosen `where`"
     return report
+
+
+# --------------------------------------------------------------------------- find
+
+@tool
+def find_elements(canvas: str | None = None, like: str | None = None, type: str | None = None,
+                  color: str | None = None, font: str | None = None, text_contains: str | None = None,
+                  style: str | None = None, group: str | None = None, layer: str | None = None):
+    """Find elements, like Figma's "select matching objects" and layer search (read-only).
+
+    canvas: one canvas (default: every canvas). like: an element id - finds elements of the same type and
+    the same look (same style name, or same fill / stroke / font / size). Other filters (all must match):
+    type, color (used anywhere in its style, alpha ignored), font, text_contains, style (theme style name),
+    group, layer. Returns {canvas: [ids]} to feed restyle(where={"ids": ...}), update or align tools.
+    """
+    st = store()
+    colors = st.theme.get("colors", {})
+    names = [canvas] if canvas else list(st.canvases)
+    probe = None
+    if like:
+        if not canvas:
+            raise ValueError("like needs the canvas it lives on")
+        ref = st.find(st.get(canvas), like)
+        rs = resolve_style(ref.get("style"), st.theme)
+        probe = (ref["type"], ref.get("style") if isinstance(ref.get("style"), str) else None,
+                 repr(rs.get("fill")), repr(rs.get("stroke")), ref.get("font") or rs.get("font"),
+                 ref.get("size") or rs.get("size"), ref.get("radius"))
+    match_color = _colour_matcher(color, colors) if color else None
+    found: dict[str, list[str]] = {}
+    for cid in names:
+        c = st.get(cid)
+        hits = []
+        for el in c["elements"]:
+            rs = resolve_style(el.get("style"), st.theme)
+            if probe is not None:
+                key = (el["type"], el.get("style") if isinstance(el.get("style"), str) else None,
+                       repr(rs.get("fill")), repr(rs.get("stroke")), el.get("font") or rs.get("font"),
+                       el.get("size") or rs.get("size"), el.get("radius"))
+                if key != probe:
+                    continue
+            if type and el["type"] != type:
+                continue
+            if group and el.get("group") != group:
+                continue
+            if layer and el.get("layer") != layer:
+                continue
+            if style and not (el.get("style") == style or (isinstance(el.get("style"), dict)
+                                                            and el["style"].get("use") == style)):
+                continue
+            if font and str(el.get("font") or rs.get("font") or "").lower() != font.lower():
+                continue
+            if text_contains and text_contains.lower() not in str(el.get("text", "")).lower():
+                continue
+            if match_color:
+                _, n = _recolour({"style": rs, "tint": el.get("tint")}, [(match_color, "#000000")], colors)
+                if not n:
+                    continue
+            hits.append(el["id"])
+        if hits:
+            found[c["id"]] = hits
+    return {"found": found, "count": sum(len(v) for v in found.values())}
 
 
 # --------------------------------------------------------------------------- path operations
@@ -343,6 +412,30 @@ def _line_outline(g, res_join: str):
     return pyclipper.SimplifyPolygons(out, pyclipper.PFT_NONZERO) if out else []
 
 
+def _rdp(points, tol: float):
+    """Ramer-Douglas-Peucker on a closed outline."""
+    pts = list(points)
+    if len(pts) < 4:
+        return pts
+
+    def rec(seg):
+        (ax, ay), (bx, by) = seg[0], seg[-1]
+        dx, dy = bx - ax, by - ay
+        n = math.hypot(dx, dy) or 1e-12
+        best, idx = -1.0, 0
+        for i in range(1, len(seg) - 1):
+            px, py = seg[i]
+            d = abs(dy * px - dx * py + bx * ay - by * ax) / n
+            if d > best:
+                best, idx = d, i
+        if best <= tol:
+            return [seg[0], seg[-1]]
+        return rec(seg[:idx + 1])[:-1] + rec(seg[idx:])
+
+    far = max(range(len(pts)), key=lambda i: (pts[i][0] - pts[0][0]) ** 2 + (pts[i][1] - pts[0][1]) ** 2)
+    return rec(pts[:far + 1])[:-1] + rec(pts[far:] + [pts[0]])[:-1]
+
+
 def _d(polys) -> str:
     def n(v: float) -> str:
         return f"{v:.3f}".rstrip("0").rstrip(".")
@@ -361,6 +454,8 @@ def path_ops(canvas: str, id: str, action: str = "flatten", distance: float = 2,
                        round / miter / bevel corners: inner panels, even rims, bleed areas, thick outlines.
       "outline_stroke" the element's first stroke (or a line / arc / ticks' own stroke) becomes a filled path
                        painted like the stroke, so it can take gradients, effects and booleans of its own.
+      "simplify"       fewer points (distance = how far, in units, the outline may move): lighter paths for
+                       vectorised images, SVG imports and traced shapes.
     keep_original: leave the source element as it is (flatten / offset) or keep its stroke (outline_stroke).
     The new path takes the source's style (outline_stroke: the stroke paint as its fill), group and layer.
     """
@@ -368,8 +463,8 @@ def path_ops(canvas: str, id: str, action: str = "flatten", distance: float = 2,
     c = st.get(canvas)
     el = st.find(c, id)
     act = str(action).lower()
-    if act not in ("flatten", "offset", "outline_stroke"):
-        raise ValueError("action must be 'flatten', 'offset' or 'outline_stroke'")
+    if act not in ("flatten", "offset", "outline_stroke", "simplify"):
+        raise ValueError("action must be 'flatten', 'offset', 'outline_stroke' or 'simplify'")
     if join not in ("round", "miter", "bevel"):
         raise ValueError("join must be 'round', 'miter' or 'bevel'")
     if el["type"] not in VECTOR_TYPES:
@@ -388,6 +483,10 @@ def path_ops(canvas: str, id: str, action: str = "flatten", distance: float = 2,
             new_style = el.get("style")
         elif act == "offset":
             polys = _offset(shape, float(distance), join)
+            new_style = el.get("style")
+        elif act == "simplify":
+            tol = max(0.01, abs(float(distance)))
+            polys = _ints([q for q in (_rdp(p, tol) for p in shape) if len(q) >= 3])
             new_style = el.get("style")
         else:
             strokes = _stroke_specs(style, st.theme.get("colors", {}))

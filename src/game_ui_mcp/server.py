@@ -96,7 +96,7 @@ def tool(fn):
         return result
 
     name = fn.__name__
-    read_only = name.startswith(("get_", "list_", "preview", "view_", "inspect_", "measure_")) or name in (
+    read_only = name.startswith(("get_", "list_", "preview", "view_", "inspect_", "measure_", "find_")) or name in (
         "review_canvas", "guide")
     # clients use these hints to skip approval for look-only tools and to warn before deletes
     if ToolAnnotations is None:
@@ -352,7 +352,8 @@ def _layer_list(c: dict) -> list[dict]:
 def update_canvas(canvas: str, name: str | None = None, width: int | None = None, height: int | None = None,
                   background: str | dict | None = None, clear_background: bool = False,
                   safe_area: list[float] | None = None, vars: dict | None = None, colors: dict | None = None,
-                  language: str | None = None, pixel_art: bool | dict | None = None, mode: str | None = None):
+                  language: str | None = None, pixel_art: bool | dict | None = None, mode: str | None = None,
+                  focus_order: list[str] | None = None):
     """Change canvas settings. Elements keep their coordinates when width/height change (use
     resize_canvas to move pinned elements with the edges).
 
@@ -365,9 +366,19 @@ def update_canvas(canvas: str, name: str | None = None, width: int | None = None
     pixel_art: true or {"palette": [...colors], "max_colors": 16, "alpha_threshold": 128} - renders without
       anti-aliasing at 1x, snaps alpha and colours, and scales up by whole pixels. false turns it off.
     mode: theme variable mode for this canvas only (see set_theme modes); "" follows the theme's mode.
+    focus_order: element ids in the order a gamepad / keyboard moves focus (accessibility and console UI);
+      written to export_spec, export_web (tab order) and export_screen notes. [] clears it.
     """
     st = store()
     c = st.get(canvas)
+    if focus_order is not None:
+        order = _maybe_json(focus_order) or []
+        for fid in order:
+            st.find(c, str(fid))
+        if order:
+            c["focus_order"] = [str(f) for f in order]
+        else:
+            c.pop("focus_order", None)
     if mode is not None:
         if mode and mode not in (st.theme.get("modes") or {}):
             raise ValueError(f"no mode '{mode}'. Modes: {', '.join(sorted(st.theme.get('modes') or {})) or '(none)'}")
@@ -582,17 +593,22 @@ def add_ellipse(canvas: str, cx: float, cy: float, rx: float, ry: float | None =
 def add_line(canvas: str, points: list[list[float]], width: float = 2, color: str | dict | None = None,
              cap: str = "round", closed: bool = False, dash: list[float] | None = None,
              style: str | dict | None = None,
-             id: str | None = None, group: str | None = None, clip: str | None = None, layer: str | None = None):
+             id: str | None = None, group: str | None = None, clip: str | None = None, layer: str | None = None,
+             start_cap: str | None = None, end_cap: str | None = None, cap_size: float | None = None):
     """Add a line or polyline through points [[x, y], ...] (dividers, accents, brackets, ticks).
 
     width: thickness. cap: "round" or "butt". color may be a color or a gradient object.
     dash [on, off] cuts it into segments: with cap "butt" and a thick width that gives LED rows,
     shift lights and segmented bars (draw a dim full row first, then a shorter bright one on top).
     style can add shadow/glow/opacity; style.stroke does not apply to lines.
+    start_cap / end_cap: line endings - "arrow", "triangle", "circle", "square", "diamond", "bar" (arrows,
+      connectors, sliders, timelines); cap_size: their size as a multiple of the width (default 3).
+      add_arc takes them too through update_element.
     """
     return _add(canvas, "line", dict(points=points, width=width, cap=None if cap == "round" else cap,
                                      closed=closed or None, dash=dash, color=color, style=style, id=id,
-                                     group=group, clip=clip, layer=layer))
+                                     group=group, clip=clip, layer=layer, start_cap=start_cap, end_cap=end_cap,
+                                     cap_size=cap_size))
 
 
 @tool
@@ -764,7 +780,8 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
              stroke: str | dict | None = None, style: str | dict | None = None, rotation: float = 0,
              origin: list[float] | None = None, arc: dict | None = None, id: str | None = None,
              group: str | None = None, clip: str | None = None, layer: str | None = None,
-             lang: str | None = None, max_lines: int | None = None, decoration: str | None = None):
+             lang: str | None = None, max_lines: int | None = None, decoration: str | None = None,
+             case: str | None = None, note: str | None = None):
     """Add text.
 
     (x, y) is where `anchor` sits: "top-left", "center" (centre of a button), "middle-left",
@@ -777,6 +794,7 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
     max_lines (with max_width): cut longer text and end the last line with "..." (player names, item
       titles, chat previews; 1 = single line). decoration: "underline" or "strikethrough" (old prices).
     letter_spacing: extra px between letters. uppercase: true, or "tr" for Turkish i -> İ rules.
+    case: "upper", "lower", "title", "tr-upper", "tr-lower" (non-destructive letter case; the text stays as typed).
     italic: use the family's italic (Barlow Condensed has one); other fonts are slanted automatically.
     skew: extra slant in degrees.
     arc: set text along a circle instead of a straight line (badges, emblems, round gauges):
@@ -800,7 +818,7 @@ def add_text(canvas: str, text: str, x: float, y: float, size: float | None = No
                                      italic=italic or None, skew=skew or None, stroke=stroke, style=style,
                                      rotation=rotation or None, origin=origin, arc=arc, id=id, group=group,
                                      clip=clip, layer=layer, lang=lang, max_lines=max_lines,
-                                     decoration=decoration))
+                                     decoration=decoration, case=case, note=note))
 
 
 @tool
@@ -1273,6 +1291,8 @@ def canvas_version(canvas: str, action: str = "list", name: str | None = None, n
       before a risky redesign or to keep alternatives ("rounded", "sharp") to compare later.
     "list": saved versions with time, note and element count. "restore": put the canvas back to that
       version (undo returns to what was there before). "delete": remove a saved version.
+    "diff": what changed between that version and now - added, removed and changed elements (with the
+      changed property names), like Figma's compare changes.
     Versions are stored next to the canvas file and survive restarts (at most 30 per canvas).
     """
     st = store()
@@ -1283,6 +1303,21 @@ def canvas_version(canvas: str, action: str = "list", name: str | None = None, n
         return {"saved": entry["name"], "versions": [v["name"] for v in st.list_versions(c)]}
     if act == "list":
         return {"canvas": c["id"], "versions": st.list_versions(c)}
+    if act == "diff":
+        if not name:
+            raise ValueError("diff needs the version name (see action='list')")
+        versions = st._versions(c["id"])
+        key = slugify(name, "version")
+        if key not in versions:
+            raise ValueError(f"no version '{key}'. Versions: {', '.join(versions) or '(none)'}")
+        old = {e["id"]: e for e in versions[key]["canvas"]["elements"]}
+        new = {e["id"]: e for e in c["elements"]}
+        changed = {i: sorted(k for k in set(old[i]) | set(new[i]) if old[i].get(k) != new[i].get(k))
+                   for i in old.keys() & new.keys() if old[i] != new[i]}
+        canvas_keys = sorted(k for k in set(versions[key]["canvas"]) | set(c)
+                             if k not in ("elements",) and versions[key]["canvas"].get(k) != c.get(k))
+        return {"version": key, "added": sorted(new.keys() - old.keys()), "removed": sorted(old.keys() - new.keys()),
+                "changed": changed, "canvas_changed": canvas_keys}
     if act in ("restore", "delete"):
         if not name:
             raise ValueError(f"{act} needs the version name (see action='list')")
@@ -1291,7 +1326,7 @@ def canvas_version(canvas: str, action: str = "list", name: str | None = None, n
             return {"restored": slugify(name, "version"), "elements": [e["id"] for e in c["elements"]]}
         st.delete_version(c, name)
         return {"deleted": slugify(name, "version"), "versions": [v["name"] for v in st.list_versions(c)]}
-    raise ValueError("action must be 'save', 'list', 'restore' or 'delete'")
+    raise ValueError("action must be 'save', 'list', 'diff', 'restore' or 'delete'")
 
 
 # --------------------------------------------------------------------------- animation tools
@@ -1635,7 +1670,8 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
 
 @tool
 def set_theme(colors: dict | None = None, styles: dict | None = None, replace: bool = False,
-              modes: dict | None = None, mode: str | None = None):
+              modes: dict | None = None, mode: str | None = None, numbers: dict | None = None,
+              tokens: dict | str | None = None):
     """Define the design tokens shared by every canvas, so a whole UI kit stays consistent.
 
     modes: Figma-style variable modes - named sets of colour overrides, e.g.
@@ -1643,6 +1679,12 @@ def set_theme(colors: dict | None = None, styles: dict | None = None, replace: b
       for every canvas ("" = base colours); one canvas can pick its own with update_canvas(mode=...).
       Every "$token" in fills, strokes, effects and theme styles follows the mode, so one kit renders as
       dark, light, team colours or seasonal skins; export_theme writes all modes.
+    numbers: number variables, e.g. {"space-md": 16, "radius-card": 12, "stroke-thin": 1.5, "text-h1": 32} -
+      use "$space-md" anywhere a number goes (radius, width, gap, font size, stroke width, blur...; not x / y).
+      A mode may override them too: modes={"compact": {"space-md": 10}}.
+    tokens: import a W3C design-tokens (DTCG) JSON - a dict or a .json path - as exported by Tokens Studio,
+      Penpot or Style Dictionary: colours become colour tokens, dimensions / numbers become number tokens,
+      {group.name} aliases become $group-name.
     colors: {"bg": "#0d0b14", "primary": "#8b5cf6", ...} -> use anywhere as "$primary" or "$primary@0.5".
     styles: named style objects, usable as style="panel" or {"use": "panel", ...overrides}. A style can
       hold any style key plus text defaults (font, weight, size, letter_spacing, uppercase), e.g.
@@ -1652,8 +1694,14 @@ def set_theme(colors: dict | None = None, styles: dict | None = None, replace: b
     Changing the theme restyles every element that references it.
     """
     st = store()
-    st.set_theme(_maybe_json(colors), _maybe_json(styles), replace, _maybe_json(modes), mode)
-    return {"colors": st.theme["colors"], "styles": sorted(st.theme["styles"]),
+    colors, numbers = _maybe_json(colors), _maybe_json(numbers)
+    if tokens is not None:
+        from .tokens import read_dtcg
+        got_colors, got_numbers = read_dtcg(_maybe_json(tokens))
+        colors = {**got_colors, **(colors or {})}
+        numbers = {**got_numbers, **(numbers or {})}
+    st.set_theme(colors, _maybe_json(styles), replace, _maybe_json(modes), mode, numbers)
+    return {"colors": st.theme["colors"], "numbers": st.theme.get("numbers", {}), "styles": sorted(st.theme["styles"]),
             "modes": sorted(st.theme.get("modes") or {}), "mode": st.theme.get("mode")}
 
 

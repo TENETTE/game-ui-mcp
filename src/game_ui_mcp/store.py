@@ -66,7 +66,8 @@ class Store:
             try:
                 data = json.loads(theme_file.read_text(encoding="utf-8"))
                 self.theme = {"colors": dict(data.get("colors", {})), "styles": dict(data.get("styles", {})),
-                              "modes": dict(data.get("modes", {})), "mode": data.get("mode")}
+                              "modes": dict(data.get("modes", {})), "mode": data.get("mode"),
+                              "numbers": dict(data.get("numbers", {}))}
             except Exception:
                 pass
         for path in sorted(self.projects_dir.glob("*.json")):
@@ -770,10 +771,19 @@ class Store:
     # ---- theme
 
     def set_theme(self, colors: dict | None, styles: dict | None, replace: bool,
-                  modes: dict | None = None, mode: str | None = None) -> None:
+                  modes: dict | None = None, mode: str | None = None, numbers: dict | None = None) -> None:
         old = copy.deepcopy(self.theme)
         if replace:
             self.theme = {"colors": {}, "styles": {}}
+        theme_numbers = self.theme.setdefault("numbers", {})
+        for key, value in (numbers or {}).items():
+            if value is None:
+                theme_numbers.pop(key, None)
+            elif isinstance(value, bool) or not isinstance(value, (int, float)):
+                self.theme = old
+                raise ValueError(f"number token '{key}' must be a number (spacing, radius, size...), got {value!r}")
+            else:
+                theme_numbers[key] = value
         theme_modes = self.theme.setdefault("modes", {})
         for name, values in (modes or {}).items():
             if values is None:
@@ -816,6 +826,8 @@ class Store:
             for name, values in self.theme.get("modes", {}).items():
                 palette = {**self.theme["colors"], **values}
                 for key, value in values.items():
+                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                        continue                         # a number token's value in this mode
                     try:
                         parse_color(value, palette)
                     except ValueError as exc:
