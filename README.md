@@ -12,7 +12,7 @@
 
 # game-ui-mcp
 
-A local [MCP](https://modelcontextprotocol.io) server that lets an AI (Claude, Cursor, VS Code Copilot, any MCP client) **draw, animate and ship game and app UI**: panels, buttons, HUDs, gauges, menus, icons and whole screens, ready for Unity, Unreal, Godot, Roblox, Figma and Penpot.
+A local [MCP](https://modelcontextprotocol.io) server that lets an AI (Claude, Cursor, VS Code Copilot, any MCP client) **design, animate and export game and app UI**: panels, buttons, HUDs, gauges, menus, icons and whole screens, delivered as engine-ready sprites, layers and editable vector files.
 
 - **No image model, no internet.** The AI calls shape, text, style and keyframe tools; the server turns them into clean, deterministic vector-quality art.
 - **It checks its own work.** `preview` shows the AI what it drew, `review_canvas` finds clipped shadows, low contrast, overflowing or missing-glyph text, blurry half-pixel edges.
@@ -69,7 +69,7 @@ Without a working CUDA device the `[gpu]` build quietly falls back to the CPU wi
 - "Make a rev gauge for a racing game with a needle animation, and give me the parts as separate layers in `D:\Game\UI`."
 - "Translate this main menu to Arabic and Japanese and check for overflowing text."
 - "Take the palette from this screenshot and build a scoreboard in the same style, light and dark."
-- "Design an iOS app icon and export the @1x/@2x/@3x set plus an SVG for Figma."
+- "Design an iOS app icon and export the @1x/@2x/@3x set plus an editable SVG."
 
 ## What it can do
 

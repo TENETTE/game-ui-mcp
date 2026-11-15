@@ -4,7 +4,7 @@
 
 # game-ui-mcp
 
-Bir AI'ın (Claude, Cursor, VS Code Copilot... MCP destekleyen her istemci) **oyun ve uygulama arayüzü çizmesini, canlandırmasını ve Unity / Unreal / Godot / Roblox'a teslim etmesini** sağlayan yerel MCP server.
+Bir AI'ın (Claude, Cursor, VS Code Copilot... MCP destekleyen her istemci) **oyun ve uygulama arayüzü tasarlamasını, canlandırmasını ve dışa aktarmasını** sağlayan yerel MCP server: oyun motoruna hazır sprite'lar, katmanlar ve düzenlenebilir vektör dosyalar.
 
 - Görsel üreten bir model yok, internete çıkmıyor: AI şekil, yazı, stil ve keyframe tool'larını çağırır, server bunu temiz PNG'ye çevirir.
 - AI çizdiğine bakar, `review_canvas` ile hatalarını bulur (taşan yazı, düşük kontrast, eksik harf), düzeltir.

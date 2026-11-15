@@ -23,9 +23,9 @@ ui.batch(c, [
     # title block
     {"op": "add_text", "text": "game-ui-mcp", "x": 72, "y": 118, "size": 76, "weight": 800,
      "color": {"type": "linear", "angle": 0, "stops": [[0, "#ffffff"], [1, "#b9a8ff"]]}},
-    {"op": "add_text", "text": "AI-drawn game & app UI  ·  vector, layered, engine-ready", "x": 76, "y": 214,
+    {"op": "add_text", "text": "Let your AI agent design game & app UI", "x": 76, "y": 214,
      "size": 24, "weight": 500, "color": "$muted"},
-    {"op": "add_text", "text": "UNITY   ·   UNREAL   ·   GODOT   ·   ROBLOX   ·   FIGMA / PENPOT SVG", "x": 76, "y": 268,
+    {"op": "add_text", "text": "DRAW   ·   ANIMATE   ·   REVIEW   ·   EXPORT", "x": 76, "y": 268,
      "size": 15, "weight": 700, "letter_spacing": 2, "color": "$cyan"},
     # a little HUD on the right
     {"op": "add_rect", "id": "card", "x": 820, "y": 70, "width": 380, "height": 260, "radius": 28,
