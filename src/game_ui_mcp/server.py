@@ -1357,7 +1357,8 @@ def _set_keyframes(c: dict, args: dict, checkpoint: bool = True) -> dict:
         raise ValueError(f"set_keyframes is missing {exc}") from exc
     key, anim = st.get_animation(c, name)
     keys = anim_mod.normalize_keyframes(raw, anim["duration"], float(args.get("offset", 0) or 0))
-    elements, warnings = st.set_track(c, anim, target, prop, keys, _maybe_json(args.get("pivot")), checkpoint)
+    elements, warnings = st.set_track(c, anim, target, prop, keys, _maybe_json(args.get("pivot")), checkpoint,
+                                      _maybe_json(args.get("path")))
     out: dict = {"animation": key, "target": target, "property": prop, "elements": [e["id"] for e in elements],
                  "keyframes": [{"t": k["t"], "value": k["value"], **({"ease": anim_mod.ease_name(k["ease"])}
                                                                       if "ease" in k else {})} for k in keys]}
@@ -1384,7 +1385,8 @@ def create_animation(canvas: str, name: str, duration: float, loop: bool = False
 
 @tool
 def set_keyframes(canvas: str, animation: str, target: str, property: str, keyframes: list,
-                  pivot: list[float] | None = None, offset: float = 0, stagger: float = 0):
+                  pivot: list[float] | None = None, offset: float = 0, stagger: float = 0,
+                  path: dict | None = None):
     """Animate one property of an element (or of a whole group) with keyframes. Calling it again for
     the same target + property replaces that track.
 
@@ -1399,6 +1401,9 @@ def set_keyframes(canvas: str, animation: str, target: str, property: str, keyfr
       colors and gradients: "style.fill", "style.glow.color", "style.stroke.color" (gradients blend when
                 both keyframes have the same stops layout)
       switches: "visible", "text" (these jump at the keyframe instead of blending)
+      "motion": travel along a path - values are progress 0..1, path {"d": "M 0 0 C 80 -120 220 -120 300 0",
+                "rotate": true} (relative to where the element is drawn; rotate turns it with the path):
+                coins flying to the HUD, orbiting icons, a cursor tracing a route.
     keyframes: [{"t": seconds, "value": v, "ease": "..."}] or [[t, v], [t, v, ease]]. A keyframe's ease
       shapes the motion arriving at it. Eases: "linear", "step", "ease-in" / "ease-out" / "ease-in-out",
       or style + direction such as "quad-out", "cubic-in-out", "back-out" (overshoot), "elastic-out",
@@ -1424,7 +1429,7 @@ def set_keyframes(canvas: str, animation: str, target: str, property: str, keyfr
             st.delete_tracks(c, st.get_animation(c, animation)[1], target, property)
             for i, el in enumerate(members):
                 results.append(_set_keyframes(c, dict(animation=animation, target=el["id"], property=property,
-                                                      keyframes=keyframes, pivot=pivot,
+                                                      keyframes=keyframes, pivot=pivot, path=path,
                                                       offset=float(offset) + i * float(stagger)), checkpoint=False))
         except Exception:
             st.drop_checkpoint(c)
@@ -1434,7 +1439,7 @@ def set_keyframes(canvas: str, animation: str, target: str, property: str, keyfr
         return {"animation": results[0]["animation"], "property": property, "staggered": [r["target"] for r in results],
                 "stagger": float(stagger)}
     return _set_keyframes(c, dict(animation=animation, target=target, property=property,
-                                  keyframes=keyframes, pivot=pivot, offset=offset))
+                                  keyframes=keyframes, pivot=pivot, offset=offset, path=path))
 
 
 @tool
@@ -1480,17 +1485,39 @@ def _pose(c: dict, anim: dict, t: float, scale: float, include_background: bool 
     return r.render(include_background=include_background, only=only), warnings + r.warnings
 
 
+def _blurred_pose(c: dict, anim: dict, t: float, scale: float, include_background: bool, only, samples: int,
+                  frame_dt: float):
+    """Motion blur: the average of `samples` poses over half a frame (a 180-degree shutter), premultiplied."""
+    import numpy as np
+    acc, warns = None, []
+    for i in range(samples):
+        sub = min(float(anim["duration"]), t + frame_dt * 0.5 * (i / max(1, samples - 1) - 0.5))
+        img, w = _pose(c, anim, max(0.0, sub), scale, include_background, only)
+        warns += w
+        arr = np.asarray(img.convert("RGBa"), dtype=np.float64)
+        acc = arr if acc is None else acc + arr
+    out = PILImage.fromarray((acc / samples + 0.5).astype(np.uint8), "RGBa").convert("RGBA")
+    return out, warns
+
+
 def _poses(c: dict, anim: dict, times: list[float], scale: float, include_background: bool = True,
-           only: set[str] | None = None) -> tuple[list[PILImage.Image], list[str]]:
+           only: set[str] | None = None, motion_blur: int = 0, fps: float = 30) -> tuple[list[PILImage.Image], list[str]]:
     """Render many animation frames at once: Pillow and numpy release the GIL, so threads use every core."""
     import os
     from concurrent.futures import ThreadPoolExecutor
     workers = max(1, min(len(times), os.cpu_count() or 1, 8))
+    samples = max(0, min(16, int(motion_blur or 0)))
+
+    def one(t):
+        if samples > 1:
+            return _blurred_pose(c, anim, t, scale, include_background, only, samples, 1.0 / fps)
+        return _pose(c, anim, t, scale, include_background, only)
+
     if workers == 1:
-        done = [_pose(c, anim, t, scale, include_background, only) for t in times]
+        done = [one(t) for t in times]
     else:
         with ThreadPoolExecutor(workers) as pool:
-            done = list(pool.map(lambda t: _pose(c, anim, t, scale, include_background, only), times))
+            done = list(pool.map(one, times))
     return [img for img, _ in done], [w for _, warns in done for w in warns]
 
 
@@ -1555,7 +1582,8 @@ def preview_animation(canvas: str, animation: str, frames: int = 8, columns: int
 @tool
 def export_animation(canvas: str, animation: str, format: str = "spritesheet", path: str | None = None,
                      fps: float | None = None, scale: float = 1, background: str | None = None,
-                     trim: bool = True, ids: list[str] | None = None, group: str | None = None):
+                     trim: bool = True, ids: list[str] | None = None, group: str | None = None,
+                     motion_blur: int = 0):
     """Export an animation.
 
     format:
@@ -1569,13 +1597,16 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
       "gif" / "apng" / "webp"   one animated file to look at or share (GIF: 256 colors, hard edges on
                     transparency; APNG and WebP keep full quality and alpha).
       "lottie"      Lottie JSON for apps, the web (lottie-web), and Lottie players in Unity / Unreal / Godot.
-                    Moving, rotating, scaling and fading parts stay real Lottie animation; parts whose
-                    colour / glow / shape animates become one picture per frame (the result says which).
+                    Plain shapes and text become real vector shape layers (crisp at any size, solid colour
+                    changes animate natively); effects become pictures moved by Lottie; parts whose glow /
+                    shape animates become one picture per frame (the result lists each kind).
     fps: sampling rate (default: the animation's own). scale: resolution multiplier.
     background: "dark", "light", "checker", "game" or a color to put behind the frames. Without it, sprite
       sheets and frames are transparent; animated files show the canvas background if it has one (a GIF
       with nothing behind it gets a dark backdrop).
     trim: crop all frames to the area that is ever painted (sprite sheets and frames only).
+    motion_blur: 4-8 sub-frame samples per frame blur fast motion like a camera shutter (spins, dashes,
+      swipes) in sprite sheets, frames, GIF / APNG / WebP; 0 = off. Costs that many renders per frame.
     ids / group: export only those elements.
     path: output file (or folder for "frames"); relative paths go to the workspace exports folder.
     """
@@ -1600,7 +1631,8 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
         doc, report = lottie.build(st, c, anim, base_name, fps, float(scale), bool(background) or bool(c.get("background")))
         out.write_text(json.dumps(doc, separators=(",", ":")), encoding="utf-8")
         return {"file": str(out), "frames": doc["op"], "fps": doc["fr"], "size": [doc["w"], doc["h"]],
-                "animated_by_transform": report["transform"], "baked_per_frame": report["frames"],
+                "vector_layers": report["vector"], "animated_by_transform": report["transform"],
+                "baked_per_frame": report["frames"],
                 "static": report["static"], "bytes": out.stat().st_size}
     if fmt == "json":
         out = Path(path).expanduser() if path else st.exports_dir / "animations" / f"{base_name}.anim.json"
@@ -1619,7 +1651,8 @@ def export_animation(canvas: str, animation: str, format: str = "spritesheet", p
     rate = float(fps or anim.get("fps", 30))
     only = {e["id"] for e in st.select(c, ids, group)} if (ids or group) else None
     own_bg = c.get("background") if fmt in ("gif", "apng", "webp") and not background else None
-    images, warnings = _poses(c, anim, times, float(scale), include_background=bool(own_bg), only=only)
+    images, warnings = _poses(c, anim, times, float(scale), include_background=bool(own_bg), only=only,
+                              motion_blur=motion_blur, fps=rate)
     result: dict = {"animation": key, "frames": len(images), "fps": rate, "duration": anim["duration"],
                     "loop": bool(anim.get("loop"))}
     offset = (0, 0)

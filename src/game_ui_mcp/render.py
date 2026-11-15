@@ -1981,7 +1981,8 @@ class Renderer:
         gbox = (box[0] - grow, box[1] - grow, box[2] + grow, box[3] + grow)
         rot = float(el.get("rotation", 0) or 0)
         soften, soften_prog = fxlib.blur_amount(st.get("blur"))
-        pad = fx.pad() + soften * 1.5 + (3 if t == "text" else 1)
+        feather = max(0.0, float(st.get("feather", 0) or 0))
+        pad = fx.pad() + soften * 1.5 + feather * 1.5 + (3 if t == "text" else 1)
         pivot = self._pivot(el, box)
         if rot:
             half = max(math.hypot(px_ - pivot[0], py_ - pivot[1])
@@ -2005,6 +2006,10 @@ class Renderer:
             smasks = []
         else:
             raise ValueError(f"Unknown element type '{t}'")
+        if feather > 0:
+            from PIL import ImageFilter as _IF
+            shape = shape.filter(_IF.GaussianBlur(feather * k / 2))
+            smasks = [m.filter(_IF.GaussianBlur(feather * k / 2)) for m in smasks]
         if not _is_none(st.get("texture")):
             origin = (px0 / k, py0 / k)
             shape = fxlib.roughen(shape, st["texture"], k, origin)

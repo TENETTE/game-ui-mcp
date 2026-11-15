@@ -714,7 +714,8 @@ class Store:
         return key, anims[key], existing is None
 
     def set_track(self, canvas: dict, anim: dict, target: str, prop: str, keyframes: list[dict],
-                  pivot: list[float] | None, checkpoint: bool = True) -> tuple[list[dict], list[str]]:
+                  pivot: list[float] | None, checkpoint: bool = True,
+                  path: dict | None = None) -> tuple[list[dict], list[str]]:
         from .animation import apply_animation, track_targets
         prop = str(prop).strip()
         if not prop or prop.split(".")[0] in ("id", "type", "group", "clip"):
@@ -726,6 +727,12 @@ class Store:
             raise ValueError(f"Animation target '{target}' not found. Use an element id ({ids}) or "
                              f"'group:<name>' (groups: {groups}).")
         track = {"target": target, "property": prop, "keyframes": keyframes}
+        if prop == "motion":
+            from .animation import motion_path
+            if not isinstance(path, dict):
+                raise ValueError('property "motion" needs path {"d": "M 0 0 C ...", "rotate": true} or {"points": [...]}')
+            motion_path(path)
+            track["path"] = path
         if pivot:
             if len(pivot) != 2:
                 raise ValueError("pivot must be [x, y]")

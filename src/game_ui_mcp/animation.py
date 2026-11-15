@@ -21,7 +21,7 @@ from .colors import parse_color, to_hex
 from .render import shift_element
 
 STYLES = ("linear", "sine", "quad", "cubic", "quart", "quint", "expo", "circ", "back", "elastic", "bounce", "spring")
-VIRTUAL = ("dx", "dy", "scale", "scale_x", "scale_y", "opacity")
+VIRTUAL = ("dx", "dy", "scale", "scale_x", "scale_y", "opacity", "motion")
 COLOR_KEYS = {"fill", "color", "color2", "highlight", "tint", "background", "from_color", "to_color"}
 MAX_FRAMES = 300
 
@@ -307,6 +307,14 @@ def apply_animation(canvas: dict, animation: dict, t: float, colors: dict) -> tu
         for el in elements:
             if track.get("pivot"):
                 el["origin"] = list(track["pivot"])
+            if prop == "motion":
+                px, py, angle = motion_point(track.get("path") or {}, float(value))
+                off = offsets.setdefault(el["id"], [0.0, 0.0])
+                off[0] += px
+                off[1] += py
+                if (track.get("path") or {}).get("rotate"):
+                    el["rotation"] = float(el.get("rotation", 0) or 0) + angle
+                continue
             if prop in ("dx", "dy"):
                 off = offsets.setdefault(el["id"], [0.0, 0.0])
                 off[0 if prop == "dx" else 1] += float(value)
@@ -320,6 +328,47 @@ def apply_animation(canvas: dict, animation: dict, t: float, colors: dict) -> tu
         if el["id"] in offsets:
             shift_element(el, *offsets[el["id"]])
     return frame, warnings
+
+
+_PATHS: dict[str, tuple] = {}
+
+
+def motion_path(spec: dict) -> tuple:
+    """(points, cumulative lengths) of a motion path {"d": svg path} or {"points": [[x, y], ...]}."""
+    from . import geometry as geo
+    key = repr(spec.get("d") or spec.get("points"))
+    if key not in _PATHS:
+        if spec.get("d"):
+            subs = geo.parse_svg_path(str(spec["d"]), 8.0)
+            if not subs:
+                raise ValueError("motion path d has no drawable segments")
+            pts = [(float(x), float(y)) for x, y in subs[0][0]]
+        elif spec.get("points"):
+            pts = [(float(p[0]), float(p[1])) for p in spec["points"]]
+        else:
+            raise ValueError('a "motion" track needs path {"d": "M 0 0 C ..."} or {"points": [[x, y], ...]}')
+        if len(pts) < 2:
+            raise ValueError("a motion path needs at least 2 points")
+        acc = [0.0]
+        for a, b in zip(pts, pts[1:]):
+            acc.append(acc[-1] + math.hypot(b[0] - a[0], b[1] - a[1]))
+        _PATHS[key] = (pts, acc)
+    return _PATHS[key]
+
+
+def motion_point(spec: dict, progress: float) -> tuple[float, float, float]:
+    """Offset from the path start and the direction of travel (degrees) at progress 0..1 along the path."""
+    pts, acc = motion_path(spec)
+    total = acc[-1] or 1.0
+    d = max(0.0, min(1.0, progress)) * total
+    for i in range(1, len(pts)):
+        if d <= acc[i] or i == len(pts) - 1:
+            seg = acc[i] - acc[i - 1] or 1e-9
+            u = (d - acc[i - 1]) / seg
+            (ax, ay), (bx, by) = pts[i - 1], pts[i]
+            x, y = ax + (bx - ax) * u, ay + (by - ay) * u
+            return x - pts[0][0], y - pts[0][1], math.degrees(math.atan2(by - ay, bx - ax))
+    return pts[-1][0] - pts[0][0], pts[-1][1] - pts[0][1], 0.0
 
 
 def frame_times(animation: dict, fps: float | None = None) -> list[float]:

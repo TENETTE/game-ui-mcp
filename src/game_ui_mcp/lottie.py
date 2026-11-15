@@ -66,6 +66,164 @@ class _Assets:
         return self._seen[key]
 
 
+_VECTOR_KEYS = {"fill", "stroke", "opacity", "use"}
+
+
+def _rgb(value: Any, colors: dict) -> list[float] | None:
+    from .colors import parse_color
+    try:
+        r, g, b, a = parse_color(value, colors)
+    except ValueError:
+        return None
+    return [round(r / 255, 4), round(g / 255, 4), round(b / 255, 4), round(a / 255, 4)]
+
+
+def _shape_polys(r, el: dict, st: dict) -> tuple[list, int] | None:
+    """Outline polygons (canvas units, no rotation / scale) of a plain vector element, and its fill rule."""
+    from .render import LINE_TYPES, VECTOR_TYPES, TextLayout, _placed_polys, vector_geometry
+    t = el["type"]
+    if t == "text":
+        if el.get("arc") or el.get("path"):
+            return None
+        layout = TextLayout(el, st, r.fonts, 4.0, r.text_of(el), r.text_lang(el))
+        if layout.shaper and any(layout.shaper.color_runs.get(line) for line, _ in layout.lines):
+            return None
+        return layout.outline_polys_units(), 1
+    if t in LINE_TYPES:
+        from .tools_design import _floats, _line_outline
+        g = vector_geometry(el, 4.0)
+        return _floats(_line_outline(g, "round")) + [list(p) for p in g.fills], 1
+    if t in VECTOR_TYPES:
+        rule = 1 if (t == "path" and str(el.get("fill_rule", "evenodd")).lower() == "nonzero") else 2
+        return _placed_polys(el, 4.0), rule
+    return None
+
+
+def _vector_layer(store, r0, el: dict, frames: list[dict], theme: dict, k: float, n: int) -> dict | None:
+    """A real Lottie shape layer (crisp at any size) for plain shapes and text: solid or gradient fill,
+    one stroke, animated position / rotation / scale / opacity and animated solid fill colour."""
+    st0 = r0._nums(resolve_style(el.get("style"), theme))
+    if set(st0) - _VECTOR_KEYS or el.get("clip") or any(el.get(x) for x in ("flip_x", "flip_y")):
+        return None
+    for f in frames:
+        sf = resolve_style(f.get("style"), theme)
+        if set(sf) - _VECTOR_KEYS:
+            return None
+        a, b = _look(f, theme), _look(el, theme)
+        if a[0] != b[0] or {k2: v for k2, v in a[1].items() if k2 != "fill"} != {k2: v for k2, v in b[1].items() if k2 != "fill"}:
+            return None
+    colors = r0.colors
+    fill = st0.get("fill", "#ffffff" if (el["type"] == "text" or not st0.get("stroke")) else None)
+    fills = [resolve_style(f.get("style"), theme).get("fill", fill) for f in frames]
+    animated_color = any(fv != fill for fv in fills)
+    if animated_color and any(isinstance(fv, (dict, list)) for fv in fills):
+        return None
+    plain = {key: v for key, v in el.items() if key not in ("rotation", "scale", "scale_x", "scale_y")}
+    got = _shape_polys(r0, r0._nums(plain), st0)
+    if got is None:
+        return None
+    polys, rule = got
+    items: list[dict] = []
+    for p in polys:
+        if len(p) < 3:
+            continue
+        v = [[round(x * k, 2), round(y * k, 2)] for x, y in p]
+        z = [[0, 0]] * len(v)
+        items.append({"ty": "sh", "ks": {"a": 0, "k": {"c": True, "v": v, "i": z, "o": z}}})
+    if not items:
+        return None
+    from .render import _stroke_specs
+    strokes = _stroke_specs(st0, colors)
+    if len(strokes) > 1 or (strokes and (strokes[0]["dash"] or strokes[0]["sides"] or strokes[0]["offset"]
+                                         or not isinstance(strokes[0]["paint"], str))):
+        return None
+    if isinstance(fill, list):
+        return None
+    if isinstance(fill, dict):
+        kind = str(fill.get("type", "linear")).lower()
+        raw = fill.get("stops") or fill.get("colors")
+        if kind not in ("linear", "radial") or not raw:
+            return None
+        g = vector_geometry_box(r0, plain, st0)
+        x0, y0, x1, y1 = (v * k for v in g)
+        bw, bh = x1 - x0, y1 - y0
+        stops = []
+        nst = len(raw)
+        for i, item in enumerate(raw):
+            off, col = (item if isinstance(item, (list, tuple)) and len(item) == 2 and not isinstance(item[1], (int, float))
+                        else (i / (nst - 1), item))
+            c = _rgb(col, colors)
+            if c is None or c[3] < 1:
+                return None
+            stops += [float(off), c[0], c[1], c[2]]
+        import math
+        if kind == "linear":
+            ang = math.radians(float(fill.get("angle", 90)))
+            ca, sa = math.cos(ang), math.sin(ang)
+            half = (abs(bw * ca) + abs(bh * sa)) / 2
+            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+            s_pt, e_pt, gt = [cx - ca * half, cy - sa * half], [cx + ca * half, cy + sa * half], 1
+        else:
+            if fill.get("circle") is None and abs(bw - bh) > 0.5:
+                return None
+            cx, cy = x0 + bw * float(fill.get("cx", 0.5)), y0 + bh * float(fill.get("cy", 0.5))
+            rad = max(bw, bh) * float(fill.get("r", 0.5))
+            s_pt, e_pt, gt = [cx, cy], [cx + rad, cy], 2
+        items.append({"ty": "gf", "o": {"a": 0, "k": 100}, "r": rule, "t": gt, "s": {"a": 0, "k": s_pt},
+                      "e": {"a": 0, "k": e_pt}, "g": {"p": nst, "k": {"a": 0, "k": stops}}})
+    elif fill is not None and not (isinstance(fill, str) and fill.strip().lower() in ("none", "")):
+        cols = [_rgb(fv, colors) for fv in fills]
+        if any(c is None for c in cols):
+            return None
+        alpha = cols[0][3]
+        items.append({"ty": "fl", "c": _prop([c[:3] + [1] for c in cols]), "o": {"a": 0, "k": round(alpha * 100, 2)},
+                      "r": rule})
+    if strokes:
+        sp = strokes[0]
+        c = _rgb(sp["paint"], colors)
+        if sp["align"] == "center":
+            items.append({"ty": "st", "c": {"a": 0, "k": c[:3] + [1]}, "o": {"a": 0, "k": round(c[3] * 100, 2)},
+                          "w": {"a": 0, "k": round(sp["width"] * k, 2)}, "lc": 2, "lj": 2})
+        else:
+            from .pdfexport import _band
+            band = _band(polys, sp["d0"], sp["d1"], sp["join"] or "round")
+            group = [{"ty": "sh", "ks": {"a": 0, "k": {"c": True, "v": [[round(x * k, 2), round(y * k, 2)] for x, y in p],
+                                                        "i": [[0, 0]] * len(p), "o": [[0, 0]] * len(p)}}}
+                     for p in band if len(p) >= 3]
+            group += [{"ty": "fl", "c": {"a": 0, "k": c[:3] + [1]}, "o": {"a": 0, "k": round(c[3] * 100, 2)}, "r": 1},
+                      _group_tr()]
+            items = [{"ty": "gr", "it": group}] + [{"ty": "gr", "it": items + [_group_tr()]}]
+            return _shape_layer(r0, el, frames, theme, k, items, plain, st0, wrapped=True)
+    return _shape_layer(r0, el, frames, theme, k, items, plain, st0)
+
+
+def _group_tr() -> dict:
+    return {"ty": "tr", "p": {"a": 0, "k": [0, 0]}, "a": {"a": 0, "k": [0, 0]}, "s": {"a": 0, "k": [100, 100]},
+            "r": {"a": 0, "k": 0}, "o": {"a": 0, "k": 100}}
+
+
+def vector_geometry_box(r0, plain: dict, st: dict):
+    return r0._geom_box(plain, st)
+
+
+def _shape_layer(r0, el, frames, theme, k, items, plain, st0, wrapped: bool = False) -> dict:
+    pivot0 = r0._pivot(plain, r0._geom_box(plain, st0))
+    ref0 = _ref_point(el)
+    pos, rot, scl, opa = [], [], [], []
+    for f in frames:
+        rx, ry = _ref_point(f)
+        sx, sy = _scales(f)
+        pos.append([round((pivot0[0] + rx - ref0[0]) * k, 3), round((pivot0[1] + ry - ref0[1]) * k, 3), 0])
+        rot.append(round(float(f.get("rotation", 0) or 0), 4))
+        scl.append([round(sx * 100, 4), round(sy * 100, 4), 100])
+        opa.append(round(_opacity(f, theme) * 100, 3))
+    shapes = items if wrapped else [{"ty": "gr", "it": items + [_group_tr()]}]
+    return {"ddd": 0, "ty": 4, "nm": el["id"], "sr": 1, "ao": 0, "bm": 0, "st": 0, "ip": 0, "op": len(frames),
+            "shapes": shapes,
+            "ks": {"o": _prop(opa), "r": _prop(rot), "p": _prop(pos),
+                   "a": {"a": 0, "k": [round(pivot0[0] * k, 3), round(pivot0[1] * k, 3), 0]}, "s": _prop(scl)}}
+
+
 def build(store, canvas: dict, anim: dict, name: str, fps: float | None, scale: float, include_background: bool) -> tuple[dict, dict]:
     theme = store.theme
     colors = theme.get("colors", {})
@@ -77,7 +235,7 @@ def build(store, canvas: dict, anim: dict, name: str, fps: float | None, scale: 
     k = scale
     assets = _Assets()
     layers: list[dict] = []
-    report = {"transform": [], "frames": [], "static": []}
+    report = {"transform": [], "frames": [], "static": [], "vector": []}
 
     def image_layer(asset: str, x: float, y: float, ip: int = 0, op: int | None = None, ks: dict | None = None, nm: str = ""):
         layers.append({"ddd": 0, "ty": 2, "nm": nm, "refId": asset, "sr": 1, "ao": 0, "bm": 0, "st": 0,
@@ -109,6 +267,11 @@ def build(store, canvas: dict, anim: dict, name: str, fps: float | None, scale: 
             static_run.append(el["id"])
             continue
         flush()
+        vec = _vector_layer(store, r0, el, frames, theme, k, n)
+        if vec is not None:
+            layers.append(vec)
+            report["vector"].append(el["id"])
+            continue
         looks_same = all(_look(f, theme) == _look(el, theme) for f in frames)
         if looks_same:
             plain = {key: v for key, v in el.items() if key not in ("rotation", "scale", "scale_x", "scale_y",
