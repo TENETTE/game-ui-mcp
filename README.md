@@ -1,38 +1,42 @@
-<p align="center"><img src="docs/banner.png" alt="game-ui-mcp" width="100%"></p>
+<div align="center">
 
-<p align="center">
-  <a href="https://github.com/TENETTE/game-ui-mcp/actions/workflows/tests.yml"><img src="https://github.com/TENETTE/game-ui-mcp/actions/workflows/tests.yml/badge.svg" alt="tests"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
-  <img src="https://img.shields.io/badge/python-3.10%2B-3776AB.svg" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/MCP-server-7c5cff.svg" alt="MCP server">
-  <img src="https://img.shields.io/badge/GPU-optional%20CUDA-76b900.svg" alt="optional GPU">
-</p>
-
-<p align="center"><b>English</b> · <a href="README.tr.md">Türkçe</a></p>
+**English** · [Türkçe](README.tr.md)
 
 # game-ui-mcp
 
-A local [MCP](https://modelcontextprotocol.io) server that lets an AI (Claude, Cursor, VS Code Copilot, any MCP client) **design, animate and export game and app UI**: panels, buttons, HUDs, gauges, menus, icons and whole screens, delivered as engine-ready sprites, layers and editable vector files.
+### One MCP for designing, animating and shipping game and app UI.
 
-- **No image model, no internet.** The AI calls shape, text, style and keyframe tools; the server turns them into clean, deterministic vector-quality art.
-- **It checks its own work.** `preview` shows the AI what it drew, `review_canvas` finds clipped shadows, low contrast, overflowing or missing-glyph text, blurry half-pixel edges.
-- **Engine-ready output.** 9-slice sprites, layers, PSD, editable vector SVG, iOS / Android density sets, sprite sheets, and scenes (Godot `.tscn`, Unity UXML/USS, Roblox Luau).
+**Describe a screen. Get engine-ready art, animation and code.**
 
-![UI kit](examples/kit_sheet.png)
+[![tests](https://img.shields.io/github/actions/workflow/status/TENETTE/game-ui-mcp/tests.yml?branch=main&style=flat-square&label=tests)](https://github.com/TENETTE/game-ui-mcp/actions/workflows/tests.yml)
+[![MCP tools](https://img.shields.io/badge/MCP-85_tools-7c5cff?style=flat-square)](#tools)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](#quick-start)
+[![GPU optional](https://img.shields.io/badge/GPU-optional_CUDA-76b900?style=flat-square&logo=nvidia&logoColor=white)](#quick-start)
+[![MIT license](https://img.shields.io/badge/license-MIT-f4c430?style=flat-square)](LICENSE)
 
-![Realistic racing HUD](examples/racing_hud.png)
+[Quick start](#quick-start) · [How it works](#how-it-works) · [What you can ship](#what-you-can-ship) · [Showcases](#showcases) · [Features](#features) · [FAQ](#faq) · [Documentation](#documentation)
 
-Design-tool features in one screen (boolean shapes, smoothed corners, fill stacks, wrapping layout, frosted glass, single-side strokes, truncated text, light / dark modes), also exported as an [editable SVG](examples/design_tools.svg):
+<code>claude mcp add game-ui -s user -- uvx --from git+https://github.com/TENETTE/game-ui-mcp game-ui-mcp</code>
 
-![Design tools](examples/design_tools.png)
+<br /><br />
 
-| Button entrance + shine | Rev gauge | Menu entrance and selection |
-| --- | --- | --- |
-| ![Button animation](examples/anim_button.gif) | ![Gauge animation](examples/anim_gauge.gif) | ![Menu animation](examples/anim_menu.gif) |
+<img src="docs/banner.png" alt="game-ui-mcp banner, drawn with game-ui-mcp itself" width="1200" />
 
-## Install
+</div>
 
-You need [uv](https://docs.astral.sh/uv/) (`winget install astral-sh.uv`, `brew install uv` or `pip install uv`). No clone, venv or Python path needed; the first start downloads everything (~30 s).
+---
+
+Need a menu, a HUD, a health bar or a whole settings screen? Ask your AI agent. game-ui-mcp gives it the drawing tools of a design app: shapes, text, layers, lighting, materials, auto layout, components and keyframe animation. The agent draws, looks at the result, finds its own mistakes and fixes them.
+
+When the design is right, the same canvas goes out as whatever you need: 9-slice sprites and scenes for Unity, Unreal, Godot and Roblox, editable SVG and PSD, PDF, Lottie, MP4, a working website or React components with their interactions.
+
+Everything runs locally. There is no image model and no internet access: every pixel comes from the tools the agent calls, so results are clean, repeatable and editable.
+
+## Quick start
+
+### Set up your agent
+
+You need [uv](https://docs.astral.sh/uv/) (`winget install astral-sh.uv`, `brew install uv` or `pip install uv`). The first start downloads everything (about 30 seconds).
 
 **Claude Code**
 
@@ -40,7 +44,7 @@ You need [uv](https://docs.astral.sh/uv/) (`winget install astral-sh.uv`, `brew 
 claude mcp add game-ui -s user -- uvx --from git+https://github.com/TENETTE/game-ui-mcp game-ui-mcp
 ```
 
-**Claude Desktop, Cursor, Windsurf** (the client's MCP config file; in VS Code `.vscode/mcp.json` uses `servers` instead of `mcpServers`):
+**Claude Desktop, Cursor, Windsurf and other MCP clients** (in VS Code, `.vscode/mcp.json` uses `servers` instead of `mcpServers`):
 
 ```json
 {
@@ -53,39 +57,166 @@ claude mcp add game-ui -s user -- uvx --from git+https://github.com/TENETTE/game
 }
 ```
 
-**CPU or GPU build.** The default (`[cpu]`) runs everywhere. With an NVIDIA card, `[gpu]` computes shader fills and large blurs on the GPU (CuPy + CUDA 12, ~1 GB download; 9-11x faster on an RTX 4060 Ti). Pick it in the package name:
+Restart the client afterwards.
+
+<details>
+<summary>GPU build, video export and the skill</summary>
+
+**GPU.** With an NVIDIA card, the `[gpu]` build computes shader fills, materials and large blurs on the GPU (CuPy + CUDA 12, about 1 GB to download; 9-11x faster on an RTX 4060 Ti). Without a working CUDA device it falls back to the CPU with identical results. `GAME_UI_MCP_GPU=0` turns it off.
 
 ```bash
 claude mcp add game-ui -s user -- uvx --from "game-ui-mcp[gpu] @ git+https://github.com/TENETTE/game-ui-mcp" game-ui-mcp
 ```
 
-Without a working CUDA device the `[gpu]` build quietly falls back to the CPU with identical results; `GAME_UI_MCP_GPU=0` turns it off.
+**Video.** MP4 / WebM export uses `ffmpeg` from your PATH (`winget install ffmpeg`, `brew install ffmpeg`), or the `[video]` extra installs one.
 
-**Optional skill:** [`skill/game-ui-mcp/SKILL.md`](skill/game-ui-mcp/SKILL.md) teaches the model the craft (themes, layer order, lighting, 9-slice rules, a review pass, engine hand-off). In Claude Code copy the folder to `~/.claude/skills/`.
+**Skill.** [`skill/game-ui-mcp/SKILL.md`](skill/game-ui-mcp/SKILL.md) teaches the agent the craft: themes, layer order, lighting, 9-slice rules, animation timing, interactions, a review pass and engine hand-off. In Claude Code, copy the folder to `~/.claude/skills/`. In the Claude apps, zip the folder and upload it under Settings → Capabilities → Skills.
 
-## Try asking
+</details>
 
-- "Draw a gold-trimmed inventory panel and a three-state button for a fantasy RPG, export them to Unity as 9-slice."
+### Ask your agent
+
+```text
+Design a main menu for a sci-fi game: title, four buttons with hover and press
+states, a settings dialog. Check it, then export it as a website I can click
+through and as 9-slice sprites for Unity.
+```
+
+More ideas:
+
 - "Make a rev gauge for a racing game with a needle animation, and give me the parts as separate layers in `D:\Game\UI`."
-- "Translate this main menu to Arabic and Japanese and check for overflowing text."
-- "Take the palette from this screenshot and build a scoreboard in the same style, light and dark."
-- "Design an iOS app icon and export the @1x/@2x/@3x set plus an editable SVG."
+- "Show me three different directions for this victory screen, then keep the second one."
+- "Build a gold-trimmed inventory panel with stone and leather materials."
+- "Translate this menu to Arabic and Japanese and check for overflowing text."
+- "Turn this card animation into an MP4 for the store page."
+- "Export the theme as a DESIGN.md for my coding agent."
 
-## What it can do
+### Update
 
-- **Shapes:** rects (round, cut or smoothed "squircle" corners, skew), ellipses, polygons and stars, lines, arcs, gauge ticks, SVG paths and SVG import, exact boolean union / subtract / intersect / exclude, flatten / offset / outline stroke, components (instances of other canvases), linear and circular arrays
-- **Style:** solid, linear / radial / conic / diamond gradients (OKLab option), glass refraction, progressive and background blur, noise and edge texture, luminance masks, patterns, fill stacks, your own per-pixel shader formulas, inside / center / outside / dashed / single-side strokes, shadows, glows, inner effects, bevel, directional 3D lighting, background blur (frosted glass), 13 blend modes, layers with clipping
-- **Text:** 10 bundled fonts plus system fonts, lists and paragraphs, OpenType features, variable axes, colour emoji, text on any path, text to outlines; Arabic, Hebrew, Indic, Thai and CJK shaped with HarfBuzz; text on arcs; ellipsis truncation; underline / strikethrough; missing-glyph checks that refuse broken exports
-- **Design system:** colour and number tokens (W3C DTCG import / export), component variants, slots and optional parts, image vectorising, generated palettes with contrast checks, kit-wide colour / font replace, named styles, variable modes (light / dark / team colours), interaction states, templates from data rows, string tables with pseudo-localisation, named version history
-- **Layout:** live auto layout (row / column / grid, wrap, hug, fill, min / max, grid spans) that re-flows on every change, pinning to screen edges, device presets with safe areas, multi-resolution preview, colour-blindness simulation
-- **Interaction and hand-off:** a state machine (hover, press, click, keys, animation chains) in web and React output, React components, DESIGN.md import / export, design variations
-- **Animation:** keyframes with 30+ eases (spring included) on any property, filmstrip preview, motion paths, playable GIF / sprite-sheet images, pan / zoom, 23 ready materials, motion blur, vector Lottie, MP4 / WebM video, GIF / APNG / WebP / sprite sheet / frames, or tween JSON for the engine
-- **Websites:** working HTML / CSS pages with live text and fonts, links and overlays, hover states, CSS animations and smooth page transitions, fit-to-window or responsive
-- **Hand-off:** vector PDF, PNG / WebP / JPG / ICO, density presets, layered PNG / SVG, PSD, atlases, bitmap fonts, design tokens (CSS, USS, C#, GDScript, Luau), clickable HTML prototypes, engine scenes and import helpers
+`uvx` keeps a cached copy. To get the latest version, clear it and restart your client:
 
-Full feature list, style reference, layers, animation and engine tables: **[docs/GUIDE.md](docs/GUIDE.md)** (Turkish).
+```bash
+uv cache clean game-ui-mcp
+```
 
-## Tools (82)
+## How it works
+
+Your agent calls the tools over MCP. The server keeps the canvases, renders them and answers with a picture, so the agent can look at what it drew. `review_canvas` adds a written check (clipped shadows, low contrast, overflowing text, missing glyphs, half-pixel blur, inconsistent radii). The agent fixes what it finds, then exports.
+
+```mermaid
+flowchart LR
+    A["Your request"] --> B["Agent"]
+    B -->|"draws with tools"| C["game-ui-mcp"]
+    C -->|"picture + review"| D{"Looks right?"}
+    D -->|"no, fix it"| B
+    D -->|"yes"| E["Export"]
+    E --> F["Engine sprites<br/>and scenes"]
+    E --> G["SVG · PSD<br/>PDF · PNG"]
+    E --> H["Web · React<br/>Lottie · MP4"]
+```
+
+## What you can ship
+
+| Target | What you get | Tools |
+| --- | --- | --- |
+| Unity | 9-slice sprites with an import helper, UI Toolkit screens (UXML + USS), C# tokens | `export_asset`, `export_screen`, `write_engine_helpers` |
+| Unreal | Box brushes with margins, an editor import script | `export_asset`, `write_engine_helpers` |
+| Godot 4 | `.tscn` scenes, `StyleBoxTexture` resources, GDScript tokens | `export_screen`, `export_asset` |
+| Roblox | A LocalScript screen, slice centers, Luau tokens | `export_screen`, `export_asset` |
+| Animated parts | Separate layers with pivots, sprite sheets, tween JSON with Roblox and DOTween ease names | `export_layers`, `export_animation` |
+| Websites | HTML / CSS pages with real text, links, overlays, hover states, animations and interactions | `export_web` |
+| React | One JSX + CSS component per screen, images imported, interactions included | `export_react` |
+| Mobile and desktop apps | iOS / Android / web density sets, app icons, ICO | `export_png` |
+| Design apps | Editable vector SVG, layered PSD | `export_svg`, `export_psd` |
+| Print and review | Multi-page vector PDF | `export_pdf` |
+| Apps and players | Lottie with vector shape layers | `export_animation` |
+| Video | MP4 (H.264) or transparent WebM | `export_animation` |
+| Developers and agents | Specs, tokens (CSS, USS, DTCG, C#, GDScript, Luau), DESIGN.md | `export_spec`, `export_theme` |
+
+## Showcases
+
+Every picture here is drawn by the server itself; the scripts in [`examples/`](examples) rebuild them.
+
+### A full UI kit
+
+Buttons, panels, bars, slots and badges from one theme, checked side by side with `contact_sheet`.
+
+![UI kit](examples/kit_sheet.png)
+
+### A realistic racing HUD
+
+Dark glass panels, carbon and brushed metal, a rev gauge with ticks, a needle and LED segments, telemetry in fixed-width digits.
+
+![Racing HUD](examples/racing_hud.png)
+
+### Materials
+
+23 procedural materials, each tintable, seedable and animatable. Define your own in the theme, from a built-in one or from scratch with a shader formula.
+
+![Materials](examples/materials.png)
+
+### Design variations
+
+`make_variations` explores palette, shape and type directions in one call and lays them out next to the original.
+
+![Variations](examples/variations.png)
+
+### Design tools in one screen
+
+Boolean shapes, smoothed corners, fill stacks, wrapping layout, frosted glass, single-side strokes, truncated text and light / dark modes, also exported as an [editable SVG](examples/design_tools.svg).
+
+![Design tools](examples/design_tools.png)
+
+### Animation
+
+| Button entrance + shine | Rev gauge | Menu entrance and selection |
+| --- | --- | --- |
+| ![Button animation](examples/anim_button.gif) | ![Gauge animation](examples/anim_gauge.gif) | ![Menu animation](examples/anim_menu.gif) |
+
+<details>
+<summary>More examples</summary>
+
+**Lighting and shading.** Flat shapes turned into glass, metal and plastic with layers, clipping and directional light.
+
+![Shading kit](examples/shading_kit.png)
+
+**Painting in layers.** Ground shadow, body, shade (multiply), light (screen) and a rim, each on its own layer.
+
+![Orb layers](examples/orb_layers.png)
+
+**Realistic kit.** Carbon, glass, turned metal and a boost gauge.
+
+![Realistic kit](examples/realistic_kit.png)
+
+**Components, states and data.** One button with four states, item cards generated from data rows, pixel-art mode.
+
+![Workflow](examples/workflow.png)
+
+**Multi-resolution.** One HUD pinned to screen edges, checked at 16:9, 21:9 and phone sizes.
+
+![Resolutions](examples/resolutions.png)
+
+</details>
+
+## Features
+
+- **Shapes:** rects with round, cut or smoothed corners, ellipses, polygons and stars, lines with arrow heads and tapering, arcs, gauge ticks, SVG paths and import, exact booleans, offset / outline / flatten, components, linear and circular arrays, image vectorising.
+- **Style:** solid, linear / radial / conic / diamond gradients (OKLab), patterns, fill stacks, your own per-pixel shader formulas, 23 ready materials plus your own, multiple strokes, shadows, glows, inner effects, bevel, directional 3D lighting, frosted and refracting glass, progressive blur, feathered edges, grain, edge texture, masks, 13 blend modes, layers with clipping.
+- **Images:** crop, background cut-out, pan and zoom inside any shape, animated GIF / APNG / WebP and sprite sheets, sub-pixel smooth motion.
+- **Text:** 10 bundled fonts plus system fonts, Arabic, Hebrew, Indic, Thai and CJK shaped with HarfBuzz, colour emoji, OpenType features, variable axes, lists, text on arcs and paths, truncation, text to outlines, missing-glyph checks.
+- **Design system:** colour and number tokens, light / dark / team modes, named styles, generated palettes with contrast checks, W3C DTCG and DESIGN.md import / export, kit-wide restyling, version history.
+- **Layout:** live auto layout (row / column / grid, wrap, hug, fill, min / max, spans), pins to screen edges, device presets with safe areas, multi-resolution preview, colour-blindness simulation.
+- **Components and data:** instances, variants, slots, optional parts, interaction states, templates from data rows, string tables with pseudo-localisation.
+- **Animation:** keyframes on any property with 30+ eases (spring included), motion paths, staggering, motion blur, filmstrip preview.
+- **Interaction:** a state machine (hover, press, click, keys, animation chains, states, navigation) that runs in web and React output and is listed for engine code.
+- **Review:** `preview` with zoom and regions, `review_canvas` lint, pixel inspection, contact sheets, design variations.
+
+The full reference with style keys, layers, animation and engine tables is in **[docs/GUIDE.md](docs/GUIDE.md)** (Turkish).
+
+## Tools
+
+<details>
+<summary><strong>All 85 tools</strong></summary>
 
 | Group | Tools |
 | --- | --- |
@@ -97,33 +228,83 @@ Full feature list, style reference, layers, animation and engine tables: **[docs
 | Checks | `review_canvas`, `inspect_pixels`, `view_image`, `preview_nine_slice` |
 | Animation | `create_animation`, `set_keyframes`, `delete_keyframes`, `get_animations`, `delete_animation`, `preview_animation`, `export_animation` |
 | Theme and info | `set_theme`, `get_theme`, `make_palette`, `list_fonts`, `measure_text`, `guide` |
-| Preview | `preview`, `preview_resolutions`, `contact_sheet` |
-| Export | `export_png`, `export_svg`, `export_pdf`, `export_web`, `export_asset`, `export_layers`, `export_psd`, `export_atlas`, `export_bitmap_font`, `write_engine_helpers` |
-| Hand-off | `export_spec`, `export_theme`, `set_link`, `export_prototype`, `export_screen` |
+| Preview and explore | `preview`, `preview_resolutions`, `contact_sheet`, `make_variations` |
+| Export | `export_png`, `export_svg`, `export_pdf`, `export_web`, `export_react`, `export_asset`, `export_layers`, `export_psd`, `export_atlas`, `export_bitmap_font`, `write_engine_helpers` |
+| Hand-off | `export_spec`, `export_theme`, `set_link`, `set_interaction`, `export_prototype`, `export_screen` |
 
-Look-only tools (`preview`, `get_*`, `review_canvas`...) are marked read-only and `delete_*` destructive, so clients can skip or ask for approval accordingly. Every error tells the model what was wrong and how to fix it.
+Look-only tools (`preview`, `get_*`, `review_canvas`...) are marked read-only and `delete_*` destructive, so clients can skip or ask for approval. Every error tells the agent what was wrong and how to fix it.
 
-## Files
+</details>
 
-Canvases, theme and exports live in `~/GameUI` and survive restarts. Set `"env": {"GAME_UI_MCP_DIR": "D:\\UI"}` in the config for another folder. Fonts dropped into `~/GameUI/fonts/` become available.
+## FAQ
+
+<details>
+<summary><strong>Which agents can use it?</strong></summary>
+
+Any client that supports local MCP servers: Claude Code, Claude Desktop, Cursor, Windsurf, VS Code and others. See [Quick start](#quick-start).
+
+</details>
+
+<details>
+<summary><strong>Does it use an image model or the internet?</strong></summary>
+
+No. The agent builds everything from shapes, text and effects, and the server renders them locally. Nothing is uploaded; your agent's model provider sees the tool results under its own data policy.
+
+</details>
+
+<details>
+<summary><strong>Can it draw characters, illustrations or photos?</strong></summary>
+
+No, that is not what it is for. It draws interface art. Place existing art with `add_image`, which can crop it, cut out a flat background, pan and zoom it, or play it as an animation.
+
+</details>
+
+<details>
+<summary><strong>Where are my files?</strong></summary>
+
+Canvases, the theme and exports live in `~/GameUI` and survive restarts. Set `"env": {"GAME_UI_MCP_DIR": "D:\\UI"}` in the client config for another folder. Fonts dropped into `~/GameUI/fonts/` become available.
+
+</details>
+
+<details>
+<summary><strong>Are the engine files tested inside the engines?</strong></summary>
+
+They are generated and format-tested, but not yet opened inside Unity, Unreal, Godot or Roblox. If an import fails, the error message usually tells the agent what to change; please also [open an issue](https://github.com/TENETTE/game-ui-mcp/issues).
+
+</details>
+
+<details>
+<summary><strong>How much context do the tools take?</strong></summary>
+
+The 85 tool definitions take about 30k tokens. Clients that load tools on demand (Claude Code) pay much less. Long references live behind the `guide` tool instead of the server instructions.
+
+</details>
+
+<details>
+<summary><strong>What should I do if I hit a bug?</strong></summary>
+
+[Update](#update) first. If it persists, [open an issue](https://github.com/TENETTE/game-ui-mcp/issues) with what you asked, the tool call and the error message.
+
+</details>
+
+## Documentation
+
+- [Guide](docs/GUIDE.md) (Turkish): every feature, style key, layer rule, animation and engine table, and the limits.
+- [Skill](skill/game-ui-mcp/SKILL.md) (Turkish): the workflow and craft rules the agent follows.
+- [Changelog](CHANGELOG.md): what changed in each version.
+- In the agent, `guide(topic)` returns the full reference for fills, shaders, style, design, layers, geometry, text, reuse, review, animation and export.
 
 ## Security
 
-- No network access; generated engine scripts are written, never run. Shader formulas are a whitelisted maths language that cannot touch files or the system.
-- Values written into engine scripts (paths, asset ids) are allow-listed; SVG DOCTYPE / ENTITY declarations are refused; oversized renders and heavy formulas are refused before they start.
-- Export tools write to the folder you give them and overwrite files of the same name.
+- No network access. Generated engine scripts are written, never run. Shader formulas are a whitelisted maths language that cannot touch files or the system.
+- Values written into engine scripts are allow-listed, SVG DOCTYPE / ENTITY declarations are refused, and oversized renders and heavy formulas are refused before they start.
+- Export tools write to the folder you give them and overwrite files with the same name.
 
 Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
-## Limits
+## Contributing
 
-- It does not generate characters, illustrations or photos; place existing art with `add_image`.
-- Engine-side files are generated and format-tested but not yet opened inside Unity, Unreal, Godot or Roblox.
-- The 82 tool definitions take about 27k tokens; clients that load tools on demand (Claude Code) pay much less.
-
-Full list: [docs/GUIDE.md](docs/GUIDE.md#sınırlar).
-
-## Development
+Bug reports, ideas and pull requests are welcome: [open an issue](https://github.com/TENETTE/game-ui-mcp/issues) or [send a pull request](https://github.com/TENETTE/game-ui-mcp/pulls).
 
 ```bash
 git clone https://github.com/TENETTE/game-ui-mcp
@@ -132,10 +313,10 @@ uv venv && uv pip install -e ".[dev]"
 uv run pytest
 ```
 
-`examples/demo*.py` rebuild every picture in this README (`python examples/run_all.py` runs them all). See [CONTRIBUTING.md](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
+`python examples/run_all.py` rebuilds every picture in this README. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
 [MIT](LICENSE): free for any use, including commercial. Bundled fonts are under the SIL Open Font License (`OFL.txt` in each font folder). What you draw with it is yours.
 
-Figma, Penpot, Unity, Unreal Engine, Godot, Roblox, Photoshop, Illustrator, Inkscape and other product names are trademarks of their owners. This project is not affiliated with or endorsed by them; the names only describe compatibility.
+Figma, Penpot, Unity, Unreal Engine, Godot, Roblox, Photoshop, Illustrator, Inkscape, React and other product names are trademarks of their owners. This project is not affiliated with or endorsed by them; the names only describe compatibility.
