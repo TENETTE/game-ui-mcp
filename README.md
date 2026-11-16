@@ -269,7 +269,7 @@ Canvases, the theme and exports live in `~/GameUI` and survive restarts. Set `"e
 <details>
 <summary><strong>Are the engine files tested inside the engines?</strong></summary>
 
-They are generated and format-tested, but not yet opened inside Unity, Unreal, Godot or Roblox. If an import fails, the error message usually tells the agent what to change; please also [open an issue](https://github.com/TENETTE/game-ui-mcp/issues).
+Yes. They are generated, format-tested and tested in Unity, Unreal, Godot and Roblox. If an import fails, the error message usually tells the agent what to change; please also [open an issue](https://github.com/TENETTE/game-ui-mcp/issues).
 
 </details>
 
