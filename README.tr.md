@@ -269,7 +269,7 @@ Canvas'lar, tema ve çıktılar `~/GameUI` klasöründe durur, yeniden başlatı
 <details>
 <summary><strong>Motor dosyaları motorların içinde denendi mi?</strong></summary>
 
-Üretiliyor ve biçimleri test ediliyor, ama henüz Unity, Unreal, Godot ya da Roblox içinde açılmadı. İçe aktarma hata verirse mesaj genelde ajana neyi değiştireceğini söyler; yine de lütfen [issue aç](https://github.com/TENETTE/game-ui-mcp/issues).
+Evet. Üretiliyor, biçimleri test ediliyor ve Unity, Unreal, Godot ve Roblox içinde denendi. İçe aktarma hata verirse mesaj genelde ajana neyi değiştireceğini söyler; yine de lütfen [issue aç](https://github.com/TENETTE/game-ui-mcp/issues).
 
 </details>
 

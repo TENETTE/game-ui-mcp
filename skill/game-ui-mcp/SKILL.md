@@ -308,7 +308,6 @@ Hazır dolgular yetmiyorsa formülü kendin yaz: `{"type":"shader","code":"...",
 - **Unreal:** `export_asset(engine="unreal")` → `write_engine_helpers("unreal", ...)` → editörde Python ile `import_game_ui.py`. Brush `Draw As: Box` ve margin'ler log'da. İbre `SetRenderTransformAngle`, cam için `BackgroundBlur`.
 - **Godot 4:** `export_asset(engine="godot")` → `write_engine_helpers("godot", ..., godot_res_path=...)` → her 9-slice için `.stylebox.tres`; `NinePatchRect` için `.gameui.json` içindeki `margins_LTRB`.
 - Hareketli parçayı export etmeden önce dinlenme haline getir (ibre `rotation: 0`, sağa bakar); motor döndürsün. Clip'li gölge / ışık katmanları `export_layers`'ta tabana gömülür (motor multiply / screen uygulayamaz).
-- Motor dosyaları bu server'da üretilip biçimleri test edildi ama motorların içinde denenmedi; kullanıcı ilk kullanımda hata görürse mesaja göre düzelt.
 
 ## Kontrol turu (her asset için)
 
