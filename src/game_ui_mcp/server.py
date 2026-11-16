@@ -1800,7 +1800,7 @@ def set_theme(colors: dict | None = None, styles: dict | None = None, replace: b
       A mode may override them too: modes={"compact": {"space-md": 10}}.
     tokens: import a W3C design-tokens (DTCG) JSON - a dict or a .json path - as exported by Tokens Studio,
       Penpot or Style Dictionary: colours become colour tokens, dimensions / numbers become number tokens,
-      {group.name} aliases become $group-name. A DESIGN.md path (Google Stitch and other AI design tools)
+      {group.name} aliases become $group-name. A DESIGN.md path (as written by AI design and coding tools)
       imports its colours, typography (as text styles), rounded / spacing (as radius-* / space-* numbers).
     materials: your own named materials, used like the built-in ones as style {"material": "name"}. Each is a
       style object: build on a built-in one ({"material": "wood", "color": "#5a3a22", "scale": 2,

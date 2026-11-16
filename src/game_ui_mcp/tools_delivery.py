@@ -264,7 +264,7 @@ def export_theme(format: str = "json", path: str | None = None):
     format: "json", "css" (custom properties + text classes), "uss" (Unity UI Toolkit variables +
     classes), "csharp" (static Color32 class), "gdscript" (Godot constants), "luau" (Roblox module with
     Color3 + transparency), "dtcg" (W3C design tokens JSON for Tokens Studio, Penpot, Style Dictionary;
-    modes go into $extensions), "design.md" (DESIGN.md for AI design / coding agents such as Google Stitch:
+    modes go into $extensions), "design.md" (DESIGN.md for AI design and coding agents:
     YAML front-matter tokens plus readable colour, type, spacing and component sections).
     Text styles (theme styles with font / size / weight) become typography tokens.
     """

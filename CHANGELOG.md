@@ -24,7 +24,7 @@
 
 ## 0.8.0 - 2026-11-16
 
-Closes every applicable gap found against Figma and Penpot:
+Layout, components, effects, text and export additions:
 
 - Live auto layout (re-flows on every change), fill / min / max sizing, grid spans, group items.
 - Component variants (states named prop=value), optional parts (hide / show), slots.
